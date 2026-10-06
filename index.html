@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SHIFUKU</title>
+<!--
+  入口ページ(Netlifyに index.html として置く)
+  開き方：<このページのURL>?tool=closing&store=SHIFUKU
+    tool  … 開きたいツールのID(認証基盤の「ツール一覧」に登録したもの)
+    store などのほかのパラメータ … そのままツールへ引き継ぐ(引き継ぐ名前はツール一覧で決める)
+  ログイン画面は無い。LINE WORKSのアプリ内で開くと、開いた人のUserIdを受け取って自動で照合し、ツールへ移動する。
+  アプリの外(普通のブラウザ)で開かれた場合は、ログインさせずに「LINE WORKSのアプリから開いてください」と案内するだけ
+
+  ※ このページには秘密情報を置かない。置くのは WOFF ID と認証基盤のURL(公開されても困らない値)だけ
+-->
+
+<!-- ▼ WOFF SDK：PoCで動いた <script> の行(3.7.1・charset="utf-8" 付き)を、そのままここに貼る -->
+<script charset="utf-8" src="★PoCで動いたWOFF SDKのURL★"></script>
+
+<style>
+  :root { --c: #16323A; --muted: #5F6670; --err: #B42318; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #F5F6F8;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; color: #1F2328; }
+  .box { width: min(440px, 92vw); background: #fff; border: 1px solid #D5DAE0; border-radius: 16px; padding: 32px 24px; text-align: center; }
+  h1 { font-size: 20px; margin: 0 0 16px; color: var(--c); }
+  #msg { font-size: 18px; line-height: 1.7; white-space: pre-wrap; }
+  #msg.err { color: var(--err); font-weight: 700; }
+  .spinner { width: 40px; height: 40px; margin: 0 auto 16px; border: 5px solid #E8EEF0; border-top-color: var(--c); border-radius: 50%; animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .btn { display: inline-block; margin-top: 20px; padding: 16px 28px; font-size: 18px; font-weight: 700; color: #fff; background: var(--c);
+    border: none; border-radius: 12px; text-decoration: none; cursor: pointer; font-family: inherit; }
+  .sub { font-size: 14px; color: var(--muted); margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>SHIFUKU</h1>
+  <div class="spinner" id="spin"></div>
+  <div id="msg">確認しています…</div>
+  <div id="action"></div>
+</div>
+
+<script>
+// ===== 設定(秘密情報ではない) =====
+const WOFF_ID = '★WOFF ID★';
+const AUTH_API = '★認証基盤のWebアプリのURL(…/exec)★';
+
+// ===== 開きたいツールとパラメータ(ログインで画面が切り替わっても失わないよう保存しておく) =====
+const KEY = 'shifuku_auth_request';
+function readRequest() {
+  const q = new URLSearchParams(location.search);
+  if (q.get('tool')) {
+    const params = {};
+    q.forEach((v, k) => { if (k !== 'tool') params[k] = v; });
+    const req = { tool: q.get('tool'), params: params };
+    try { sessionStorage.setItem(KEY, JSON.stringify(req)); } catch (e) {}
+    return req;
+  }
+  try { return JSON.parse(sessionStorage.getItem(KEY) || 'null') || { tool: '', params: {} }; } catch (e) { return { tool: '', params: {} }; }
+}
+const REQUEST = readRequest();
+
+const $ = id => document.getElementById(id);
+function show(text, isErr) {
+  $('msg').textContent = text;
+  $('msg').className = isErr ? 'err' : '';
+  $('spin').style.display = isErr || $('action').innerHTML ? 'none' : 'block';
+}
+function setAction(html) { $('action').innerHTML = html; $('spin').style.display = html ? 'none' : 'block'; }
+
+const ERRORS = {
+  invalid_token: 'ログインを確認できませんでした。\nLINE WORKSのアプリから開き直してください。',
+  not_registered: 'スタッフとして登録されていません。\n利用するには申請が必要です。',
+  inactive: '現在、利用できない状態になっています。\n管理者に連絡してください。',
+  no_permission: 'このツールを使う権限がありません。\n必要な場合は管理者に申請してください。',
+  no_store_permission: 'この店舗のページを開く権限がありません。\n所属している店舗のリンクから開いてください。',
+  unknown_tool: '開こうとしたツールが見つかりません。\nリンクが正しいか確認してください。',
+  no_tool: '開くツールが指定されていません。\nLINE WORKSのリンクから開いてください。',
+  bad_request: 'うまく確認できませんでした。\nもう一度開き直してください。',
+  internal_error: '一時的なエラーが起きました。\n少し待ってから開き直してください。',
+};
+
+// ===== 本体 =====
+async function start() {
+  if (typeof woff === 'undefined') { show('ログインの部品を読み込めませんでした。\n通信状態を確認して開き直してください。', true); return; }
+  try {
+    await woff.init({ woffId: WOFF_ID });
+  } catch (e) {
+    show('LINE WORKSの準備に失敗しました。\n開き直してください。', true);
+    return;
+  }
+  if (!woff.isLoggedIn()) {
+    // ログイン画面は出さない。アプリ内で開けばログイン済みなので、ここに来るのはアプリの外で開いたとき
+    show('このページはLINE WORKSのアプリから開いてください。\n（トークにあるリンクをタップ）', true);
+    return;
+  }
+  await authenticate();
+}
+
+async function authenticate() {
+  show('スタッフ情報を確認しています…');
+  let res;
+  try {
+    const accessToken = woff.getAccessToken();
+    const profile = await woff.getProfile();
+    const r = await fetch(AUTH_API, {
+      method: 'POST',
+      // text/plain で送る(application/json だと事前確認の通信が走り、GASが受け付けないため)
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ accessToken: accessToken, userId: profile.userId, tool: REQUEST.tool, params: REQUEST.params }),
+    });
+    res = await r.json();
+  } catch (e) {
+    show('通信に失敗しました。\n電波の良いところで開き直してください。', true);
+    return;
+  }
+  if (res.ok && res.redirect) {
+    show((res.name ? res.name + ' さん、' : '') + 'ツールを開いています…');
+    try { sessionStorage.removeItem(KEY); } catch (e) {}
+    location.replace(res.redirect);
+    return;
+  }
+  show(ERRORS[res.error] || ERRORS.internal_error, true);
+  if (res.error === 'not_registered' && res.applyUrl) {
+    setAction('<a class="btn" href="' + encodeURI(res.applyUrl) + '">利用を申請する</a>');
+  }
+}
+
+start();
+</script>
+</body>
+</html>

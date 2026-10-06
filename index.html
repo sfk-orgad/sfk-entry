@@ -32,6 +32,7 @@
   .btn { display: inline-block; margin-top: 20px; padding: 16px 28px; font-size: 18px; font-weight: 700; color: #fff; background: var(--c);
     border: none; border-radius: 12px; text-decoration: none; cursor: pointer; font-family: inherit; }
   .sub { font-size: 14px; color: var(--muted); margin-top: 16px; }
+  #detail { font-size: 12px; color: var(--muted); margin-top: 14px; word-break: break-all; text-align: left; }
 </style>
 </head>
 <body>
@@ -39,6 +40,7 @@
   <div class="spinner" id="spin"></div>
   <div id="msg">確認しています…</div>
   <div id="action"></div>
+  <div id="detail"></div>
 </div>
 
 <script>
@@ -98,21 +100,43 @@ async function start() {
   await authenticate();
 }
 
+// 失敗したときに、どの段階で何が起きたかを小さく表示する(管理者が原因を調べるため。秘密は含まない)
+function detail(stage, e) {
+  $('detail').textContent = '[' + stage + '] ' + (e && e.message ? e.message : String(e || ''));
+}
+
 async function authenticate() {
   show('スタッフ情報を確認しています…');
-  let res;
+  let accessToken, profile, r, text, res;
+  // 1. LINE WORKSから本人の情報を受け取る
   try {
-    const accessToken = woff.getAccessToken();
-    const profile = await woff.getProfile();
-    const r = await fetch(AUTH_API, {
+    accessToken = woff.getAccessToken();
+    profile = await woff.getProfile();
+  } catch (e) {
+    show('LINE WORKSから情報を受け取れませんでした。\nアプリから開き直してください。', true);
+    detail('profile', e);
+    return;
+  }
+  // 2. 認証基盤に問い合わせる
+  try {
+    r = await fetch(AUTH_API, {
       method: 'POST',
       // text/plain で送る(application/json だと事前確認の通信が走り、GASが受け付けないため)
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ accessToken: accessToken, userId: profile.userId, tool: REQUEST.tool, params: REQUEST.params }),
     });
-    res = await r.json();
+    text = await r.text();
   } catch (e) {
     show('通信に失敗しました。\n電波の良いところで開き直してください。', true);
+    detail('fetch', e);
+    return;
+  }
+  // 3. 返事を読む(JSONでなければ、URL違い・公開範囲・デプロイの問題)
+  try {
+    res = JSON.parse(text);
+  } catch (e) {
+    show('認証の仕組みから正しい返事がありませんでした。\n管理者に連絡してください。', true);
+    detail('response ' + r.status, { message: text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 160) });
     return;
   }
   if (res.ok && res.redirect) {

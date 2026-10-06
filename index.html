@@ -93,10 +93,34 @@ async function start() {
     return;
   }
   if (!woff.isLoggedIn()) {
-    // ログイン画面は出さない。アプリ内で開けばログイン済みなので、ここに来るのはアプリの外で開いたとき
-    show('このページはLINE WORKSのアプリから開いてください。\n（トークにあるリンクをタップ）', true);
+    const inClient = typeof woff.isInClient === 'function' ? woff.isInClient() : null;
+    detail('state', { message: 'inClient=' + inClient + ' / ' + location.host });
+    if (inClient === false) {
+      // アプリの外(普通のブラウザやGitHub PagesのURLを直接開いた場合)。ログイン画面は出さない
+      show('このページはLINE WORKSのアプリから開いてください。\n（トークにあるリンクをタップ）', true);
+      return;
+    }
+    // アプリ内(または判定できない)：一度だけ自動で login() を呼ぶ。アプリがログイン情報を持っているので入力画面は出ない想定
+    let tried = null;
+    try { tried = sessionStorage.getItem(KEY + '_login'); } catch (e) {}
+    if (!tried) {
+      try { sessionStorage.setItem(KEY + '_login', '1'); } catch (e) {}
+      show('LINE WORKSの情報を確認しています…');
+      try { woff.login(); } catch (e) { detail('login', e); }
+      // 画面が切り替わらなかったときだけ、タップで続けるボタンを出す(ブラウザの制約で自動では進めない場合がある)
+      setTimeout(() => {
+        show('もう一度確認します。');
+        setAction('<button class="btn" id="cont">続ける</button>');
+        $('cont').addEventListener('click', () => woff.login());
+      }, 2500);
+      return;
+    }
+    // login() のあと戻ってきても未ログインのまま
+    show('LINE WORKSのログインを確認できませんでした。\nトークのリンクから開き直してください。', true);
+    try { sessionStorage.removeItem(KEY + '_login'); } catch (e) {}
     return;
   }
+  try { sessionStorage.removeItem(KEY + '_login'); } catch (e) {}
   await authenticate();
 }
 

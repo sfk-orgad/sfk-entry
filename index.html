@@ -46,27 +46,50 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-06f';
+const PAGE_VERSION = '2026-10-06g';
 document.getElementById('ver').textContent = 'ver ' + PAGE_VERSION;
 
+// ===== 設定(秘密情報ではない) =====
 // ===== 設定(秘密情報ではない) =====
 const WOFF_ID = 'zOLRGLwYG4i71sA08_geGw';
 const AUTH_API = 'https://script.google.com/macros/s/AKfycbyrk69F7F1E1LatE1e0hz_V2p8FVtdx5FxJQTJSDuiMDg7ETCXoLCJc3ZwynbArvSVClA/exec';
 
 // ===== 開きたいツールとパラメータ(ログインで画面が切り替わっても失わないよう保存しておく) =====
 const KEY = 'entry_request';
-// WOFFがパラメータを別の名前に包んで渡す場合(例：?xxx.state=%3Ftool%3Dclosing…)にも対応する
-function readQuery() {
-  const q = new URLSearchParams(location.search);
-  if (q.get('tool')) return q;
-  for (const [k, v] of q) {
-    const inner = String(v || '');
-    const qs = inner.indexOf('?') !== -1 ? inner.slice(inner.indexOf('?') + 1) : inner;
-    if (/(^|&)tool=/.test(qs)) return new URLSearchParams(qs);
+// URLの中から「tool=…」を含む部分を探す。WOFFやログインの戻りで包まれて(エンコードされて)いても読む
+function findToolQuery(str) {
+  let s = String(str || '');
+  for (let i = 0; i < 3; i++) {
+    const idx = s.search(/(?:^|[?&#])tool=/);
+    if (idx !== -1) {
+      const at = s.charAt(idx) === 't' ? idx : idx + 1;
+      const begin = Math.max(s.lastIndexOf('?', at), s.lastIndexOf('#', at)); // 「tool=」を含む区切りの先頭
+      return new URLSearchParams(s.slice(begin + 1).split('#')[0]);
+    }
+    let d;
+    try { d = decodeURIComponent(s); } catch (e) { break; }
+    if (d === s) break;
+    s = d;
   }
-  if (location.hash && /tool=/.test(location.hash)) return new URLSearchParams(location.hash.replace(/^#\??/, ''));
-  return q;
+  return null;
 }
+function readQuery() {
+  return findToolQuery(location.search) || findToolQuery(location.hash) || new URLSearchParams(location.search);
+}
+
+// 調査用：パラメータの「名前」だけを並べる(値にはログイン情報が入ることがあるので出さない)
+function paramNames(str) {
+  const t = String(str || '').replace(/^[?#]/, '');
+  if (!t) return '(なし)';
+  return t.split('&').map(p => decodeURIComponent(p.split('=')[0] || '')).join(',');
+}
+const FIRST_KEY = 'entry_first_seen';
+try {
+  if (!sessionStorage.getItem(FIRST_KEY)) {
+    sessionStorage.setItem(FIRST_KEY, 'search=' + paramNames(location.search) + ' / hash=' + paramNames(location.hash));
+  }
+} catch (e) {}
+
 function readRequest() {
   const q = readQuery();
   if (q.get('tool')) {
@@ -183,13 +206,16 @@ async function authenticate() {
   if (res.ok && res.redirect) {
     show((res.name ? res.name + ' さん、' : '') + 'ツールを開いています…');
     try { sessionStorage.removeItem(KEY); } catch (e) {}
+    try { sessionStorage.removeItem(FIRST_KEY); } catch (e) {}
     location.replace(res.redirect);
     return;
   }
   show(ERRORS[res.error] || ERRORS.internal_error, true);
   if (res.error === 'no_tool') {
     // 届き方を調べるため、受け取ったURLのパラメータ部分を表示(秘密は含まない)
-    detail('query', { message: 'search=' + (location.search || '(なし)') + ' / hash=' + (location.hash || '(なし)') });
+    let first = '';
+    try { first = sessionStorage.getItem(FIRST_KEY) || ''; } catch (e) {}
+    detail('query', { message: '最初：' + (first || '(記録なし)') + ' ／ 今：search=' + paramNames(location.search) + ' / hash=' + paramNames(location.hash) });
   }
   if (res.error === 'not_registered' && res.applyUrl) {
     setAction('<a class="btn" href="' + encodeURI(res.applyUrl) + '">利用を申請する</a>');

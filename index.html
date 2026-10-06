@@ -6,9 +6,9 @@
 <title>確認中</title>
 <!--
   入口ページ(Netlifyに index.html として置く)
-  開き方：<このページのURL>?tool=ツールID&store=店舗コード
-    tool  … 開きたいツールのID(認証基盤の「ツール一覧」に登録したもの)
-    store などのほかのパラメータ … そのままツールへ引き継ぐ(引き継ぐ名前はツール一覧で決める)
+  開き方：LINE WORKSのトーク・メニューに置いたWOFFのリンクをタップする(リンクは1つだけ)
+    → 本人を確認し、その人が使えるツールのボタンを並べる。使えるツールが1つだけなら、そのまま開く
+    (WOFFはリンクに付けたパラメータをページに渡さないため、ツールはページの中で選ぶ形にしている)
   ログイン画面は無い。LINE WORKSのアプリ内で開くと、開いた人のUserIdを受け取って自動で照合し、ツールへ移動する。
   アプリの外(普通のブラウザ)で開かれた場合は、ログインさせずに「LINE WORKSのアプリから開いてください」と案内するだけ
 
@@ -32,6 +32,8 @@
   .btn { display: inline-block; margin-top: 20px; padding: 16px 28px; font-size: 18px; font-weight: 700; color: #fff; background: var(--c);
     border: none; border-radius: 12px; text-decoration: none; cursor: pointer; font-family: inherit; }
   .sub { font-size: 14px; color: var(--muted); margin-top: 16px; }
+  .menu { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
+  .menu .btn { margin-top: 0; display: block; }
   #detail { font-size: 12px; color: var(--muted); margin-top: 14px; word-break: break-all; text-align: left; }
 </style>
 </head>
@@ -46,10 +48,9 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-06g';
+const PAGE_VERSION = '2026-10-06h';
 document.getElementById('ver').textContent = 'ver ' + PAGE_VERSION;
 
-// ===== 設定(秘密情報ではない) =====
 // ===== 設定(秘密情報ではない) =====
 const WOFF_ID = 'zOLRGLwYG4i71sA08_geGw';
 const AUTH_API = 'https://script.google.com/macros/s/AKfycbyrk69F7F1E1LatE1e0hz_V2p8FVtdx5FxJQTJSDuiMDg7ETCXoLCJc3ZwynbArvSVClA/exec';
@@ -77,19 +78,6 @@ function readQuery() {
   return findToolQuery(location.search) || findToolQuery(location.hash) || new URLSearchParams(location.search);
 }
 
-// 調査用：パラメータの「名前」だけを並べる(値にはログイン情報が入ることがあるので出さない)
-function paramNames(str) {
-  const t = String(str || '').replace(/^[?#]/, '');
-  if (!t) return '(なし)';
-  return t.split('&').map(p => decodeURIComponent(p.split('=')[0] || '')).join(',');
-}
-const FIRST_KEY = 'entry_first_seen';
-try {
-  if (!sessionStorage.getItem(FIRST_KEY)) {
-    sessionStorage.setItem(FIRST_KEY, 'search=' + paramNames(location.search) + ' / hash=' + paramNames(location.hash));
-  }
-} catch (e) {}
-
 function readRequest() {
   const q = readQuery();
   if (q.get('tool')) {
@@ -104,6 +92,8 @@ function readRequest() {
 const REQUEST = readRequest();
 
 const $ = id => document.getElementById(id);
+const escHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const escAttr = escHtml;
 function show(text, isErr) {
   $('msg').textContent = text;
   $('msg').className = isErr ? 'err' : '';
@@ -115,7 +105,7 @@ const ERRORS = {
   invalid_token: 'ログインを確認できませんでした。\nLINE WORKSのアプリから開き直してください。',
   not_registered: 'スタッフとして登録されていません。\n利用するには申請が必要です。',
   inactive: '現在、利用できない状態になっています。\n管理者に連絡してください。',
-  no_permission: 'このツールを使う権限がありません。\n必要な場合は管理者に申請してください。',
+  no_permission: '使える権限がありません。\n必要な場合は管理者に申請してください。',
   no_store_permission: 'この店舗のページを開く権限がありません。\n所属している店舗のリンクから開いてください。',
   unknown_tool: '開こうとしたツールが見つかりません。\nリンクが正しいか確認してください。',
   no_tool: '開くツールが指定されていません。\nLINE WORKSのリンクから開いてください。',
@@ -203,20 +193,26 @@ async function authenticate() {
     detail('response ' + r.status, { message: text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 160) });
     return;
   }
+  // ツールの一覧(ふだんの使い方)：1つだけならそのまま開く。2つ以上ならボタンを並べる
+  if (res.ok && res.menu) {
+    try { sessionStorage.removeItem(KEY); } catch (e) {}
+    if (res.menu.length === 1) {
+      show((res.name ? res.name + ' さん、' : '') + res.menu[0].label + 'を開いています…');
+      location.replace(res.menu[0].redirect);
+      return;
+    }
+    show((res.name ? res.name + ' さん\n' : '') + '開くものを選んでください');
+    setAction('<div class="menu">' + res.menu.map(m =>
+      '<a class="btn" href="' + escAttr(m.redirect) + '">' + escHtml(m.label) + '</a>').join('') + '</div>');
+    return;
+  }
   if (res.ok && res.redirect) {
     show((res.name ? res.name + ' さん、' : '') + 'ツールを開いています…');
     try { sessionStorage.removeItem(KEY); } catch (e) {}
-    try { sessionStorage.removeItem(FIRST_KEY); } catch (e) {}
     location.replace(res.redirect);
     return;
   }
   show(ERRORS[res.error] || ERRORS.internal_error, true);
-  if (res.error === 'no_tool') {
-    // 届き方を調べるため、受け取ったURLのパラメータ部分を表示(秘密は含まない)
-    let first = '';
-    try { first = sessionStorage.getItem(FIRST_KEY) || ''; } catch (e) {}
-    detail('query', { message: '最初：' + (first || '(記録なし)') + ' ／ 今：search=' + paramNames(location.search) + ' / hash=' + paramNames(location.hash) });
-  }
   if (res.error === 'not_registered' && res.applyUrl) {
     setAction('<a class="btn" href="' + encodeURI(res.applyUrl) + '">利用を申請する</a>');
   }

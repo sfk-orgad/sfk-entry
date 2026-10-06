@@ -41,9 +41,14 @@
   <div id="msg">確認しています…</div>
   <div id="action"></div>
   <div id="detail"></div>
+  <div id="ver" style="font-size:11px;color:#9AA3AD;margin-top:18px;"></div>
 </div>
 
 <script>
+// ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
+const PAGE_VERSION = '2026-10-06d';
+document.getElementById('ver').textContent = 'ver ' + PAGE_VERSION;
+
 // ===== 設定(秘密情報ではない) =====
 const WOFF_ID = 'zOLRGLwYG4i71sA08_geGw';
 const AUTH_API = 'https://script.google.com/macros/s/AKfycbyrk69F7F1E1LatE1e0hz_V2p8FVtdx5FxJQTJSDuiMDg7ETCXoLCJc3ZwynbArvSVClA/exec';

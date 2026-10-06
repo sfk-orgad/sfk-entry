@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SHIFUKU</title>
+<title>確認中</title>
 <!--
   入口ページ(Netlifyに index.html として置く)
-  開き方：<このページのURL>?tool=closing&store=SHIFUKU
+  開き方：<このページのURL>?tool=ツールID&store=店舗コード
     tool  … 開きたいツールのID(認証基盤の「ツール一覧」に登録したもの)
     store などのほかのパラメータ … そのままツールへ引き継ぐ(引き継ぐ名前はツール一覧で決める)
   ログイン画面は無い。LINE WORKSのアプリ内で開くと、開いた人のUserIdを受け取って自動で照合し、ツールへ移動する。
@@ -15,8 +15,8 @@
   ※ このページには秘密情報を置かない。置くのは WOFF ID と認証基盤のURL(公開されても困らない値)だけ
 -->
 
-<!-- ▼ WOFF SDK：PoCで動いた <script> の行(3.7.1・charset="utf-8" 付き)を、そのままここに貼る -->
-<script charset="utf-8" src="★PoCで動いたWOFF SDKのURL★"></script>
+<!-- ▼ WOFF SDK：PoCで動いた <script> の行(3.7.1・charset="utf-8" 付き)と同じか確認して、違えばPoCの行を使う -->
+<script charset="utf-8" src="https://static.worksmobile.net/static/wm/woff/edge/3.7.1/sdk.js"></script>
 
 <style>
   :root { --c: #16323A; --muted: #5F6670; --err: #B42318; }
@@ -36,7 +36,6 @@
 </head>
 <body>
 <div class="box">
-  <h1>SHIFUKU</h1>
   <div class="spinner" id="spin"></div>
   <div id="msg">確認しています…</div>
   <div id="action"></div>
@@ -44,11 +43,11 @@
 
 <script>
 // ===== 設定(秘密情報ではない) =====
-const WOFF_ID = '★WOFF ID★';
-const AUTH_API = '★認証基盤のWebアプリのURL(…/exec)★';
+const WOFF_ID = 'zOLRGLwYG4i71sA08_geGw';
+const AUTH_API = 'https://script.google.com/macros/s/AKfycbwhwNoFjOKK2MGr9qDDDZEolVc8IQrUS3Kcec1IIyf-t73_MGQFTYHdKaXi7R83Z6z2Iw/exec★';
 
 // ===== 開きたいツールとパラメータ(ログインで画面が切り替わっても失わないよう保存しておく) =====
-const KEY = 'shifuku_auth_request';
+const KEY = 'entry_request';
 function readRequest() {
   const q = new URLSearchParams(location.search);
   if (q.get('tool')) {

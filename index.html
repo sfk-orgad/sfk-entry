@@ -46,7 +46,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-06e';
+const PAGE_VERSION = '2026-10-06f';
 document.getElementById('ver').textContent = 'ver ' + PAGE_VERSION;
 
 // ===== 設定(秘密情報ではない) =====
@@ -55,8 +55,20 @@ const AUTH_API = 'https://script.google.com/macros/s/AKfycbyrk69F7F1E1LatE1e0hz_
 
 // ===== 開きたいツールとパラメータ(ログインで画面が切り替わっても失わないよう保存しておく) =====
 const KEY = 'entry_request';
-function readRequest() {
+// WOFFがパラメータを別の名前に包んで渡す場合(例：?xxx.state=%3Ftool%3Dclosing…)にも対応する
+function readQuery() {
   const q = new URLSearchParams(location.search);
+  if (q.get('tool')) return q;
+  for (const [k, v] of q) {
+    const inner = String(v || '');
+    const qs = inner.indexOf('?') !== -1 ? inner.slice(inner.indexOf('?') + 1) : inner;
+    if (/(^|&)tool=/.test(qs)) return new URLSearchParams(qs);
+  }
+  if (location.hash && /tool=/.test(location.hash)) return new URLSearchParams(location.hash.replace(/^#\??/, ''));
+  return q;
+}
+function readRequest() {
+  const q = readQuery();
   if (q.get('tool')) {
     const params = {};
     q.forEach((v, k) => { if (k !== 'tool') params[k] = v; });
@@ -175,6 +187,10 @@ async function authenticate() {
     return;
   }
   show(ERRORS[res.error] || ERRORS.internal_error, true);
+  if (res.error === 'no_tool') {
+    // 届き方を調べるため、受け取ったURLのパラメータ部分を表示(秘密は含まない)
+    detail('query', { message: 'search=' + (location.search || '(なし)') + ' / hash=' + (location.hash || '(なし)') });
+  }
   if (res.error === 'not_registered' && res.applyUrl) {
     setAction('<a class="btn" href="' + encodeURI(res.applyUrl) + '">利用を申請する</a>');
   }

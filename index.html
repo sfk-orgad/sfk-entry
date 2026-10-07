@@ -48,8 +48,12 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-06h';
-document.getElementById('ver').textContent = 'ver ' + PAGE_VERSION;
+const PAGE_VERSION = '2026-10-06i';
+const T0 = Date.now();
+const TIMES = [];
+function showVer() { document.getElementById('ver').textContent = 'ver ' + PAGE_VERSION + (TIMES.length ? '・' + TIMES.join('・') : ''); }
+function lap(label, from) { TIMES.push(label + ' ' + ((Date.now() - from) / 1000).toFixed(1) + '秒'); showVer(); }
+showVer();
 
 // ===== 設定(秘密情報ではない) =====
 const WOFF_ID = 'zOLRGLwYG4i71sA08_geGw';
@@ -171,7 +175,9 @@ async function authenticate() {
     detail('profile', e);
     return;
   }
+  lap('LINE WORKS', T0);
   // 2. 認証基盤に問い合わせる
+  const t2 = Date.now();
   try {
     r = await fetch(AUTH_API, {
       method: 'POST',
@@ -185,6 +191,7 @@ async function authenticate() {
     detail('fetch', e);
     return;
   }
+  lap('認証', t2);
   // 3. 返事を読む(JSONでなければ、URL違い・公開範囲・デプロイの問題)
   try {
     res = JSON.parse(text);

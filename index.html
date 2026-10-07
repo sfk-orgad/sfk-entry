@@ -3,72 +3,119 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>確認中</title>
+<title>業務ポータル</title>
 <!--
-  入口ページ(Netlifyに index.html として置く)
+  業務ポータル(GitHub Pages に index.html として置く)
   開き方：LINE WORKSのトーク・メニューに置いたWOFFのリンクをタップする(リンクは1つだけ)
-    → 本人を確認し、その人が使えるツールのボタンを並べる。使えるツールが1つだけなら、そのまま開く
-    (WOFFはリンクに付けたパラメータをページに渡さないため、ツールはページの中で選ぶ形にしている)
-  ログイン画面は無い。LINE WORKSのアプリ内で開くと、開いた人のUserIdを受け取って自動で照合し、ツールへ移動する。
-  アプリの外(普通のブラウザ)で開かれた場合は、ログインさせずに「LINE WORKSのアプリから開いてください」と案内するだけ
-
+    → 本人を確認し、今日の営業と、その人が使えるツールのカードを並べる
   ※ このページには秘密情報を置かない。置くのは WOFF ID と認証基盤のURL(公開されても困らない値)だけ
+  ※ 表示する中身(ツール・店舗・今日の営業)は、すべて認証のあとに認証基盤から受け取る(このファイルには持たない)
 -->
 
 <!-- ▼ WOFF SDK：PoCで動いた <script> の行(3.7.1・charset="utf-8" 付き)と同じか確認して、違えばPoCの行を使う -->
 <script charset="utf-8" src="https://static.worksmobile.net/static/wm/woff/edge/3.7.1/sdk.js"></script>
 
 <style>
-  :root { --c: #16323A; --muted: #5F6670; --err: #B42318; }
+  :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; --hol: #B42318; }
   * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #F5F6F8;
-    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; color: #1F2328; }
-  .box { width: min(440px, 92vw); background: #fff; border: 1px solid #D5DAE0; border-radius: 16px; padding: 32px 24px; text-align: center; }
-  h1 { font-size: 20px; margin: 0 0 16px; color: var(--c); }
+  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 17px; line-height: 1.5; }
+  /* 確認中・エラーの画面 */
+  #gate { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .box { width: min(440px, 92vw); background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 32px 24px; text-align: center; }
   #msg { font-size: 18px; line-height: 1.7; white-space: pre-wrap; }
   #msg.err { color: var(--err); font-weight: 700; }
-  .spinner { width: 40px; height: 40px; margin: 0 auto 16px; border: 5px solid #E8EEF0; border-top-color: var(--c); border-radius: 50%; animation: spin .9s linear infinite; }
+  .spinner { width: 40px; height: 40px; margin: 0 auto 16px; border: 5px solid var(--soft); border-top-color: var(--c); border-radius: 50%; animation: spin .9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .btn { display: inline-block; margin-top: 20px; padding: 16px 28px; font-size: 18px; font-weight: 700; color: #fff; background: var(--c);
     border: none; border-radius: 12px; text-decoration: none; cursor: pointer; font-family: inherit; }
-  .sub { font-size: 14px; color: var(--muted); margin-top: 16px; }
-  .menu { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
-  .menu .btn { margin-top: 0; display: block; }
   #detail { font-size: 12px; color: var(--muted); margin-top: 14px; word-break: break-all; text-align: left; }
+  .ver { font-size: 11px; color: #9AA3AD; margin-top: 18px; text-align: center; }
+  /* ポータル */
+  #portal { display: none; }
+  header { background: var(--c); color: #fff; padding: 18px 16px 16px; position: relative; }
+  header h1 { margin: 0; font-size: 22px; }
+  .me { position: absolute; top: 10px; right: 14px; font-size: 14px; opacity: .9; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 0 12px 40px; }
+  .today { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-top: 14px; }
+  .today h2 { font-size: 16px; margin: 0 0 8px; color: var(--muted); font-weight: 700; }
+  .store { padding: 8px 0; border-top: 1px solid #EEF1F4; }
+  .store:first-of-type { border-top: none; }
+  .store .head { font-weight: 700; }
+  .price { display: inline-block; font-size: 14px; padding: 2px 10px; border-radius: 999px; background: var(--soft); color: var(--c); margin-left: 6px; }
+  .price.closed { background: #FDECEA; color: var(--err); }
+  .hol { font-size: 13px; color: var(--hol); margin-left: 6px; }
+  .topics { margin: 4px 0 0; padding-left: 1.2em; font-size: 15px; }
+  .cat { font-size: 15px; color: var(--muted); font-weight: 700; margin: 20px 4px 8px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 360px) { .grid { grid-template-columns: 1fr; } }
+  .tile { display: flex; flex-direction: column; gap: 4px; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 14px;
+    padding: 14px; cursor: pointer; font-family: inherit; color: var(--ink); min-height: 96px; }
+  .tile:active { background: var(--soft); }
+  .tile .icon { font-size: 26px; line-height: 1; }
+  .tile .name { font-size: 17px; font-weight: 700; }
+  .tile .tag { font-size: 12px; color: var(--c); background: var(--soft); border-radius: 999px; padding: 1px 8px; align-self: flex-start; }
+  .tile .desc { font-size: 13px; color: var(--muted); }
+  .empty { font-size: 15px; color: var(--muted); margin-top: 20px; text-align: center; }
+  .overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,.92); z-index: 50; align-items: center; justify-content: center; flex-direction: column; }
 </style>
 </head>
 <body>
-<div class="box">
+<div id="gate"><div class="box">
   <div class="spinner" id="spin"></div>
   <div id="msg">確認しています…</div>
   <div id="action"></div>
   <div id="detail"></div>
-  <div id="ver" style="font-size:11px;color:#9AA3AD;margin-top:18px;"></div>
+  <div class="ver" id="ver"></div>
+</div></div>
+
+<div id="portal">
+  <header><div class="me" id="me"></div><h1>業務ポータル</h1></header>
+  <div class="wrap">
+    <div id="today"></div>
+    <div id="tools"></div>
+    <div class="ver" id="ver2"></div>
+  </div>
 </div>
+<div class="overlay" id="overlay"><div class="spinner"></div><div>開いています…</div></div>
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-07a';
+const PAGE_VERSION = '2026-10-07b';
 const T0 = Date.now();
 const TIMES = [];
-function showVer() { document.getElementById('ver').textContent = 'ver ' + PAGE_VERSION + (TIMES.length ? '・' + TIMES.join('・') : ''); }
+function showVer() {
+  const t = 'ver ' + PAGE_VERSION + (TIMES.length ? '・' + TIMES.join('・') : '');
+  document.getElementById('ver').textContent = t;
+  document.getElementById('ver2').textContent = t;
+}
 function lap(label, from) { TIMES.push(label + ' ' + ((Date.now() - from) / 1000).toFixed(1) + '秒'); showVer(); }
 showVer();
 
 // ===== 設定(秘密情報ではない) =====
 const WOFF_ID = 'zOLRGLwYG4i71sA08_geGw';
 const AUTH_API = 'https://script.google.com/macros/s/AKfycbyrk69F7F1E1LatE1e0hz_V2p8FVtdx5FxJQTJSDuiMDg7ETCXoLCJc3ZwynbArvSVClA/exec';
+const REFRESH_AFTER_MS = 8 * 60 * 1000; // 通行証は発行から10分で入場できなくなるので、8分たっていたら押したときに取り直す
 
-// ===== 開きたいツールとパラメータ(ログインで画面が切り替わっても失わないよう保存しておく) =====
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+function show(text, isErr) {
+  $('msg').textContent = text;
+  $('msg').className = isErr ? 'err' : '';
+  $('spin').style.display = isErr || $('action').innerHTML ? 'none' : 'block';
+}
+function setAction(html) { $('action').innerHTML = html; $('spin').style.display = html ? 'none' : 'block'; }
+function detail(stage, e) { $('detail').textContent = '[' + stage + '] ' + (e && e.message ? e.message : String(e || '')); }
+
+// ===== ツールの直接指定(?tool=…)。WOFFはパラメータを渡さないので通常は使わないが、将来のために残す =====
 const KEY = 'entry_request';
-// URLの中から「tool=…」を含む部分を探す。WOFFやログインの戻りで包まれて(エンコードされて)いても読む
 function findToolQuery(str) {
   let s = String(str || '');
   for (let i = 0; i < 3; i++) {
     const idx = s.search(/(?:^|[?&#])tool=/);
     if (idx !== -1) {
       const at = s.charAt(idx) === 't' ? idx : idx + 1;
-      const begin = Math.max(s.lastIndexOf('?', at), s.lastIndexOf('#', at)); // 「tool=」を含む区切りの先頭
+      const begin = Math.max(s.lastIndexOf('?', at), s.lastIndexOf('#', at));
       return new URLSearchParams(s.slice(begin + 1).split('#')[0]);
     }
     let d;
@@ -78,41 +125,24 @@ function findToolQuery(str) {
   }
   return null;
 }
-function readQuery() {
-  return findToolQuery(location.search) || findToolQuery(location.hash) || new URLSearchParams(location.search);
-}
-
 function readRequest() {
-  const q = readQuery();
-  if (q.get('tool')) {
+  const q = findToolQuery(location.search) || findToolQuery(location.hash);
+  if (q && q.get('tool')) {
     const params = {};
     q.forEach((v, k) => { if (k !== 'tool') params[k] = v; });
-    const req = { tool: q.get('tool'), params: params };
-    try { sessionStorage.setItem(KEY, JSON.stringify(req)); } catch (e) {}
-    return req;
+    return { tool: q.get('tool'), params: params };
   }
-  try { return JSON.parse(sessionStorage.getItem(KEY) || 'null') || { tool: '', params: {} }; } catch (e) { return { tool: '', params: {} }; }
+  return { tool: '', params: {} };
 }
 const REQUEST = readRequest();
-
-const $ = id => document.getElementById(id);
-const escHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const escAttr = escHtml;
-function show(text, isErr) {
-  $('msg').textContent = text;
-  $('msg').className = isErr ? 'err' : '';
-  $('spin').style.display = isErr || $('action').innerHTML ? 'none' : 'block';
-}
-function setAction(html) { $('action').innerHTML = html; $('spin').style.display = html ? 'none' : 'block'; }
 
 const ERRORS = {
   invalid_token: 'ログインを確認できませんでした。\nLINE WORKSのアプリから開き直してください。',
   not_registered: 'スタッフとして登録されていません。\n利用するには申請が必要です。',
   inactive: '現在、利用できない状態になっています。\n管理者に連絡してください。',
   no_permission: '使える権限がありません。\n必要な場合は管理者に申請してください。',
-  no_store_permission: 'この店舗のページを開く権限がありません。\n所属している店舗のリンクから開いてください。',
-  unknown_tool: '開こうとしたツールが見つかりません。\nリンクが正しいか確認してください。',
-  no_tool: '開くツールが指定されていません。\nLINE WORKSのリンクから開いてください。',
+  no_store_permission: 'この店舗のページを開く権限がありません。',
+  unknown_tool: '開こうとしたツールが見つかりません。',
   bad_request: 'うまく確認できませんでした。\nもう一度開き直してください。',
   internal_error: '一時的なエラーが起きました。\n少し待ってから開き直してください。',
 };
@@ -124,24 +154,21 @@ async function start() {
     await woff.init({ woffId: WOFF_ID });
   } catch (e) {
     show('LINE WORKSの準備に失敗しました。\n開き直してください。', true);
+    detail('init', e);
     return;
   }
   if (!woff.isLoggedIn()) {
     const inClient = typeof woff.isInClient === 'function' ? woff.isInClient() : null;
-    detail('state', { message: 'inClient=' + inClient + ' / ' + location.host });
     if (inClient === false) {
-      // アプリの外(普通のブラウザやGitHub PagesのURLを直接開いた場合)。ログイン画面は出さない
       show('このページはLINE WORKSのアプリから開いてください。\n（トークにあるリンクをタップ）', true);
       return;
     }
-    // アプリ内(または判定できない)：一度だけ自動で login() を呼ぶ。アプリがログイン情報を持っているので入力画面は出ない想定
     let tried = null;
     try { tried = sessionStorage.getItem(KEY + '_login'); } catch (e) {}
     if (!tried) {
       try { sessionStorage.setItem(KEY + '_login', '1'); } catch (e) {}
       show('LINE WORKSの情報を確認しています…');
       try { woff.login(); } catch (e) { detail('login', e); }
-      // 画面が切り替わらなかったときだけ、タップで続けるボタンを出す(ブラウザの制約で自動では進めない場合がある)
       setTimeout(() => {
         show('もう一度確認します。');
         setAction('<button class="btn" id="cont">続ける</button>');
@@ -149,88 +176,105 @@ async function start() {
       }, 2500);
       return;
     }
-    // login() のあと戻ってきても未ログインのまま
     show('LINE WORKSのログインを確認できませんでした。\nトークのリンクから開き直してください。', true);
     try { sessionStorage.removeItem(KEY + '_login'); } catch (e) {}
     return;
   }
   try { sessionStorage.removeItem(KEY + '_login'); } catch (e) {}
-  await authenticate();
+  lap('LINE WORKS', T0);
+  const res = await callAuth();
+  if (!res) return;
+  if (res.ok && res.redirect) { location.replace(res.redirect); return; } // ツールの直接指定
+  if (res.ok && res.items) { renderPortal(res); return; }
+  show(ERRORS[res.error] || ERRORS.internal_error, true);
+  if (res.error === 'not_registered' && res.applyUrl) setAction('<a class="btn" href="' + esc(encodeURI(res.applyUrl)) + '">利用を申請する</a>');
 }
 
-// 失敗したときに、どの段階で何が起きたかを小さく表示する(管理者が原因を調べるため。秘密は含まない)
-function detail(stage, e) {
-  $('detail').textContent = '[' + stage + '] ' + (e && e.message ? e.message : String(e || ''));
-}
-
-async function authenticate() {
-  show('スタッフ情報を確認しています…');
+// 認証基盤に問い合わせる(失敗したら画面にメッセージを出して null を返す)
+async function callAuth() {
   let accessToken, profile, r, text, res;
-  // 1. LINE WORKSから本人の情報を受け取る
   try {
     accessToken = woff.getAccessToken();
     profile = await woff.getProfile();
   } catch (e) {
-    show('LINE WORKSから情報を受け取れませんでした。\nアプリから開き直してください。', true);
-    detail('profile', e);
-    return;
+    show('LINE WORKSから情報を受け取れませんでした。\nアプリから開き直してください。', true); detail('profile', e); return null;
   }
-  lap('LINE WORKS', T0);
-  // 2. 認証基盤に問い合わせる
   const t2 = Date.now();
   try {
     r = await fetch(AUTH_API, {
       method: 'POST',
-      // text/plain で送る(application/json だと事前確認の通信が走り、GASが受け付けないため)
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // application/json だと事前確認の通信が走り、GASが受け付けない
       body: JSON.stringify({ accessToken: accessToken, userId: profile.userId, tool: REQUEST.tool, params: REQUEST.params }),
     });
     text = await r.text();
   } catch (e) {
-    show('通信に失敗しました。\n電波の良いところで開き直してください。', true);
-    detail('fetch', e);
-    return;
+    show('通信に失敗しました。\n電波の良いところで開き直してください。', true); detail('fetch', e); return null;
   }
   lap('認証', t2);
-  // 3. 返事を読む(JSONでなければ、URL違い・公開範囲・デプロイの問題)
   try {
     res = JSON.parse(text);
-    if (res && res.timing) {
-      // サーバー側の内訳(本人確認・データ・ボタン作成・記録)。残りは通信とGASの起動の時間
-      const t = res.timing, sum = Object.keys(t).reduce((a, k) => a + t[k], 0);
-      TIMES.push('(内訳 ' + Object.keys(t).map(k => k + ((t[k] / 1000).toFixed(1))).join('・') + '・通信と起動' +
-        Math.max(0, (Date.now() - t2 - sum) / 1000).toFixed(1) + ')');
-      showVer();
-    }
   } catch (e) {
     show('認証の仕組みから正しい返事がありませんでした。\n管理者に連絡してください。', true);
     detail('response ' + r.status, { message: text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 160) });
-    return;
+    return null;
   }
-  // ツールの一覧(ふだんの使い方)：1つだけならそのまま開く。2つ以上ならボタンを並べる
-  if (res.ok && res.menu) {
-    try { sessionStorage.removeItem(KEY); } catch (e) {}
-    if (res.menu.length === 1) {
-      show((res.name ? res.name + ' さん、' : '') + res.menu[0].label + 'を開いています…');
-      location.replace(res.menu[0].redirect);
-      return;
-    }
-    show((res.name ? res.name + ' さん\n' : '') + '開くものを選んでください');
-    setAction('<div class="menu">' + res.menu.map(m =>
-      '<a class="btn" href="' + escAttr(m.redirect) + '">' + escHtml(m.label) + '</a>').join('') + '</div>');
-    return;
-  }
-  if (res.ok && res.redirect) {
-    show((res.name ? res.name + ' さん、' : '') + 'ツールを開いています…');
-    try { sessionStorage.removeItem(KEY); } catch (e) {}
-    location.replace(res.redirect);
-    return;
-  }
-  show(ERRORS[res.error] || ERRORS.internal_error, true);
-  if (res.error === 'not_registered' && res.applyUrl) {
-    setAction('<a class="btn" href="' + encodeURI(res.applyUrl) + '">利用を申請する</a>');
-  }
+  return res;
 }
+
+// ===== ポータルの表示 =====
+let DATA = null, FETCHED_AT = 0;
+function renderPortal(res) {
+  DATA = res; FETCHED_AT = Date.now();
+  $('gate').style.display = 'none';
+  $('portal').style.display = 'block';
+  $('me').textContent = res.name ? res.name + ' さん' : '';
+
+  // 今日の営業
+  if (res.today && res.today.length) {
+    $('today').innerHTML = '<div class="today"><h2>今日の営業 ' + esc(res.today[0].date) + '</h2>' + res.today.map(t =>
+      '<div class="store"><span class="head">' + esc(t.name) + '</span>' +
+      '<span class="price' + (t.closed ? ' closed' : '') + '">' + esc(t.closed ? '休業日' : t.price) + '</span>' +
+      (t.holiday ? '<span class="hol">' + esc(t.holiday) + '</span>' : '') +
+      (t.topics.length ? '<ul class="topics">' + t.topics.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '') + '</div>'
+    ).join('') + '</div>';
+  } else {
+    $('today').innerHTML = '';
+  }
+
+  // ツールのカード(カテゴリごと。カテゴリは表に出てきた順)
+  const cats = [];
+  res.items.forEach(it => { const c = it.category || 'ツール'; if (cats.indexOf(c) === -1) cats.push(c); });
+  $('tools').innerHTML = res.items.length ? cats.map(c =>
+    '<div class="cat">' + esc(c) + '</div><div class="grid">' + res.items.filter(it => (it.category || 'ツール') === c).map(it =>
+      '<button class="tile" data-key="' + esc(it.key) + '">' +
+      '<span class="icon">' + esc(it.icon || (it.kind === 'link' ? '🔗' : '📋')) + '</span>' +
+      '<span class="name">' + esc(it.label) + '</span>' +
+      (it.storeName ? '<span class="tag">' + esc(it.storeName) + '</span>' : '') +
+      (it.desc ? '<span class="desc">' + esc(it.desc) + '</span>' : '') + '</button>'
+    ).join('') + '</div>'
+  ).join('') : '<div class="empty">使えるツールはまだありません。</div>';
+}
+
+// カードを押したとき：外部リンクはそのまま開く。GASのツールは、時間がたっていたら通行証を取り直してから開く
+$('tools').addEventListener('click', async e => {
+  const b = e.target.closest('.tile');
+  if (!b) return;
+  const key = b.getAttribute('data-key');
+  let it = DATA.items.find(x => x.key === key);
+  if (!it) return;
+  if (it.kind !== 'link' && Date.now() - FETCHED_AT > REFRESH_AFTER_MS) {
+    $('overlay').style.display = 'flex';
+    const res = await callAuth();
+    if (!res || !res.ok || !res.items) { $('overlay').style.display = 'none'; $('portal').style.display = 'none'; $('gate').style.display = 'flex'; return; }
+    renderPortal(res);
+    it = res.items.find(x => x.key === key);
+    if (!it) { $('overlay').style.display = 'none'; alert('このツールは使えなくなりました。'); return; }
+  }
+  $('overlay').style.display = 'flex';
+  location.href = it.redirect;
+});
+// ツールから「戻る」で帰ってきたときは、くるくるを消す
+window.addEventListener('pageshow', () => { $('overlay').style.display = 'none'; });
 
 start();
 </script>

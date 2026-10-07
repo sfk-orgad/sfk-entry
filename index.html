@@ -81,7 +81,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-07c';
+const PAGE_VERSION = '2026-10-07d';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -95,16 +95,16 @@ showVer();
 // ===== 設定(秘密情報ではない) =====
 const WOFF_ID = 'zOLRGLwYG4i71sA08_geGw';
 const AUTH_API = 'https://script.google.com/macros/s/AKfycbyrk69F7F1E1LatE1e0hz_V2p8FVtdx5FxJQTJSDuiMDg7ETCXoLCJc3ZwynbArvSVClA/exec';
-const REFRESH_AFTER_MS = 8 * 60 * 1000; // 通行証は発行から10分で入場できなくなるので、8分たっていたら押したときに取り直す
-const SAVE_KEY = 'portal_data';          // ポータルの表示内容(8分間)。戻ってきたときに認証基盤を呼ばずに表示する
-const USED_KEY = 'portal_used';          // 開いたツール(通行証は使い捨てなので、同じツールを開き直すときは取り直す)
-function saved() {
-  try {
-    const x = JSON.parse(sessionStorage.getItem(SAVE_KEY) || 'null');
-    return x && Date.now() - x.at < REFRESH_AFTER_MS ? x : null;
-  } catch (e) { return null; }
-}
-function used() { try { return JSON.parse(sessionStorage.getItem(USED_KEY) || '[]'); } catch (e) { return []; } }
+// ===== ブラウザの中での受け渡し(同じサイトのツールの画面だけが読める。URLには出さない) =====
+//   portal_session：{ token:通行証, exp:期限(ミリ秒), name, apis:{ ツールID: データの入口のURL } }  … ツールの画面が使う
+//   portal_data   ：{ at, res }  … ポータルの表示内容。10分以内に戻ってきたら、認証基盤を呼ばずに表示する
+const SESSION_KEY = 'portal_session';
+const SAVE_KEY = 'portal_data';
+const SHOW_CACHE_MS = 10 * 60 * 1000;   // 表示内容(今日の営業など)を使い回す時間
+const SESSION_MARGIN_MS = 30 * 60 * 1000; // 通行証の期限が30分を切っていたら、取り直してから開く
+function readJson(k) { try { return JSON.parse(sessionStorage.getItem(k) || 'null'); } catch (e) { return null; } }
+function sessionOk() { const x = readJson(SESSION_KEY); return !!(x && x.exp - Date.now() > SESSION_MARGIN_MS); }
+function saved() { const x = readJson(SAVE_KEY); return x && Date.now() - x.at < SHOW_CACHE_MS && sessionOk() ? x : null; }
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -158,7 +158,7 @@ const ERRORS = {
 
 // ===== 本体 =====
 async function start() {
-  // 8分以内に表示した内容があれば、それを使う(「‹ ポータル」で戻ったとき・開き直したときに速く出す)
+  // 10分以内に表示した内容があれば、それを使う(ツールから戻ったとき・開き直したときに速く出す)
   const keep = !REQUEST.tool && saved();
   if (keep) { TIMES.push('前回の表示を使用'); showVer(); renderPortal(keep.res, keep.at); return; }
   if (typeof woff === 'undefined') { show('ログインの部品を読み込めませんでした。\n通信状態を確認して開き直してください。', true); return; }
@@ -197,7 +197,6 @@ async function start() {
   lap('LINE WORKS', T0);
   const res = await callAuth();
   if (!res) return;
-  if (res.ok && res.redirect) { location.replace(res.redirect); return; } // ツールの直接指定
   if (res.ok && res.items) { renderPortal(res); return; }
   show(ERRORS[res.error] || ERRORS.internal_error, true);
   if (res.error === 'not_registered' && res.applyUrl) setAction('<a class="btn" href="' + esc(encodeURI(res.applyUrl)) + '">利用を申請する</a>');
@@ -266,7 +265,14 @@ let DATA = null, FETCHED_AT = 0;
 function renderPortal(res, at) {
   DATA = res; FETCHED_AT = at || Date.now();
   if (!at) {
-    try { sessionStorage.setItem(SAVE_KEY, JSON.stringify({ at: FETCHED_AT, res: res })); sessionStorage.setItem(USED_KEY, '[]'); } catch (e) {}
+    // 通行証とデータの入口を、ツールの画面に受け渡すために保管する
+    const apis = {};
+    res.items.forEach(it => { if (it.kind !== 'link' && it.api) apis[it.tool] = it.api; });
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify({ token: res.session, exp: res.sessionExp, name: res.name, apis: apis }));
+      const show = Object.assign({}, res); delete show.session; // 表示用には通行証を持たない
+      sessionStorage.setItem(SAVE_KEY, JSON.stringify({ at: FETCHED_AT, res: show }));
+    } catch (e) {}
   }
   warmTools(res.items);
   $('gate').style.display = 'none';
@@ -299,25 +305,24 @@ function renderPortal(res, at) {
   ).join('') : '<div class="empty">使えるツールはまだありません。</div>';
 }
 
-// 裏でツール(GAS)を起こしておく：通行証を付けずに軽く呼ぶだけ(文字だけの案内が返る。何も消費しない)
-// ボタンを押したときに、GASの起動を待たずに済むようにするため
+// 裏でツールのGAS(データの入口)を起こしておく：?warm=1 で軽く呼ぶだけ(何もしない)
+// ツールの画面を開いたときに、GASの起動を待たずに済むようにするため
 function warmTools(items) {
   const bases = [];
-  items.filter(it => it.kind !== 'link').forEach(it => {
-    const u = String(it.redirect).replace(/([?&])t=[^&]*/, '$1').replace(/[?&]$/, '');
-    const base = u.split('?')[0];
+  items.filter(it => it.kind !== 'link' && it.api).forEach(it => {
+    const base = String(it.api).split('?')[0];
     if (bases.indexOf(base) === -1) { bases.push(base); fetch(base + '?warm=1', { mode: 'no-cors', cache: 'no-store' }).catch(() => {}); }
   });
 }
 
-// カードを押したとき：外部リンクはそのまま開く。GASのツールは、時間がたっていた・一度開いたものなら通行証を取り直してから開く
+// カードを押したとき：外部リンクはそのまま開く。自作のツールは、通行証の期限が近ければ取り直してから開く
 $('tools').addEventListener('click', async e => {
   const b = e.target.closest('.tile');
   if (!b) return;
   const key = b.getAttribute('data-key');
   let it = DATA.items.find(x => x.key === key);
   if (!it) return;
-  if (it.kind !== 'link' && (Date.now() - FETCHED_AT > REFRESH_AFTER_MS || used().indexOf(key) !== -1)) {
+  if (it.kind !== 'link' && !sessionOk()) {
     $('overlay').style.display = 'flex';
     const res = await callAuth();
     if (!res || !res.ok || !res.items) {
@@ -329,9 +334,8 @@ $('tools').addEventListener('click', async e => {
     it = res.items.find(x => x.key === key);
     if (!it) { $('overlay').style.display = 'none'; alert('このツールは使えなくなりました。'); return; }
   }
-  if (it.kind !== 'link') { try { sessionStorage.setItem(USED_KEY, JSON.stringify(used().concat([key]))); } catch (e) {} }
   $('overlay').style.display = 'flex';
-  location.href = it.redirect;
+  location.href = it.url;
 });
 // ツールから「戻る」で帰ってきたときは、くるくるを消す
 window.addEventListener('pageshow', () => { $('overlay').style.display = 'none'; });

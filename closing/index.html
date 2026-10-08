@@ -75,6 +75,7 @@
   <div class="store" id="storeName"></div>
   <h1>締めチェック</h1>
 </div></header>
+<div id="timing" style="text-align:center;font-size:11px;color:#9AA3AD;margin:6px 0 0;"></div>
 
 <div class="wrap" id="main">
   <div class="card" id="card-basic">
@@ -94,7 +95,6 @@
   <button class="submit" id="submitBtn">提出する</button>
 </div></div>
 
-<div id="timing" style="text-align:center;font-size:11px;color:#9AA3AD;margin:8px 0 0;"></div>
 <div id="done">
   <h2>提出しました</h2>
   <p id="doneMsg"></p>
@@ -108,7 +108,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-10-07e';
+var PAGE_VERSION = '2026-10-07f';
 var PORTAL_URL = '../';            // ポータル(同じサイト)
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -153,17 +153,41 @@ if (!S || !S.token || S.exp < Date.now()) {
 } else if (!API || !STORE) {
   gate('開く店舗やツールが分かりませんでした。\nポータルから開き直してください。', true);
 } else {
+  // ポータルが先読みしたデータ(3分以内)があれば、待たずに表示して、裏で最新を確かめる
+  var pre = readPrefetch();
+  if (pre) {
+    showForm(pre, '先読み');
+    api('closing.init', {}, true).then(function (res) {
+      if (res.ok && window.__refreshForm) window.__refreshForm(res.init);
+    }).catch(function () {});
+  } else {
+    loadNow();
+  }
+}
+
+function readPrefetch() {
+  try {
+    var x = JSON.parse(sessionStorage.getItem('prefetch_closing') || 'null');
+    return x && Date.now() - x.at < 3 * 60 * 1000 && x.inits && x.inits[STORE] ? x.inits[STORE] : null;
+  } catch (e) { return null; }
+}
+
+function showForm(D, how) {
+  D.portalUrl = PORTAL_URL;
+  D.clientMs = Date.now() - T0;
+  D.how = how;
+  g('gate').style.display = 'none';
+  g('app').style.display = 'block';
+  startForm(D);
+}
+
+function loadNow() {
   api('closing.init', {}, true).then(function (res) {
     if (!res.ok) {
       gate(res.error === 'AUTH' ? 'ログインの期限が切れました。\nポータルから開き直してください。' : '開けませんでした：' + res.error, true);
       return;
     }
-    var D = res.init;
-    D.portalUrl = PORTAL_URL;
-    D.clientMs = Date.now() - T0;
-    g('gate').style.display = 'none';
-    g('app').style.display = 'block';
-    startForm(D);
+    showForm(res.init, '取得');
   }).catch(function (e) {
     gate(e && e.stage === 'response' ? 'データを受け取れませんでした。\n管理者に連絡してください。' : '通信に失敗しました。\n電波の良いところで開き直してください。', true);
     // 原因を調べるための表示(秘密は含まない。通行証は出さない)
@@ -185,7 +209,7 @@ function startForm(D) {
     $('back2').href = D.portalUrl; $('backWrap').style.display = 'block';
   }
   // サーバー側でかかった時間(重さの原因を調べるため)
-  $('timing').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + (D.clientMs / 1000).toFixed(1) + '秒' +
+  $('timing').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + (D.clientMs / 1000).toFixed(1) + '秒(' + (D.how || '') + ')' +
     (D.timing ? '(サーバー：' + Object.keys(D.timing).map(function (k) { return k + ' ' + (D.timing[k] / 1000).toFixed(1) + '秒'; }).join('・') + ')' : '');
   $('date').innerHTML = D.dates.map(function (d) { return '<option value="' + esc(d.ymd) + '">' + esc(d.label) + '</option>'; }).join('');
 
@@ -200,6 +224,22 @@ function startForm(D) {
   }
   $('date').addEventListener('change', renderDay);
   renderDay();
+
+  // 先読みで表示したあと、裏で受け取った最新の内容を反映する
+  //   営業日の情報(料金区分・トピック・提出済み)は差し替える。営業日や項目が変わっていたら、読み込み直しを案内する
+  window.__refreshForm = function (N) {
+    var sameDays = JSON.stringify(N.dates.map(function (d) { return d.ymd; })) === JSON.stringify(D.dates.map(function (d) { return d.ymd; }));
+    var sameItems = JSON.stringify(N.items) === JSON.stringify(D.items);
+    if (sameDays) { N.dates.forEach(function (d, i) { D.dates[i] = d; }); renderDay(); }
+    if (!sameDays || !sameItems) {
+      $('error').innerHTML = '内容が更新されています。<a href="#" id="reloadNow">読み込み直す</a>(入力した内容は消えます)';
+      $('reloadNow').addEventListener('click', function (e) {
+        e.preventDefault();
+        try { sessionStorage.removeItem('prefetch_closing'); } catch (x) {}
+        location.reload();
+      });
+    }
+  };
 
   // グループごとにカードを作る
   var groups = [];

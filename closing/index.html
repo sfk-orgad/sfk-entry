@@ -65,7 +65,9 @@
 -->
 <div id="gate" style="min-height:70vh;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;">
   <div><div class="gspin" id="gspin"></div><div id="gmsg" style="font-size:18px;line-height:1.7;white-space:pre-wrap;">準備しています…</div>
-  <div id="gact" style="margin-top:18px;"></div><div id="gver" style="font-size:11px;color:#9AA3AD;margin-top:16px;"></div></div>
+  <div id="gact" style="margin-top:18px;"></div>
+  <div id="gdetail" style="font-size:12px;color:#5F6670;margin-top:14px;word-break:break-all;text-align:left;"></div>
+  <div id="gver" style="font-size:11px;color:#9AA3AD;margin-top:16px;"></div></div>
 </div>
 <div id="app" style="display:none">
 
@@ -106,7 +108,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-10-07d';
+var PAGE_VERSION = '2026-10-07e';
 var PORTAL_URL = '../';            // ポータル(同じサイト)
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -127,9 +129,18 @@ var API = S && S.apis ? S.apis.closing : '';
 function api(action, extra, retry) {
   var body = JSON.stringify(Object.assign({ app: 'closing', action: action, token: S.token, store: STORE }, extra || {}));
   function once() {
+    var status = 0;
     return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
-      .then(function (r) { return r.text(); })
-      .then(function (t) { return JSON.parse(t); });
+      .then(function (r) { status = r.status; return r.text(); }, function (e) {
+        var err = new Error('通信できませんでした(' + (e && e.message ? e.message : e) + ')'); err.stage = 'fetch'; throw err;
+      })
+      .then(function (t) {
+        try { return JSON.parse(t); } catch (e) {
+          // JSONでない＝BotのURL違い・公開範囲・古いデプロイなど。返ってきた文の一部を見せる
+          var err = new Error('正しい返事ではありませんでした(' + status + '): ' + String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 160));
+          err.stage = 'response'; throw err;
+        }
+      });
   }
   return once().catch(function (e) {
     if (!retry) throw e;
@@ -154,7 +165,9 @@ if (!S || !S.token || S.exp < Date.now()) {
     g('app').style.display = 'block';
     startForm(D);
   }).catch(function (e) {
-    gate('通信に失敗しました。\n電波の良いところで開き直してください。', true);
+    gate(e && e.stage === 'response' ? 'データを受け取れませんでした。\n管理者に連絡してください。' : '通信に失敗しました。\n電波の良いところで開き直してください。', true);
+    // 原因を調べるための表示(秘密は含まない。通行証は出さない)
+    g('gdetail').textContent = '[' + (e && e.stage || '?') + '] ' + (e && e.message ? e.message : e) + ' ／ API: ' + String(API).replace(/\/macros\/s\/([^/]{6})[^/]*/, '/macros/s/$1…');
   });
 }
 

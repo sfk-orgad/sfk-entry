@@ -108,7 +108,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-10-07f';
+var PAGE_VERSION = '2026-10-07g';
 var PORTAL_URL = '../';            // ポータル(同じサイト)
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -210,7 +210,8 @@ function startForm(D) {
   }
   // サーバー側でかかった時間(重さの原因を調べるため)
   $('timing').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + (D.clientMs / 1000).toFixed(1) + '秒(' + (D.how || '') + ')' +
-    (D.timing ? '(サーバー：' + Object.keys(D.timing).map(function (k) { return k + ' ' + (D.timing[k] / 1000).toFixed(1) + '秒'; }).join('・') + ')' : '');
+    (D.timing && D.how === '取得' ? '(サーバー：' + Object.keys(D.timing).map(function (k) { return k + ' ' + (D.timing[k] / 1000).toFixed(1); }).join('・') +
+      '・通信と起動 ' + Math.max(0, (D.clientMs - Object.keys(D.timing).reduce(function (a, k) { return a + D.timing[k]; }, 0)) / 1000).toFixed(1) + ')' : '');
   $('date').innerHTML = D.dates.map(function (d) { return '<option value="' + esc(d.ymd) + '">' + esc(d.label) + '</option>'; }).join('');
 
   // 選んだ営業日の情報（料金区分・祝日・トピック・提出済みか）

@@ -81,7 +81,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-07d';
+const PAGE_VERSION = '2026-10-07e';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -274,6 +274,7 @@ function renderPortal(res, at) {
       sessionStorage.setItem(SAVE_KEY, JSON.stringify({ at: FETCHED_AT, res: show }));
     } catch (e) {}
   }
+  prefetchClosing(res.items); // 締めチェックのデータを先に読んでおく(表示し終わってから。表示の速さには影響しない)
   warmTools(res.items);
   $('gate').style.display = 'none';
   $('portal').style.display = 'block';
@@ -305,10 +306,31 @@ function renderPortal(res, at) {
   ).join('') : '<div class="empty">使えるツールはまだありません。</div>';
 }
 
+// 締めチェックのデータの先読み：開ける全店舗の分を1回で受け取り、ブラウザの中に置く(3分間使える)
+// 締めチェックの画面は、これがあれば待たずに表示し、裏で最新を確かめる
+const PREFETCH_KEY = 'prefetch_closing';
+let PREFETCH_API = '';
+function prefetchClosing(items) {
+  const it = items.find(x => x.tool === 'closing' && x.kind !== 'link' && x.api);
+  const sess = readJson(SESSION_KEY);
+  if (!it || !sess || !sess.token) return;
+  PREFETCH_API = String(it.api).split('?')[0];
+  const old = readJson(PREFETCH_KEY);
+  if (old && Date.now() - old.at < 60 * 1000) return; // 1分以内に読んだばかりなら読み直さない
+  fetch(it.api, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ app: 'closing', action: 'closing.prefetch', token: sess.token }),
+  }).then(r => r.text()).then(t => {
+    const res = JSON.parse(t);
+    if (res && res.ok) sessionStorage.setItem(PREFETCH_KEY, JSON.stringify({ at: Date.now(), inits: res.inits }));
+  }).catch(() => {}); // 先読みの失敗は無視(締めチェックの画面が自分で取りに行く)
+}
+
 // 裏でツールのGAS(データの入口)を起こしておく：?warm=1 で軽く呼ぶだけ(何もしない)
-// ツールの画面を開いたときに、GASの起動を待たずに済むようにするため
+// ツールの画面を開いたときに、GASの起動を待たずに済むようにするため(先読みで呼ぶGASは除く)
 function warmTools(items) {
-  const bases = [];
+  const bases = PREFETCH_API ? [PREFETCH_API] : [];
   items.filter(it => it.kind !== 'link' && it.api).forEach(it => {
     const base = String(it.api).split('?')[0];
     if (bases.indexOf(base) === -1) { bases.push(base); fetch(base + '?warm=1', { mode: 'no-cors', cache: 'no-store' }).catch(() => {}); }

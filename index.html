@@ -85,7 +85,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-08a';
+const PAGE_VERSION = '2026-10-08b';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -162,9 +162,13 @@ const ERRORS = {
 
 // ===== 本体 =====
 async function start() {
-  // 10分以内に表示した内容があれば、それを使う(ツールから戻ったとき・開き直したときに速く出す)
+  // 10分以内に表示した内容があれば、それですぐ表示し、裏で最新を確かめる(メンテナンスの切り替えなどを取りこぼさない)
   const keep = !REQUEST.tool && saved();
-  if (keep) { TIMES.push('前回の表示を使用'); showVer(); renderPortal(keep.res, keep.at); return; }
+  if (keep) {
+    TIMES.push('前回の表示を使用'); showVer(); renderPortal(keep.res, keep.at);
+    revalidate(keep.res);
+    return;
+  }
   if (typeof woff === 'undefined') { show('ログインの部品を読み込めませんでした。\n通信状態を確認して開き直してください。', true); return; }
   try {
     await woff.init({ woffId: WOFF_ID });
@@ -267,6 +271,30 @@ async function callAuth() {
     showVer();
   }
   return res;
+}
+
+// 裏で最新を確かめ、変わっていれば表示を差し替える(画面に失敗のメッセージは出さない)
+async function revalidate(old) {
+  if (!(await ensureWoff())) return;
+  let res;
+  try {
+    const accessToken = woff.getAccessToken();
+    const profile = await woff.getProfile();
+    const r = await fetch(AUTH_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ accessToken: accessToken, userId: profile.userId, tool: '', params: {} }) });
+    res = JSON.parse(await r.text());
+  } catch (e) { return; }
+  if (!res || !res.ok) return;
+  if (res.maintenance && res.maintenance.all && !res.maintenance.tester) {
+    // メンテナンス中に切り替わっていた
+    try { sessionStorage.removeItem(SAVE_KEY); } catch (e) {}
+    $('portal').style.display = 'none'; $('gate').style.display = 'flex';
+    show('ただいまメンテナンス中です。' + (res.maintenance.message ? '\n' + res.maintenance.message : ''), true);
+    return;
+  }
+  const pick = x => JSON.stringify({ items: (x.items || []).map(i => [i.key, i.maintenance, i.label]), today: x.today, m: x.maintenance });
+  renderPortal(res); // 通行証も新しくなる
+  if (pick(res) !== pick(old)) { TIMES.push('最新に更新'); showVer(); }
 }
 
 // ===== ポータルの表示 =====

@@ -34,6 +34,10 @@
   .hol { font-size: 13px; color: var(--sun); margin-left: 6px; font-weight: 400; }
   .rng { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
   .rng select { flex: 1; min-width: 0; }
+  .rng select.st { flex: 0 0 auto; max-width: 34%; font-size: 15px; padding: 10px 4px; }
+  .brow select { flex: 1; min-width: 0; }
+  .brow select.st { flex: 0 0 auto; max-width: 34%; font-size: 15px; }
+  .tagst { font-size: 12px; color: var(--muted); }
   .x { font-size: 18px; width: 40px; height: 40px; border: 1px solid #C9CFD6; border-radius: 10px; background: #fff; cursor: pointer; }
   .mini { font-size: 14px; padding: 6px 10px; border: 1px solid #C9CFD6; border-radius: 8px; background: #fff; cursor: pointer; font-family: inherit; color: var(--ink); margin-left: 4px; }
   .empty { font-size: 14px; color: var(--muted); }
@@ -73,30 +77,22 @@
 <div id="timing" style="text-align:center;font-size:11px;color:#9AA3AD;margin:6px 0 0;"></div>
 
 <div class="wrap" id="main">
-  <div class="card" id="storeCard" style="display:none">
-    <div class="card-title">店舗</div>
-    <select id="store"></select>
-  </div>
-
   <div class="card">
     <div class="card-title">まとめて入れる</div>
-    <div class="note">曜日を選んで時間を入れると、その曜日の日にまとめて入ります(すでに入っている日は上書き)。</div>
+    <div class="note">曜日を選んで時間を入れると、その曜日の日にまとめて入ります(すでに入っている日は上書き)。分断勤務なら2つ目の時間帯も入れてください。</div>
     <div class="chips" id="wchips"></div>
-    <div class="row"><select id="bs"></select>〜<select id="be"></select>
-      <button class="btn solid" id="bulk">まとめて入れる</button></div>
-    <div class="row" style="margin-top:10px"><button class="btn" id="clearAll">全部消す</button></div>
+    <div class="row brow" data-b="0"></div>
+    <div class="row brow" data-b="1" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:10px"><button class="btn solid" id="bulk">まとめて入れる</button><button class="btn" id="clearAll">全部消す</button></div>
   </div>
-
-  <div class="note" style="margin:14px 4px 0">出勤できない日は、空欄のままで大丈夫です。1日に時間帯は<span id="maxr"></span>つまで入れられます。</div>
+  <div class="note" style="margin:14px 4px 0">出勤できない日は、空欄のままで大丈夫です。1日に時間帯は<span id="maxr"></span>つまで入れられます(例：9:00〜12:00と15:00〜18:00の分断勤務)。<span id="storeHint"></span></div>
   <div id="days"></div>
-
   <div class="card">
     <div class="card-title">備考</div>
     <textarea id="note" placeholder="例：テスト期間なので土日中心で"></textarea>
   </div>
   <div id="error"></div>
 </div>
-
 <div class="bar" id="bar"><div class="inner">
   <div class="progress" id="progress"></div>
   <button class="submit" id="submitBtn">提出する</button>
@@ -114,7 +110,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-10-09a';
+var PAGE_VERSION = '2026-10-10a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -210,7 +206,7 @@ function startForm(D) {
   $('title').textContent = D.month.label + 'のシフト希望';
   if (D.name) $('me').textContent = D.name + ' さん';
   $('timing').innerHTML = esc('ver ' + PAGE_VERSION + '・開くまで ' + (D.clientMs / 1000).toFixed(1) + '秒(' + D.how + ')') + '<span id="wakeState"></span>';
-  if (D.portalUrl) { // ポータルに戻る(同じサイトの中の移動)
+  if (D.portalUrl) {
     $('back').href = D.portalUrl; $('back').style.visibility = 'visible';
     $('back2').href = D.portalUrl; $('backWrap').style.display = 'block';
   }
@@ -223,100 +219,57 @@ function startForm(D) {
     return;
   }
 
-  var cur = { store: '', days: {}, note: '' };
+  // ===== 入力の持ち方：days = { 日: [[開始, 終了, 店舗コード], …] }(時間帯ごとに店舗を持つ) =====
+  var MULTI = D.stores.length > 1;           // 2店舗以上なら、時間帯ごとに店舗を選ぶ
+  var cur = { days: {}, note: '' };
   var dirty = false;
-  function storeOf(code) { return D.stores.filter(function (s) { return s.code === code; })[0]; }
-  function times() { return storeOf(cur.store).times; }
-  function opts(sel, ph) {
-    return '<option value="">' + ph + '</option>' + times().map(function (t) { return '<option' + (t === sel ? ' selected' : '') + '>' + t + '</option>'; }).join('');
+  var lastStore = D.stores[0].code;          // 新しい時間帯の店舗の初期値(最後に選んだ店舗)
+  if (MULTI) $('storeHint').textContent = '時間帯ごとに、どちらの店舗で働けるかを選んでください。';
+  function storeOf(code) { return D.stores.filter(function (s) { return s.code === code; })[0] || D.stores[0]; }
+  function opts(list, sel, ph) {
+    return '<option value="">' + ph + '</option>' + list.map(function (t) { return '<option' + (t === sel ? ' selected' : '') + '>' + t + '</option>'; }).join('');
+  }
+  function storeOpts(sel) {
+    return D.stores.map(function (s) { return '<option value="' + esc(s.code) + '"' + (s.code === sel ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('');
+  }
+  // 時間帯の部品(店舗・開始・終了)
+  function rangeHtml(attrs, r) {
+    var st = r[2] || lastStore;
+    var times = storeOf(st).times;
+    return (MULTI ? '<select class="st" ' + attrs + ' data-k="2">' + storeOpts(st) + '</select>' : '') +
+      '<select ' + attrs + ' data-k="0">' + opts(times, r[0], '開始') + '</select>〜' +
+      '<select ' + attrs + ' data-k="1">' + opts(times, r[1], '終了') + '</select>';
   }
 
-  // 店舗
-  $('store').innerHTML = D.stores.map(function (s) { return '<option value="' + esc(s.code) + '">' + esc(s.name) + '</option>'; }).join('');
-  if (D.stores.length > 1) $('storeCard').style.display = '';
-  $('store').addEventListener('change', function () {
-    saveDraft(); // 入力中の内容は店舗ごとの下書きに残るので、確認せずに切り替える
-    load($('store').value);
-  });
-
-  function load(code) {
-    cur.store = code;
-    var ex = D.existing[code];
-    cur.days = ex ? clone(ex.days) : {};
-    cur.note = ex ? ex.note : '';
-    dirty = false;
-    var note = $('draftNote');
-    if (note) note.parentNode.removeChild(note);
-    // 入力途中の下書きがあれば、そちらを戻す
-    var dr = readDraft(code);
-    if (dr) {
-      cur.days = clone(dr.days);
-      cur.note = dr.note || '';
-      dirty = true;
-      var t = new Date(dr.at);
-      $('main').insertAdjacentHTML('afterbegin', '<div class="card" id="draftNote" style="background:#FFF8E6;border-color:#F2D58A;font-size:15px;">' +
-        '入力途中の内容を戻しました(' + (t.getMonth() + 1) + '/' + t.getDate() + ' ' + t.getHours() + ':' + ('0' + t.getMinutes()).slice(-2) + 'に保存)。' +
-        '<br><a href="#" id="draftReset">' + (ex ? '提出済みの内容に戻す' : '最初から入力する') + '</a></div>');
-      $('draftReset').addEventListener('click', function (e) {
-        e.preventDefault();
-        if (!window.confirm('入力途中の内容を消しますか？')) return;
-        clearDraft(code);
-        load(code);
-      });
-    }
-    $('note').value = cur.note;
-    $('bs').innerHTML = opts('', '開始');
-    $('be').innerHTML = opts('', '終了');
-    render();
-  }
-
-  // ---- 入力途中の内容の自動保存(店舗×月ごと。端末の中に保存。通行証は含めない。提出したら消す。7日より古いものは掃除) ----
-  var DRAFT_PREFIX = 'draft_shift_';
-  var DRAFT_MAX_MS = 7 * 24 * 60 * 60 * 1000;
-  function draftKey(code) { return DRAFT_PREFIX + (code || cur.store) + '_' + D.month.key; }
-  function readDraft(code) {
-    try {
-      var x = JSON.parse(localStorage.getItem(draftKey(code)) || 'null');
-      return x && x.days && Date.now() - x.at < DRAFT_MAX_MS ? x : null;
-    } catch (e) { return null; }
-  }
-  function saveDraft() {
-    if (!cur.store || !dirty) return;
-    try {
-      cur.note = $('note').value;
-      var json = JSON.stringify({ days: cur.days, note: cur.note });
-      if (json === saveDraft.last) return;
-      saveDraft.last = json;
-      localStorage.setItem(draftKey(), JSON.stringify({ at: Date.now(), days: cur.days, note: cur.note }));
-    } catch (e) {}
-  }
-  function clearDraft(code) { try { localStorage.removeItem(draftKey(code)); saveDraft.last = ''; } catch (e) {} }
-  (function cleanOldDrafts() {
-    try {
-      for (var i = localStorage.length - 1; i >= 0; i--) {
-        var k = localStorage.key(i);
-        if (!k || k.indexOf(DRAFT_PREFIX) !== 0) continue;
-        var x = JSON.parse(localStorage.getItem(k) || 'null');
-        if (!x || Date.now() - x.at > DRAFT_MAX_MS) localStorage.removeItem(k);
-      }
-    } catch (e) {}
-  })();
-
-  // まとめて入れる(曜日＋祝日)
+  // ===== まとめて入れる(曜日＋祝日、時間帯2つまで) =====
   var wsel = {};
+  var bulkR = [['', '', lastStore], ['', '', lastStore]];
   $('wchips').innerHTML = W.split('').map(function (w, i) { return '<button type="button" class="chip" data-w="' + i + '">' + w + '</button>'; }).join('') +
     '<button type="button" class="chip" data-w="hol">祝</button>';
   $('wchips').addEventListener('click', function (e) {
     var b = e.target.closest('.chip'); if (!b) return;
     var k = b.getAttribute('data-w'); wsel[k] = !wsel[k]; b.classList.toggle('on', wsel[k]);
   });
+  function renderBulk() {
+    Array.prototype.forEach.call(document.querySelectorAll('.brow'), function (row) {
+      var i = Number(row.getAttribute('data-b'));
+      row.innerHTML = '<span class="tagst">' + (i + 1) + '</span>' + rangeHtml('data-b="' + i + '"', bulkR[i]);
+    });
+  }
+  document.querySelector('#main .card').addEventListener('change', function (e) {
+    var s = e.target; if (s.tagName !== 'SELECT' || s.getAttribute('data-b') == null) return;
+    var i = Number(s.getAttribute('data-b')), k = Number(s.getAttribute('data-k'));
+    bulkR[i][k] = s.value;
+    if (k === 2) { var t = storeOf(s.value).times; if (t.indexOf(bulkR[i][0]) === -1) bulkR[i][0] = ''; if (t.indexOf(bulkR[i][1]) === -1) bulkR[i][1] = ''; renderBulk(); }
+  });
   $('bulk').addEventListener('click', function () {
-    var s = $('bs').value, en = $('be').value;
-    if (!s || !en) { alert('開始と終了を選んでください'); return; }
-    if (mins(s) >= mins(en)) { alert('開始は終了より前にしてください'); return; }
+    var rs = bulkR.filter(function (r) { return r[0] || r[1]; }).map(function (r) { return [r[0], r[1], MULTI ? r[2] : D.stores[0].code]; });
+    if (!rs.length) { alert('時間を選んでください'); return; }
+    var msg = rangeProblem(rs);
+    if (msg) { alert(msg); return; }
     var hit = D.days.filter(function (x) { return (x.hol && wsel.hol) || wsel[String(x.w)]; });
     if (!hit.length) { alert('曜日を選んでください'); return; }
-    hit.forEach(function (x) { cur.days[x.d] = [[s, en]]; });
+    hit.forEach(function (x) { cur.days[x.d] = clone(rs); });
     dirty = true; render();
   });
   $('clearAll').addEventListener('click', function () {
@@ -324,7 +277,7 @@ function startForm(D) {
     cur.days = {}; dirty = true; render();
   });
 
-  // 日ごとの入力
+  // ===== 日ごとの入力 =====
   function render() {
     $('days').innerHTML = D.days.map(function (x) {
       var rs = cur.days[x.d] || [];
@@ -335,8 +288,7 @@ function startForm(D) {
         (rs.length < D.maxRanges ? '<button type="button" class="mini" data-act="add" data-d="' + x.d + '">＋時間帯</button>' : '') + '</div></div>';
       if (!rs.length) h += '<div class="empty">出勤できない(空欄)</div>';
       rs.forEach(function (r, i) {
-        h += '<div class="rng"><select data-d="' + x.d + '" data-i="' + i + '" data-k="0">' + opts(r[0], '開始') + '</select>〜' +
-          '<select data-d="' + x.d + '" data-i="' + i + '" data-k="1">' + opts(r[1], '終了') + '</select>' +
+        h += '<div class="rng">' + rangeHtml('data-d="' + x.d + '" data-i="' + i + '"', r) +
           '<button type="button" class="x" data-act="del" data-d="' + x.d + '" data-i="' + i + '">×</button></div>';
       });
       return h + '</div>';
@@ -346,12 +298,22 @@ function startForm(D) {
   $('days').addEventListener('change', function (e) {
     var s = e.target; if (s.tagName !== 'SELECT') return;
     var d = s.getAttribute('data-d'), i = Number(s.getAttribute('data-i')), k = Number(s.getAttribute('data-k'));
-    cur.days[d][i][k] = s.value; dirty = true; markOk(d); progress();
+    var r = cur.days[d][i];
+    r[k] = s.value;
+    if (k === 2) {
+      // 店舗を変えたら、その店舗で選べない時刻は消して、選べる時刻を入れ直す
+      lastStore = s.value;
+      var t = storeOf(s.value).times;
+      if (t.indexOf(r[0]) === -1) r[0] = '';
+      if (t.indexOf(r[1]) === -1) r[1] = '';
+      dirty = true; render(); return;
+    }
+    dirty = true; markOk(d); progress();
   });
   $('days').addEventListener('click', function (e) {
     var b = e.target.closest('button'); if (!b) return;
     var act = b.getAttribute('data-act'), d = Number(b.getAttribute('data-d'));
-    if (act === 'add') { (cur.days[d] = cur.days[d] || []).push(['', '']); }
+    if (act === 'add') { (cur.days[d] = cur.days[d] || []).push(['', '', MULTI ? lastStore : D.stores[0].code]); }
     if (act === 'del') { cur.days[d].splice(Number(b.getAttribute('data-i')), 1); if (!cur.days[d].length) delete cur.days[d]; }
     if (act === 'copy') { if (cur.days[d - 1]) cur.days[d] = clone(cur.days[d - 1]); else delete cur.days[d]; }
     dirty = true; render();
@@ -363,22 +325,107 @@ function startForm(D) {
     $('progress').textContent = '入力した日：' + n + '日 / ' + D.days.length + '日';
   }
 
-  // 入力のチェック(サーバーでも同じチェックをする)
+  // 時間帯の確認(サーバーでも同じ確認をする)。店舗が違っても、同じ日の時間帯は重ねられない
+  function rangeProblem(rs) {
+    var msg = '';
+    rs.forEach(function (r) {
+      if (!r[0] || !r[1]) msg = msg || '開始と終了の両方を選んでください';
+      else if (mins(r[0]) >= mins(r[1])) msg = msg || '開始は終了より前にしてください';
+    });
+    if (msg) return msg;
+    var sorted = rs.slice().sort(function (a, b) { return mins(a[0]) - mins(b[0]); });
+    for (var i = 1; i < sorted.length; i++) if (mins(sorted[i][0]) < mins(sorted[i - 1][1])) return '時間帯が重なっています';
+    return '';
+  }
   function check() {
     var bad = [];
     Object.keys(cur.days).forEach(function (d) {
       var rs = (cur.days[d] || []).filter(function (r) { return r[0] || r[1]; });
-      var msg = '';
-      rs.forEach(function (r) { if (!r[0] || !r[1]) msg = '開始と終了の両方を選んでください'; else if (mins(r[0]) >= mins(r[1])) msg = '開始は終了より前にしてください'; });
-      if (!msg) {
-        var s = rs.slice().sort(function (a, b) { return mins(a[0]) - mins(b[0]); });
-        for (var i = 1; i < s.length; i++) if (mins(s[i][0]) < mins(s[i - 1][1])) msg = '時間帯が重なっています';
-      }
+      var msg = rangeProblem(rs);
       if (msg) bad.push({ d: d, msg: msg });
     });
     return bad;
   }
+  // 空の時間帯(開始も終了も未選択)は送らない
+  function cleaned() {
+    var out = {};
+    Object.keys(cur.days).forEach(function (d) {
+      var rs = (cur.days[d] || []).filter(function (r) { return r[0] || r[1]; }).map(function (r) { return [r[0], r[1], MULTI ? r[2] : D.stores[0].code]; });
+      if (rs.length) out[d] = rs;
+    });
+    return out;
+  }
 
+  // ===== 読み込み(提出済みの内容 → 下書きがあれば下書き) =====
+  function load() {
+    var ex = D.existing;
+    cur.days = ex ? clone(ex.days) : {};
+    cur.note = ex ? ex.note : '';
+    dirty = false;
+    var note = $('draftNote');
+    if (note) note.parentNode.removeChild(note);
+    var dr = readDraft();
+    if (dr) {
+      cur.days = clone(dr.days);
+      cur.note = dr.note || '';
+      dirty = true;
+      var t = new Date(dr.at);
+      $('main').insertAdjacentHTML('afterbegin', '<div class="card" id="draftNote" style="background:#FFF8E6;border-color:#F2D58A;font-size:15px;">' +
+        '入力途中の内容を戻しました(' + (t.getMonth() + 1) + '/' + t.getDate() + ' ' + t.getHours() + ':' + ('0' + t.getMinutes()).slice(-2) + 'に保存)。' +
+        '<br><a href="#" id="draftReset">' + (ex ? '提出済みの内容に戻す' : '最初から入力する') + '</a></div>');
+      $('draftReset').addEventListener('click', function (e) {
+        e.preventDefault();
+        if (!window.confirm('入力途中の内容を消しますか？')) return;
+        clearDraft();
+        load();
+      });
+    }
+    // 最後に使われた店舗を、新しい時間帯の初期値にする
+    Object.keys(cur.days).forEach(function (d) { (cur.days[d] || []).forEach(function (r) { if (r[2]) lastStore = r[2]; }); });
+    $('note').value = cur.note;
+    renderBulk();
+    render();
+  }
+
+  // ===== 入力途中の内容の自動保存(月ごと。端末の中に保存。通行証は含めない。提出したら消す。7日より古いものは掃除) =====
+  var DRAFT_PREFIX = 'draft_shift_';
+  var DRAFT_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+  function draftKey() { return DRAFT_PREFIX + D.month.key; }
+  function readDraft() {
+    try {
+      var x = JSON.parse(localStorage.getItem(draftKey()) || 'null');
+      return x && x.days && Date.now() - x.at < DRAFT_MAX_MS ? x : null;
+    } catch (e) { return null; }
+  }
+  var lastSaved = '';
+  function saveDraft() {
+    if (!dirty) return;
+    try {
+      cur.note = $('note').value;
+      var json = JSON.stringify({ days: cur.days, note: cur.note });
+      if (json === lastSaved) return;
+      lastSaved = json;
+      localStorage.setItem(draftKey(), JSON.stringify({ at: Date.now(), days: cur.days, note: cur.note }));
+    } catch (e) {}
+  }
+  function clearDraft() { try { localStorage.removeItem(draftKey()); lastSaved = ''; } catch (e) {} }
+  (function cleanOldDrafts() {
+    try {
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var k = localStorage.key(i);
+        if (!k || k.indexOf(DRAFT_PREFIX) !== 0) continue;
+        var x = JSON.parse(localStorage.getItem(k) || 'null');
+        if (!x || Date.now() - x.at > DRAFT_MAX_MS) localStorage.removeItem(k);
+      }
+    } catch (e) {}
+  })();
+  $('main').addEventListener('click', function () { setTimeout(saveDraft, 0); });
+  $('main').addEventListener('change', function () { setTimeout(saveDraft, 0); });
+  $('main').addEventListener('input', function () { setTimeout(saveDraft, 0); });
+  setInterval(saveDraft, 3000);
+  window.addEventListener('pagehide', saveDraft);
+
+  // ===== 提出 =====
   $('submitBtn').addEventListener('click', function () {
     $('error').textContent = '';
     var bad = check();
@@ -390,16 +437,17 @@ function startForm(D) {
     }
     $('overlay').style.display = 'flex'; $('submitBtn').disabled = true;
     // 提出は二重送信を避けるため、自動のやり直しはしない
-    api('shift.submit', { store: cur.store, month: D.month.key, days: cur.days, note: $('note').value }, false)
+    api('shift.submit', { month: D.month.key, days: cleaned(), note: $('note').value }, false)
       .then(function (res) {
         if (!res.ok) throw new Error(res.error === 'AUTH' ? 'AUTH:' + (res.reason || '') : res.error);
         $('overlay').style.display = 'none'; $('submitBtn').disabled = false;
-        D.existing[cur.store] = { days: res.days, note: res.note, updatedAt: res.updatedAt };
-        clearDraft(cur.store); // 提出できたので下書きを消す
+        D.existing = { days: res.days, note: res.note, updatedAt: res.updatedAt };
+        clearDraft();
         dirty = false;
         var dn = $('draftNote'); if (dn) dn.parentNode.removeChild(dn);
-        $('doneMsg').textContent = storeOf(cur.store).name + '・' + D.month.label + '分を受け付けました(' + res.updatedAt + ')。締め切りまでは何度でも修正できます。';
+        $('doneMsg').textContent = D.month.label + '分を受け付けました(' + res.updatedAt + ')。締め切りまでは何度でも修正できます。';
         $('main').style.display = 'none'; $('bar').style.display = 'none'; $('done').style.display = 'block'; window.scrollTo(0, 0);
+        if (wakeLock) { try { wakeLock.release(); } catch (x) {} }
       })
       .catch(function (e) {
         $('overlay').style.display = 'none'; $('submitBtn').disabled = false;
@@ -411,16 +459,10 @@ function startForm(D) {
   });
   $('again').addEventListener('click', function () {
     $('done').style.display = 'none'; $('main').style.display = ''; $('bar').style.display = '';
-    load(cur.store);
+    load();
   });
-  // 入力のたび・3秒おき・画面を離れるときに下書きを保存する(画面オフでページが閉じても続きから入力できる)
-  $('main').addEventListener('click', function () { setTimeout(saveDraft, 0); });
-  $('main').addEventListener('change', function () { setTimeout(saveDraft, 0); });
-  $('main').addEventListener('input', function () { setTimeout(saveDraft, 0); });
-  setInterval(saveDraft, 3000);
-  window.addEventListener('pagehide', saveDraft);
 
-  // ---- フォームを開いている間は、画面が自動で消えないようにする(対応している端末だけ) ----
+  // ===== フォームを開いている間は、画面が自動で消えないようにする(対応している端末だけ) =====
   var wakeLock = null;
   function wakeStatus(t) { var el = $('wakeState'); if (el) el.textContent = t; }
   function requestWake() {
@@ -444,10 +486,10 @@ function startForm(D) {
       return;
     }
     D.existing = N.existing;
-    if (!dirty) load(cur.store);
+    if (!dirty) load();
   };
 
-  load(D.stores[0].code);
+  load();
 }
 </script>
 </body>

@@ -65,6 +65,22 @@
   .warn { font-size: 11px; color: #B4581F; }
   #editor { display: none; position: fixed; z-index: 70; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.15); padding: 12px 14px; }
   #editor .row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+  .panel { background: #fff; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; overflow-x: auto; }
+  .panel h3 { margin: 0; padding: 10px 14px; font-size: 15px; border-bottom: 1px solid var(--line); }
+  table.pn { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .pn td, .pn th { padding: 6px 10px; border-bottom: 1px solid #EEF1F4; vertical-align: top; text-align: left; }
+  .pn th { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .pn .nm { font-weight: 700; white-space: nowrap; }
+  .pn .rq { color: var(--muted); min-width: 220px; }
+  .ln { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0; }
+  .ln select { font-size: 13px; padding: 4px 6px; }
+  .ln.req { color: var(--muted); }
+  .ln.bad select { border-color: var(--err); background: #FDECEA; }
+  .ln .tag2 { font-size: 11px; border-radius: 999px; padding: 1px 8px; }
+  .t-out { background: #FCE9D9; color: #B4581F; }
+  .t-no { background: #EEF1F4; color: var(--muted); }
+  .t-bad { background: #FDECEA; color: var(--err); }
+  .mini2 { font-size: 12px; padding: 3px 8px; border: 1px solid #B9C0C8; border-radius: 6px; background: #fff; cursor: pointer; }
   .legend span { display: inline-block; width: 14px; height: 12px; vertical-align: middle; margin: 0 4px 0 10px; border-radius: 2px; }
   .tl tr.sum td { background: #F5F6F8; font-weight: 700; }
   .tl tr.sum td.s { text-align: center; font-size: 10px; color: var(--muted); }
@@ -102,8 +118,9 @@
     <div class="bar2">
       <button class="btn" id="fillAll">全員を希望どおりに確定</button>
       <button class="btn" id="clearDay">この日の確定を消す</button>
-      <button class="btn solid" id="saveDay">この日を保存</button>
+      <button class="btn solid" id="saveDay">今すぐ保存</button>
       <span id="saveState">保存済み</span>
+      <span class="muted">変更は2秒後に自動で保存されます</span>
       <span class="muted legend"><span style="background:#FFF6B3;border:1px solid #E5D97A"></span>希望<span style="background:#2F6FBF"></span>確定<span style="background:#E07A1F"></span>確定(希望の外)</span>
     </div>
     <div class="dayhead">
@@ -112,6 +129,7 @@
       <button class="btn" id="next">次の日 ›</button>
       <span class="muted" id="slotInfo"></span>
     </div>
+    <div class="panel"><h3>この日の調整(希望を採用するものにチェック → 時間・店舗を選び直す)</h3><div id="panelBody"></div></div>
     <div class="grid-wrap"><table class="tl" id="grid"></table></div>
     <div class="side">
       <div class="box"><h3>この店舗の未提出(この月)</h3><div id="unsub" class="muted"></div></div>
@@ -128,7 +146,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-10-12b';
+var PAGE_VERSION = '2026-10-12c';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -310,6 +328,7 @@ function renderDay() {
   sm.crit.forEach(function (x) { h += row(esc(x.c.name), (x.c.min ? '最低' + x.c.min + '人(確定)' : ''), x.n, function (n) { return x.c.min && n < x.c.min; }); });
   g('grid').innerHTML = h + '</tbody>';
   g('prev').disabled = DAY <= 1; g('next').disabled = DAY >= B.days.length;
+  renderPanel();
 }
 
 function renderUnsub() {
@@ -317,7 +336,140 @@ function renderUnsub() {
   g('unsub').textContent = list.length ? list.join('、') : 'なし';
 }
 
-// ===== 確定シフトの編集 =====
+// ===== この日の調整(人ごと：希望を採用するか・時間・店舗を選び直す) =====
+function timesOf(code) { var st = storeOf(code), o = []; for (var t = st.start; t <= st.end; t += B.slot) o.push(hm(t)); return o; }
+function overlapHM(a1, a2, b1, b2) { return mins(a1) < mins(b2) && mins(b1) < mins(a2); }
+// その日の、ある人の行：確定(全店舗) ＋ まだ採用していない希望(どの確定とも重ならない希望)
+function personLines(uid) {
+  var confs = [];
+  B.stores.forEach(function (st) { confOf(st.code, DAY).forEach(function (c, i) { if (c[0] === uid) confs.push({ kind: 'conf', store: st.code, i: i, s: c[1], e: c[2] }); }); });
+  var reqs = reqOf(DAY).filter(function (r) { return r[4] === uid; })
+    .filter(function (r) { return !confs.some(function (x) { return overlapHM(x.s, x.e, r[2], r[3]); }); })
+    .map(function (r) { return { kind: 'req', store: r[1], s: r[2], e: r[3] }; });
+  return confs.concat(reqs).sort(function (a, b) { return mins(a.s) - mins(b.s); });
+}
+// 人ごとの問題：同じ人の確定が(店舗をまたいでも)重なる ／ 開始≧終了
+function badLines() {
+  var bad = {};
+  Object.keys(B.staff).concat(peopleOfDay()).forEach(function (uid) {
+    var cs = [];
+    B.stores.forEach(function (st) { confOf(st.code, DAY).forEach(function (c, i) { if (c[0] === uid) cs.push({ k: st.code + ':' + i, s: c[1], e: c[2] }); }); });
+    cs.forEach(function (a) {
+      if (mins(a.s) >= mins(a.e)) bad[a.k] = '開始が終了より後です';
+      cs.forEach(function (b) { if (a !== b && overlapHM(a.s, a.e, b.s, b.e)) bad[a.k] = '時間帯が重なっています'; });
+    });
+  });
+  return bad;
+}
+function peopleOfDay() {
+  var u = [];
+  reqOf(DAY).forEach(function (r) { if (u.indexOf(r[4]) === -1) u.push(r[4]); });
+  B.stores.forEach(function (st) { confOf(st.code, DAY).forEach(function (c) { if (u.indexOf(c[0]) === -1) u.push(c[0]); }); });
+  if (g('showAll').checked) Object.keys(B.staff).forEach(function (x) {
+    var p = B.staff[x]; if (u.indexOf(x) === -1 && (p.stores.indexOf('*') !== -1 || p.stores.indexOf(STORE) !== -1)) u.push(x);
+  });
+  return u;
+}
+function selHtml(list, v, f, attrs) {
+  return '<select data-f="' + f + '" ' + attrs + '>' + list.map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select>';
+}
+function storeSel(v, attrs) {
+  return '<select data-f="st" ' + attrs + '>' + B.stores.map(function (s) { return '<option value="' + esc(s.code) + '"' + (s.code === v ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select>';
+}
+function renderPanel() {
+  var bad = badLines();
+  var all = reqOf(DAY);
+  var first = function (u) { var l = personLines(u); return l.length ? mins(l[0].s) : 99999; };
+  var uids = peopleOfDay().sort(function (a, b) { return first(a) - first(b); });
+  if (!uids.length) { g('panelBody').innerHTML = '<div class="muted" style="padding:10px 14px;">この日の希望はありません(「希望のない人も表示」で全員を出せます)</div>'; return; }
+  var h = '<table class="pn"><tr><th>氏名</th><th>グレード</th><th>希望</th><th>確定させる時間(チェック＝採用)</th></tr>';
+  uids.forEach(function (u) {
+    var p = B.staff[u] || { name: u, grade: '' };
+    var mine = all.filter(function (r) { return r[4] === u; });
+    var lines = personLines(u);
+    var hasConf = lines.some(function (l) { return l.kind === 'conf'; });
+    h += '<tr data-u="' + esc(u) + '"><td class="nm">' + esc(p.name) + '</td><td>' + esc(p.grade) + '</td><td class="rq">' +
+      (mine.length ? esc(mine.map(function (r) { return (storeOf(r[1]) ? storeOf(r[1]).name : r[1]) + ' ' + r[2] + '-' + r[3]; }).join(' / ')) : '希望なし') + '</td><td>';
+    lines.forEach(function (l) {
+      if (l.kind === 'req') {
+        h += '<div class="ln req"><label><input type="checkbox" data-act="adopt" data-st="' + esc(l.store) + '" data-s="' + l.s + '" data-e="' + l.e + '"> ' +
+          esc(storeOf(l.store) ? storeOf(l.store).name : l.store) + ' ' + l.s + '-' + l.e + '(希望)</label></div>';
+      } else {
+        var k = l.store + ':' + l.i, attrs = 'data-st="' + esc(l.store) + '" data-i="' + l.i + '"';
+        var ts = timesOf(l.store);
+        var inReq = mine.some(function (r) { return r[1] === l.store && mins(r[2]) <= mins(l.s) && mins(l.e) <= mins(r[3]); });
+        h += '<div class="ln' + (bad[k] ? ' bad' : '') + '"><input type="checkbox" checked data-act="drop" ' + attrs + '> ' +
+          storeSel(l.store, attrs) + selHtml(ts.slice(0, -1), l.s, 's', attrs) + '〜' + selHtml(ts.slice(1), l.e, 'e', attrs) +
+          (bad[k] ? '<span class="tag2 t-bad">' + bad[k] + '</span>' : (inReq ? '' : '<span class="tag2 t-out">希望の外</span>')) + '</div>';
+      }
+    });
+    h += '<div class="ln"><button class="mini2" data-act="add">＋時間帯</button>' + (hasConf ? '' : '<span class="tag2 t-no">入れない</span>') + '</div></td></tr>';
+  });
+  g('panelBody').innerHTML = h + '</table>';
+}
+// 確定を、指定の店舗に足す(同じ人の重なる・隣り合う確定は1つにまとめる)
+function addConfTo(store, uid, s, e) {
+  var k = key(store, DAY);
+  var list = (CONF[k] || []).slice();
+  var mine = list.filter(function (c) { return c[0] === uid; }).concat([[uid, s, e]]);
+  var rest = list.filter(function (c) { return c[0] !== uid; });
+  mine.sort(function (a, b) { return mins(a[1]) - mins(b[1]); });
+  var merged = [];
+  mine.forEach(function (c) {
+    var last = merged[merged.length - 1];
+    if (last && mins(c[1]) <= mins(last[2])) { if (mins(c[2]) > mins(last[2])) last[2] = c[2]; }
+    else merged.push([c[0], c[1], c[2]]);
+  });
+  CONF[k] = rest.concat(merged);
+}
+g('panelBody').addEventListener('change', function (e) {
+  var el = e.target, tr = el.closest('tr[data-u]'); if (!tr) return;
+  var uid = tr.getAttribute('data-u'), act = el.getAttribute('data-act'), f = el.getAttribute('data-f');
+  var st = el.getAttribute('data-st'), i = Number(el.getAttribute('data-i'));
+  if (act === 'adopt') { addConfTo(st, uid, el.getAttribute('data-s'), el.getAttribute('data-e')); return changedKeys([st]); }
+  if (act === 'drop') { CONF[key(st, DAY)].splice(i, 1); return changedKeys([st]); }
+  var c = (CONF[key(st, DAY)] || [])[i]; if (!c) return;
+  if (f === 's') { c[1] = el.value; return changedKeys([st]); }
+  if (f === 'e') { c[2] = el.value; return changedKeys([st]); }
+  if (f === 'st' && el.value !== st) {
+    // 店舗を変える：今の店舗から外し、新しい店舗に足す(新しい店舗で選べない時刻は、選べる範囲に寄せる)
+    var ns = el.value, ts = timesOf(ns), s1 = c[1], e1 = c[2];
+    if (ts.indexOf(s1) === -1) s1 = mins(s1) < mins(ts[0]) ? ts[0] : ts[ts.length - 2];
+    if (ts.indexOf(e1) === -1) e1 = mins(e1) > mins(ts[ts.length - 1]) ? ts[ts.length - 1] : ts[1];
+    CONF[key(st, DAY)].splice(i, 1);
+    (CONF[key(ns, DAY)] = CONF[key(ns, DAY)] || []).push([uid, s1, e1]);
+    return changedKeys([st, ns]);
+  }
+});
+g('panelBody').addEventListener('click', function (e) {
+  var b = e.target.closest('button[data-act="add"]'); if (!b) return;
+  var uid = b.closest('tr[data-u]').getAttribute('data-u');
+  var p = B.staff[uid] || { stores: [] };
+  var st = (p.stores.indexOf('*') !== -1 || p.stores.indexOf(STORE) !== -1) ? STORE : (p.stores[0] || STORE);
+  var ts = timesOf(st);
+  (CONF[key(st, DAY)] = CONF[key(st, DAY)] || []).push([uid, ts[0], ts[Math.min(ts.length - 1, 60 / B.slot * 4)]]);
+  changedKeys([st]);
+});
+// 変更があった店舗×日を未保存にし、2秒後にまとめて保存する(重なりなどがあれば保存しない)
+function changedKeys(stores) {
+  stores.forEach(function (st) { DIRTY[key(st, DAY)] = true; });
+  clearTimeout(saveTimer);
+  var bad = Object.keys(badLines()).length;
+  if (bad) setState('直してほしい時間帯があります(赤い行)。直すと保存します', 'err');
+  else {
+    setState('未保存(2秒後に保存)', 'dirty');
+    saveTimer = setTimeout(function () { saveDayAll(DAY); }, 2000);
+  }
+  renderStrip(); renderDay();
+}
+// その日の、未保存の店舗をすべて保存する
+function saveDayAll(day) {
+  if (Object.keys(badLines()).length) { setState('直してほしい時間帯があります(赤い行)。直すと保存します', 'err'); return Promise.resolve(false); }
+  var keys = Object.keys(DIRTY).filter(function (k) { return DIRTY[k] && Number(k.split(':')[1]) === day; });
+  return keys.reduce(function (p, k) { return p.then(function (ok) { return ok && saveDay(k.split(':')[0], day); }); }, Promise.resolve(true));
+}
+
+// ===== 確定シフトの編集(タイムラインのドラッグ・クリック) =====
 // 同じ人の時間帯が重なる・隣り合うときは1つにまとめる
 function addConf(uid, s, e) {
   var k = key(STORE, DAY);
@@ -334,13 +486,7 @@ function addConf(uid, s, e) {
   CONF[k] = rest.concat(merged);
   changed();
 }
-function changed() {
-  DIRTY[key(STORE, DAY)] = true;
-  setState('未保存(2秒後に保存)', 'dirty');
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(function () { saveDay(STORE, DAY); }, 2000);
-  renderStrip(); renderDay();
-}
+function changed() { changedKeys([STORE]); }
 function setState(t, cls) { g('saveState').textContent = t; g('saveState').className = cls || ''; }
 
 // 店舗×日を保存する(自動保存・「この日を保存」・別の日に移るとき)
@@ -370,7 +516,10 @@ function saveDay(store, day) {
   }).catch(function () { SAVING = false; setState('通信に失敗しました(もう一度「この日を保存」)', 'err'); return false; });
 }
 // 別の日・店舗・月に移る前に、未保存の分を保存する
-function leaveDay() { return saveDay(STORE, DAY); }
+function leaveDay() {
+  if (Object.keys(badLines()).length) { alert('赤い行(時間帯の重なりなど)を直してから移ってください'); return new Promise(function () {}); }
+  return saveDayAll(DAY);
+}
 
 // ドラッグ＝その時間を確定 ／ 希望をクリック＝希望どおりに確定 ／ 確定をクリック＝変更・削除
 var drag = null;
@@ -436,11 +585,15 @@ g('edOk').addEventListener('click', function () {
 });
 
 g('fillAll').addEventListener('click', function () {
-  var cf = confOf(STORE, DAY), done = {};
-  cf.forEach(function (c) { done[c[0]] = true; });
-  var n = 0;
-  reqOf(DAY, STORE).forEach(function (r) { if (!done[r[4]]) { addConfQuiet(r[4], mins(r[2]), mins(r[3])); n++; } });
-  if (n) changed(); else g('msg').textContent = '希望どおりに確定できる人はいません(全員確定済みか、希望がありません)';
+  // その日、まだどの店舗にも確定のない人の希望を、希望の店舗のまま採用する
+  var done = {}, touched = [];
+  B.stores.forEach(function (st) { confOf(st.code, DAY).forEach(function (c) { done[c[0]] = true; }); });
+  reqOf(DAY).forEach(function (r) {
+    if (done[r[4]]) return;
+    addConfTo(r[1], r[4], r[2], r[3]);
+    if (touched.indexOf(r[1]) === -1) touched.push(r[1]);
+  });
+  if (touched.length) changedKeys(touched); else g('msg').textContent = '希望どおりに確定できる人はいません(全員確定済みか、希望がありません)';
 });
 function addConfQuiet(uid, s, e) { var k = key(STORE, DAY); (CONF[k] = CONF[k] || []).push([uid, hm(s), hm(e)]); }
 g('clearDay').addEventListener('click', function () {
@@ -448,7 +601,10 @@ g('clearDay').addEventListener('click', function () {
   if (!confirm('この日(この店舗)の確定をすべて消しますか？')) return;
   CONF[key(STORE, DAY)] = []; changed();
 });
-g('saveDay').addEventListener('click', function () { DIRTY[key(STORE, DAY)] = DIRTY[key(STORE, DAY)] || false; saveDay(STORE, DAY); });
+g('saveDay').addEventListener('click', function () {
+  if (!Object.keys(DIRTY).some(function (k) { return DIRTY[k]; })) { setState('保存済み(変更はありません)', ''); return; }
+  saveDayAll(DAY);
+});
 
 // ===== 操作(移動の前に保存する) =====
 g('month').addEventListener('change', function () { var m = g('month').value; leaveDay().then(function () { DAY = 1; load(m); }); });

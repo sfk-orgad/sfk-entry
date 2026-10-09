@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>シフト作成(タイムライン)</title>
+<!--
+  シフト作成ツール(管理者用・PC向け)：段階1 タイムライン(GitHub Pages の shiftboard/index.html。ポータルと同じサイト)
+  開き方：ポータルのカードから。通行証とデータの入口(BotのGASのURL)は、ポータルがブラウザの中に置いたものを使う。秘密は置かない
+  ・店舗×日ごとに、縦にスタッフ・横に時刻(シフト設定の「タイムラインの刻み(分)」)で、希望の時間帯を黄色で塗る
+  ・下に人数とグレード集計(最低人数を下回る時間は赤)。上に日ごとの帯(希望人数・不足のある日に印)
+  ・「スプシに書き出す」で、シフト希望ファイルに「タイムライン_店舗_年月」シートを作る
+-->
+<style>
+  :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; --req: #FFE94D; --sat: #1D5BB8; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 14px; }
+  #gate { min-height: 70vh; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+  .gspin { width: 40px; height: 40px; margin: 0 auto 16px; border: 5px solid var(--soft); border-top-color: var(--c); border-radius: 50%; animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .gbtn { display: inline-block; padding: 12px 20px; border-radius: 10px; background: var(--c); color: #fff; text-decoration: none; font-weight: 700; }
+  #app { display: none; }
+  header { background: var(--c); color: #fff; padding: 10px 20px 12px; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+  .topbar a { color: #fff; text-decoration: none; opacity: .9; }
+  header h1 { margin: 4px 0 0; font-size: 20px; }
+  .wrap { padding: 12px 20px 40px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+  select, .btn { font-size: 14px; padding: 7px 10px; border: 1px solid #B9C0C8; border-radius: 8px; background: #fff; font-family: inherit; color: var(--ink); }
+  .btn { cursor: pointer; }
+  .btn.solid { background: var(--c); color: #fff; border-color: var(--c); font-weight: 700; }
+  .tab { padding: 7px 14px; border: 1px solid #B9C0C8; border-radius: 999px; background: #fff; cursor: pointer; font-family: inherit; font-size: 14px; }
+  .tab.on { background: var(--c); color: #fff; border-color: var(--c); font-weight: 700; }
+  .muted { color: var(--muted); font-size: 12px; }
+  /* 日の帯 */
+  .strip { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 10px; }
+  .dcell { flex: 0 0 auto; width: 44px; border: 1px solid var(--line); border-radius: 8px; background: #fff; text-align: center; padding: 4px 0; cursor: pointer; font-size: 12px; }
+  .dcell .n { font-size: 15px; font-weight: 700; }
+  .dcell.sun { color: var(--err); } .dcell.sat { color: var(--sat); }
+  .dcell.on { border: 2px solid var(--c); background: var(--soft); }
+  .dcell.short { box-shadow: inset 0 -4px 0 #F28B82; }
+  .dayhead { display: flex; align-items: center; gap: 10px; margin: 6px 0 8px; }
+  .dayhead h2 { margin: 0; font-size: 18px; }
+  /* タイムライン */
+  .grid-wrap { overflow-x: auto; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  table.tl { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+  .tl th, .tl td { border-bottom: 1px solid #EEF1F4; white-space: nowrap; }
+  .tl .fix { position: sticky; background: #fff; z-index: 2; padding: 4px 8px; }
+  .tl .c0 { left: 0; min-width: 96px; font-weight: 700; }
+  .tl .c1 { left: 96px; min-width: 52px; color: var(--muted); }
+  .tl .c2 { left: 148px; min-width: 150px; color: var(--muted); border-right: 2px solid var(--line); }
+  .tl th.hr { text-align: left; padding: 3px 0 3px 2px; border-left: 1px solid var(--line); color: var(--muted); font-weight: 400; }
+  .tl td.s { width: 14px; min-width: 14px; height: 24px; padding: 0; }
+  .tl td.s.hb { border-left: 1px solid var(--line); }
+  .tl td.s.on { background: var(--req); }
+  .tl tr.sum td { background: #F5F6F8; font-weight: 700; }
+  .tl tr.sum td.s { text-align: center; font-size: 10px; color: var(--muted); }
+  .tl tr.sum td.s.low { background: #F8B4B4; color: var(--err); }
+  .tl tr.none td { color: var(--muted); }
+  .other { font-size: 11px; color: var(--sat); }
+  .side { margin-top: 12px; display: flex; gap: 16px; flex-wrap: wrap; }
+  .box { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; min-width: 260px; }
+  .box h3 { margin: 0 0 6px; font-size: 14px; }
+  #msg { margin-left: 8px; }
+</style>
+</head>
+<body>
+<div id="gate"><div>
+  <div class="gspin" id="gspin"></div><div id="gmsg" style="font-size:18px;line-height:1.7;white-space:pre-wrap;">準備しています…</div>
+  <div id="gact" style="margin-top:18px;"></div>
+  <div id="gdetail" style="font-size:12px;color:#5F6670;margin-top:14px;word-break:break-all;text-align:left;"></div>
+  <div id="gver" style="font-size:11px;color:#9AA3AD;margin-top:16px;"></div>
+</div></div>
+
+<div id="app">
+  <header>
+    <div class="topbar"><a href="../">‹ ポータル</a><span id="me"></span></div>
+    <h1>シフト作成(タイムライン)</h1>
+  </header>
+  <div class="wrap">
+    <div class="tools">
+      <select id="month"></select>
+      <span id="tabs"></span>
+      <label class="muted"><input type="checkbox" id="showAll"> 希望のない人も表示</label>
+      <button class="btn solid" id="export">スプシに書き出す</button>
+      <span id="msg" class="muted"></span>
+    </div>
+    <div class="strip" id="strip"></div>
+    <div class="dayhead">
+      <button class="btn" id="prev">‹ 前の日</button>
+      <h2 id="dayTitle"></h2>
+      <button class="btn" id="next">次の日 ›</button>
+      <span class="muted" id="slotInfo"></span>
+    </div>
+    <div class="grid-wrap"><table class="tl" id="grid"></table></div>
+    <div class="side">
+      <div class="box"><h3>この店舗の未提出(この月)</h3><div id="unsub" class="muted"></div></div>
+      <div class="box"><h3>見方</h3><div class="muted">黄色＝出勤できる時間(希望)。下の行は時間ごとの人数と、グレード集計(最低人数を下回る時間は赤)。<br>上の帯の数字＝その日にこの店舗で希望を出した人数。下線が赤い日は、営業時間の中に集計の不足がある日。</div></div>
+    </div>
+    <div class="muted" id="ver" style="margin-top:10px;"></div>
+  </div>
+</div>
+
+<script>
+var PAGE_VERSION = '2026-10-10b';
+var PORTAL_URL = '../';
+var T0 = Date.now();
+function g(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function gate(msg, link) {
+  g('gspin').style.display = 'none'; g('gmsg').textContent = msg;
+  if (link) g('gact').innerHTML = '<a class="gbtn" href="' + PORTAL_URL + '">ポータルに戻る</a>';
+}
+g('gver').textContent = 'ver ' + PAGE_VERSION;
+
+var S = null;
+try { S = JSON.parse(sessionStorage.getItem('portal_session') || 'null'); } catch (e) { S = null; }
+var API = S && S.apis ? S.apis.shiftboard : '';
+
+function api(action, extra) {
+  var body = JSON.stringify(Object.assign({ app: 'shift', action: action, token: S.token }, extra || {}));
+  function once() {
+    var status = 0;
+    return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
+      .then(function (r) { status = r.status; return r.text(); })
+      .then(function (t) { try { return JSON.parse(t); } catch (e) { var er = new Error('正しい返事ではありませんでした(' + status + ')'); throw er; } });
+  }
+  return once().catch(function () { return new Promise(function (ok) { setTimeout(ok, 800); }).then(once); });
+}
+
+// ===== 状態 =====
+var B = null;          // board.get の返事
+var STORE = '';        // 表示中の店舗
+var DAY = 1;           // 表示中の日
+var W = '日月火水木金土';
+function hm(t) { return ('0' + Math.floor(t / 60)).slice(-2) + ':' + ('0' + (t % 60)).slice(-2); }
+function mins(s) { var p = String(s).split(':'); return Number(p[0]) * 60 + Number(p[1]); }
+function storeOf(code) { return B.stores.filter(function (s) { return s.code === code; })[0]; }
+function cols() { var st = storeOf(STORE), out = []; for (var t = st.start; t < st.end; t += B.slot) out.push(t); return out; }
+function reqOf(day, store) { return B.req.filter(function (r) { return r[0] === day && (!store || r[1] === store); }); }
+function covered(rs, t) { return rs.some(function (r) { return mins(r[2]) <= t && t < mins(r[3]); }); }
+
+// その日の集計(人数・グレード集計)と、不足があるか
+function sums(day) {
+  var cs = cols(), rs = reqOf(day, STORE);
+  var uids = []; rs.forEach(function (r) { if (uids.indexOf(r[4]) === -1) uids.push(r[4]); });
+  var count = cs.map(function (t) { return uids.filter(function (u) { return covered(rs.filter(function (r) { return r[4] === u; }), t); }).length; });
+  var crit = (B.criteria || []).map(function (c) {
+    return { c: c, n: cs.map(function (t) { return uids.filter(function (u) {
+      var p = B.staff[u] || {}; return c.grades.indexOf(String(p.grade)) !== -1 && covered(rs.filter(function (r) { return r[4] === u; }), t);
+    }).length; }) };
+  });
+  var short = crit.some(function (x) { return x.c.min && x.n.some(function (n) { return n < x.c.min; }); });
+  return { cols: cs, uids: uids, count: count, crit: crit, short: short };
+}
+
+function load(month) {
+  g('msg').textContent = '読み込んでいます…';
+  return api('board.get', month ? { month: month } : {}).then(function (res) {
+    if (!res.ok) {
+      gate(res.error === 'AUTH' ? (res.reason === 'no_permission' ? 'シフト作成を使う権限がありません。' : 'ログインの期限が切れました。\nポータルから開き直してください。') : '開けませんでした：' + res.error, true);
+      return;
+    }
+    B = res.board;
+    if (!STORE || !storeOf(STORE)) STORE = B.stores[0] ? B.stores[0].code : '';
+    if (DAY > B.days.length) DAY = 1;
+    g('gate').style.display = 'none'; g('app').style.display = 'block';
+    g('me').textContent = S.name ? S.name + ' さん' : '';
+    g('msg').textContent = '';
+    g('ver').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + ((Date.now() - T0) / 1000).toFixed(1) + '秒';
+    renderAll();
+  }).catch(function (e) { gate('通信に失敗しました。\n開き直してください。', true); g('gdetail').textContent = e.message; });
+}
+
+function renderAll() {
+  g('month').innerHTML = B.months.map(function (m) {
+    return '<option value="' + m + '"' + (m === B.month ? ' selected' : '') + '>' + m.replace('-', '年') + '月' + (m === B.target ? '(受付中)' : '') + '</option>';
+  }).join('');
+  g('tabs').innerHTML = B.stores.map(function (s) { return '<button class="tab' + (s.code === STORE ? ' on' : '') + '" data-s="' + esc(s.code) + '">' + esc(s.name) + '</button>'; }).join(' ');
+  g('slotInfo').textContent = B.slot + '分刻み';
+  renderStrip(); renderDay(); renderUnsub();
+}
+
+function renderStrip() {
+  g('strip').innerHTML = B.days.map(function (x) {
+    var n = []; reqOf(x.d, STORE).forEach(function (r) { if (n.indexOf(r[4]) === -1) n.push(r[4]); });
+    var cls = (x.w === 0 || x.hol ? ' sun' : (x.w === 6 ? ' sat' : '')) + (x.d === DAY ? ' on' : '') + (sums(x.d).short ? ' short' : '');
+    return '<div class="dcell' + cls + '" data-d="' + x.d + '" title="' + esc(x.hol) + '">' + x.d + '(' + W.charAt(x.w) + ')<div class="n">' + n.length + '</div></div>';
+  }).join('');
+}
+
+function renderDay() {
+  var x = B.days[DAY - 1];
+  g('dayTitle').textContent = B.label + DAY + '日(' + W.charAt(x.w) + ')' + (x.hol ? ' ' + x.hol : '');
+  var sm = sums(DAY), cs = sm.cols, perHour = 60 / B.slot;
+  var h = '<thead><tr><th class="fix c0">氏名</th><th class="fix c1">グレード</th><th class="fix c2">希望</th>';
+  cs.forEach(function (t, i) { if (t % 60 === 0 || i === 0) { var span = 0; for (var j = i; j < cs.length && (j === i || cs[j] % 60 !== 0); j++) span++; h += '<th class="hr" colspan="' + span + '">' + Math.floor(t / 60) + '</th>'; } });
+  h += '</tr></thead><tbody>';
+  var all = reqOf(DAY);
+  var uids = sm.uids.slice().sort(function (a, b) {
+    var fa = Math.min.apply(null, all.filter(function (r) { return r[4] === a && r[1] === STORE; }).map(function (r) { return mins(r[2]); }));
+    var fb = Math.min.apply(null, all.filter(function (r) { return r[4] === b && r[1] === STORE; }).map(function (r) { return mins(r[2]); }));
+    return fa - fb;
+  });
+  if (g('showAll').checked) {
+    Object.keys(B.staff).forEach(function (u) {
+      var p = B.staff[u];
+      if (uids.indexOf(u) === -1 && (p.stores.indexOf('*') !== -1 || p.stores.indexOf(STORE) !== -1)) uids.push(u);
+    });
+  }
+  uids.forEach(function (u) {
+    var p = B.staff[u] || { name: u, grade: '' };
+    var mine = all.filter(function (r) { return r[4] === u && r[1] === STORE; });
+    var others = all.filter(function (r) { return r[4] === u && r[1] !== STORE; });
+    var otherTxt = others.map(function (r) { return (storeOf(r[1]) ? storeOf(r[1]).name : r[1]) + ' ' + r[2] + '-' + r[3]; }).join(' / ');
+    h += '<tr' + (mine.length ? '' : ' class="none"') + '><td class="fix c0">' + esc(p.name) + '</td><td class="fix c1">' + esc(p.grade) + '</td>' +
+      '<td class="fix c2">' + esc(mine.map(function (r) { return r[2] + '-' + r[3]; }).join(' / ') || '(希望なし)') +
+      (otherTxt ? '<div class="other">他店舗：' + esc(otherTxt) + '</div>' : '') + '</td>';
+    cs.forEach(function (t, i) { h += '<td class="s' + (t % 60 === 0 ? ' hb' : '') + (covered(mine, t) ? ' on' : '') + '" title="' + esc(p.name) + ' ' + hm(t) + '"></td>'; });
+    h += '</tr>';
+  });
+  if (!uids.length) h += '<tr class="none"><td class="fix c0" colspan="3">この日の希望はありません</td>' + cs.map(function () { return '<td class="s"></td>'; }).join('') + '</tr>';
+  h += '<tr class="sum"><td class="fix c0">人数</td><td class="fix c1"></td><td class="fix c2"></td>' + sm.count.map(function (n, i) { return '<td class="s' + (cs[i] % 60 === 0 ? ' hb' : '') + '">' + (n || '') + '</td>'; }).join('') + '</tr>';
+  sm.crit.forEach(function (x) {
+    h += '<tr class="sum"><td class="fix c0">' + esc(x.c.name) + '</td><td class="fix c1"></td><td class="fix c2">' + (x.c.min ? '最低' + x.c.min + '人' : '') + '</td>' +
+      x.n.map(function (n, i) { return '<td class="s' + (cs[i] % 60 === 0 ? ' hb' : '') + (x.c.min && n < x.c.min ? ' low' : '') + '">' + (n || '') + '</td>'; }).join('') + '</tr>';
+  });
+  g('grid').innerHTML = h + '</tbody>';
+  g('prev').disabled = DAY <= 1; g('next').disabled = DAY >= B.days.length;
+}
+
+function renderUnsub() {
+  var list = (B.unsubmitted[STORE] || []).map(function (u) { var p = B.staff[u] || {}; return p.name + (p.grade ? '(' + p.grade + ')' : ''); });
+  g('unsub').textContent = list.length ? list.join('、') : 'なし';
+}
+
+// ===== 操作 =====
+g('month').addEventListener('change', function () { DAY = 1; load(g('month').value); });
+g('tabs').addEventListener('click', function (e) { var b = e.target.closest('.tab'); if (!b) return; STORE = b.getAttribute('data-s'); renderAll(); });
+g('strip').addEventListener('click', function (e) { var c = e.target.closest('.dcell'); if (!c) return; DAY = Number(c.getAttribute('data-d')); renderStrip(); renderDay(); });
+g('prev').addEventListener('click', function () { if (DAY > 1) { DAY--; renderStrip(); renderDay(); } });
+g('next').addEventListener('click', function () { if (DAY < B.days.length) { DAY++; renderStrip(); renderDay(); } });
+g('showAll').addEventListener('change', renderDay);
+document.addEventListener('keydown', function (e) {
+  if (!B || e.target.tagName === 'SELECT') return;
+  if (e.key === 'ArrowLeft') g('prev').click();
+  if (e.key === 'ArrowRight') g('next').click();
+});
+g('export').addEventListener('click', function () {
+  g('export').disabled = true; g('msg').textContent = '書き出しています…';
+  api('board.export', { month: B.month, store: STORE }).then(function (res) {
+    g('export').disabled = false;
+    if (!res.ok) { g('msg').textContent = '書き出せませんでした：' + (res.error === 'AUTH' ? 'ログインの期限切れ' : res.error); return; }
+    g('msg').innerHTML = '書き出しました：<a href="' + esc(res.url) + '" target="_blank" rel="noopener">' + esc(res.sheet) + ' を開く</a>';
+  }).catch(function () { g('export').disabled = false; g('msg').textContent = '通信に失敗しました'; });
+});
+
+if (!S || !S.token || S.exp < Date.now()) gate('ポータルから開き直してください。\n(ログインの期限が切れたか、直接開かれました)', true);
+else if (!API) gate('シフト作成を開く権限がないか、ポータルの設定が足りません。\nポータルから開き直してください。', true);
+else load('');
+</script>
+</body>
+</html>

@@ -108,7 +108,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-10-07g';
+var PAGE_VERSION = '2026-10-08a';
 var PORTAL_URL = '../';            // ポータル(同じサイト)
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -184,7 +184,9 @@ function showForm(D, how) {
 function loadNow() {
   api('closing.init', {}, true).then(function (res) {
     if (!res.ok) {
-      gate(res.error === 'AUTH' ? 'ログインの期限が切れました。\nポータルから開き直してください。' : '開けませんでした：' + res.error, true);
+      gate(res.error === 'AUTH' && res.reason === 'no_permission'
+        ? 'このツールは今使えません(メンテナンス中か、使う権限がありません)。\nポータルに戻ってください。'
+        : res.error === 'AUTH' ? 'ログインの期限が切れました。\nポータルから開き直してください。' : '開けませんでした：' + res.error, true);
       return;
     }
     showForm(res.init, '取得');

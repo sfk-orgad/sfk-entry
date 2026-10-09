@@ -85,7 +85,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-08b';
+const PAGE_VERSION = '2026-10-09a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -109,6 +109,38 @@ const SESSION_MARGIN_MS = 30 * 60 * 1000; // 通行証の期限が30分を切っ
 function readJson(k) { try { return JSON.parse(sessionStorage.getItem(k) || 'null'); } catch (e) { return null; } }
 function sessionOk() { const x = readJson(SESSION_KEY); return !!(x && x.exp - Date.now() > SESSION_MARGIN_MS); }
 function saved() { const x = readJson(SAVE_KEY); return x && Date.now() - x.at < SHOW_CACHE_MS && sessionOk() ? x : null; }
+
+// ===== 閉じても消えない場所(localStorage)に、人ごとの表示内容を覚える =====
+// スマホの画面を消すとページが閉じることがあるので、開き直したときに一瞬で表示し、裏で本人確認をやり直す
+// 人(LINE WORKSのUserId)ごとに覚えるので、共用のスマホで前の人の表示が出ることはない。通行証は含めない。12時間で消す
+const VIEW_PREFIX = 'portal_view_';
+const VIEW_MAX_MS = 12 * 60 * 60 * 1000;
+let PROFILE_ID = '';
+let PENDING = null; // 裏で進めている本人確認(カードを押したら、これが終わるのを待つ)
+function dayKey() { const d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+function saveView(uid, show) {
+  if (!uid) return;
+  try { localStorage.setItem(VIEW_PREFIX + uid, JSON.stringify({ at: Date.now(), day: dayKey(), res: show })); } catch (e) {}
+}
+function readView(uid) {
+  try {
+    const x = JSON.parse(localStorage.getItem(VIEW_PREFIX + uid) || 'null');
+    if (!x || !x.res || Date.now() - x.at > VIEW_MAX_MS) return null;
+    if (x.day !== dayKey()) x.res.today = []; // 日付が変わっていたら、古い「今日の営業」は出さない
+    return x;
+  } catch (e) { return null; }
+}
+function removeView(uid) { try { localStorage.removeItem(VIEW_PREFIX + uid); } catch (e) {} }
+function cleanViews() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (!k || k.indexOf(VIEW_PREFIX) !== 0) continue;
+      const x = JSON.parse(localStorage.getItem(k) || 'null');
+      if (!x || Date.now() - x.at > VIEW_MAX_MS) localStorage.removeItem(k);
+    }
+  } catch (e) {}
+}
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -203,6 +235,18 @@ async function start() {
   try { sessionStorage.removeItem(KEY + '_login'); } catch (e) {}
   WOFF_READY = true;
   lap('LINE WORKS', T0);
+  cleanViews();
+  // 閉じたあとに開き直した：この人の表示を覚えていれば一瞬で出し、裏で本人確認と通行証の取り直しをする
+  if (!REQUEST.tool) {
+    try { PROFILE_ID = (await woff.getProfile()).userId; } catch (e) {}
+    const view = PROFILE_ID ? readView(PROFILE_ID) : null;
+    if (view) {
+      TIMES.push('保存した表示を使用'); showVer();
+      renderPortal(view.res, view.at);
+      PENDING = refreshFromHub(view.res, true);
+      return;
+    }
+  }
   const res = await callAuth();
   if (!res) return;
   if (res.ok && res.maintenance && res.maintenance.all && !res.maintenance.tester) {
@@ -235,6 +279,7 @@ async function callAuth() {
   try {
     accessToken = woff.getAccessToken();
     profile = await woff.getProfile();
+    PROFILE_ID = profile.userId;
   } catch (e) {
     show('LINE WORKSから情報を受け取れませんでした。\nアプリから開き直してください。', true); detail('profile', e); return null;
   }
@@ -273,29 +318,41 @@ async function callAuth() {
   return res;
 }
 
-// 裏で最新を確かめ、変わっていれば表示を差し替える(画面に失敗のメッセージは出さない)
-async function revalidate(old) {
-  if (!(await ensureWoff())) return;
+// 裏で最新を確かめ、変わっていれば表示を差し替える
+//   strict：覚えていた表示を出している場合。退職・権限なしなどで拒否されたら、表示を消して理由の画面にする
+//   戻り値：取り直せた返事(通行証つき)。通信の失敗などでは null(画面はそのまま。カードを押したときに取り直す)
+async function refreshFromHub(old, strict) {
+  if (!(await ensureWoff())) return null;
   let res;
   try {
     const accessToken = woff.getAccessToken();
     const profile = await woff.getProfile();
+    PROFILE_ID = profile.userId;
     const r = await fetch(AUTH_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ accessToken: accessToken, userId: profile.userId, tool: '', params: {} }) });
     res = JSON.parse(await r.text());
-  } catch (e) { return; }
-  if (!res || !res.ok) return;
-  if (res.maintenance && res.maintenance.all && !res.maintenance.tester) {
-    // メンテナンス中に切り替わっていた
+  } catch (e) { return null; }
+  if (!res) return null;
+  const toGate = msg => {
     try { sessionStorage.removeItem(SAVE_KEY); } catch (e) {}
+    removeView(PROFILE_ID);
     $('portal').style.display = 'none'; $('gate').style.display = 'flex';
-    show('ただいまメンテナンス中です。' + (res.maintenance.message ? '\n' + res.maintenance.message : ''), true);
-    return;
+    show(msg, true);
+  };
+  if (!res.ok) {
+    if (strict && res.error !== 'internal_error' && res.error !== 'bad_request') toGate(ERRORS[res.error] || ERRORS.internal_error);
+    return null;
+  }
+  if (res.maintenance && res.maintenance.all && !res.maintenance.tester) {
+    toGate('ただいまメンテナンス中です。' + (res.maintenance.message ? '\n' + res.maintenance.message : '')); // メンテナンス中に切り替わっていた
+    return null;
   }
   const pick = x => JSON.stringify({ items: (x.items || []).map(i => [i.key, i.maintenance, i.label]), today: x.today, m: x.maintenance });
   renderPortal(res); // 通行証も新しくなる
   if (pick(res) !== pick(old)) { TIMES.push('最新に更新'); showVer(); }
+  return res;
 }
+function revalidate(old) { return refreshFromHub(old, false); }
 
 // ===== ポータルの表示 =====
 let DATA = null, FETCHED_AT = 0;
@@ -309,6 +366,7 @@ function renderPortal(res, at) {
       sessionStorage.setItem(SESSION_KEY, JSON.stringify({ token: res.session, exp: res.sessionExp, name: res.name, apis: apis }));
       const show = Object.assign({}, res); delete show.session; // 表示用には通行証を持たない
       sessionStorage.setItem(SAVE_KEY, JSON.stringify({ at: FETCHED_AT, res: show }));
+      saveView(PROFILE_ID, show); // 閉じても消えない場所にも、この人の表示を覚える
     } catch (e) {}
   }
   prefetchClosing(res.items); // 締めチェックのデータを先に読んでおく(表示し終わってから。表示の速さには影響しない)
@@ -391,7 +449,10 @@ $('tools').addEventListener('click', async e => {
   if (it.maintenance && !(DATA.maintenance && DATA.maintenance.tester)) { alert('このツールはメンテナンス中です。しばらくしてから開いてください。'); return; }
   if (it.kind !== 'link' && !sessionOk()) {
     $('overlay').style.display = 'flex';
-    const res = await callAuth();
+    // 裏で本人確認を進めていれば、それが終わるのを待つ。無ければ(または失敗していれば)ここで取り直す
+    let res = PENDING ? await PENDING : null;
+    PENDING = null;
+    if (!res) res = await callAuth();
     if (!res || !res.ok || !res.items) {
       $('overlay').style.display = 'none'; $('portal').style.display = 'none'; $('gate').style.display = 'flex';
       if (res && !res.ok) show(ERRORS[res.error] || ERRORS.internal_error, true);

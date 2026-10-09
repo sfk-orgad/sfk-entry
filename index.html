@@ -98,7 +98,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-10b';
+const PAGE_VERSION = '2026-10-11a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -479,7 +479,9 @@ function renderPortal(res, at) {
 // ツールのデータの先読み：開ける全店舗の分を1回で受け取り、ブラウザの中に置く(3分間使える)
 // ツールの画面は、これがあれば待たずに表示し、裏で最新を確かめる
 //   締めチェック → prefetch_closing = { at, inits:{店舗: init} } ／ シフト希望 → prefetch_shift = { at, init }
-const PREFETCH = { closing: 'closing.prefetch', shift: 'shift.prefetch' };
+//   シフト作成(管理者だけ) → prefetch_shiftboard = { at, board }
+const PREFETCH = { closing: 'closing.prefetch', shift: 'shift.prefetch', shiftboard: 'board.get' };
+const PREFETCH_APP = { closing: 'closing', shift: 'shift', shiftboard: 'shift' }; // どのアプリ(API)に送るか
 const PREFETCH_APIS = [];
 function prefetchTools(items) {
   const sess = readJson(SESSION_KEY);
@@ -495,11 +497,11 @@ function prefetchTools(items) {
     fetch(it.api, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ app: tool, action: PREFETCH[tool], token: sess.token }),
+      body: JSON.stringify({ app: PREFETCH_APP[tool], action: PREFETCH[tool], token: sess.token }),
     }).then(r => r.text()).then(t => {
       const res = JSON.parse(t);
       if (!res || !res.ok) return;
-      const v = tool === 'closing' ? { at: Date.now(), inits: res.inits } : { at: Date.now(), init: res.init };
+      const v = tool === 'closing' ? { at: Date.now(), inits: res.inits } : tool === 'shiftboard' ? { at: Date.now(), board: res.board } : { at: Date.now(), init: res.init };
       sessionStorage.setItem(key, JSON.stringify(v));
     }).catch(() => {}); // 先読みの失敗は無視(ツールの画面が自分で取りに行く)
   });

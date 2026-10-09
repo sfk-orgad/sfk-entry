@@ -61,6 +61,11 @@
   .tile.mnt.tester { background: #FFF8E6; color: var(--ink); cursor: pointer; }
   .tile .mtag { font-size: 12px; color: #8A5A00; background: #FCE9C2; border-radius: 999px; padding: 1px 8px; align-self: flex-start; }
   .notice { background: #FFF8E6; border: 1px solid #F2D58A; border-radius: 14px; padding: 12px 16px; margin-top: 14px; font-size: 15px; white-space: pre-wrap; }
+  .pcbtn { display: block; margin: 22px auto 0; font-size: 14px; color: var(--c); background: none; border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; cursor: pointer; font-family: inherit; }
+  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 60; align-items: center; justify-content: center; padding: 20px; }
+  .modal .panel { background: #fff; border-radius: 16px; padding: 24px 22px; max-width: 380px; width: 100%; text-align: center; }
+  .code { font-size: 40px; font-weight: 700; letter-spacing: 8px; margin: 12px 0 6px; font-family: ui-monospace, Menlo, monospace; }
+  .codein { font-size: 28px; letter-spacing: 6px; text-align: center; width: 220px; padding: 10px; border: 2px solid var(--line); border-radius: 12px; font-family: ui-monospace, Menlo, monospace; }
   .overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,.92); z-index: 50; align-items: center; justify-content: center; flex-direction: column; }
 </style>
 </head>
@@ -78,14 +83,22 @@
   <div class="wrap">
     <div id="today"></div>
     <div id="tools"></div>
+    <button class="pcbtn" id="pcOpen" style="display:none">PCで開く(コードを表示)</button>
     <div class="ver" id="ver2"></div>
   </div>
 </div>
+<div class="modal" id="pcModal"><div class="panel">
+  <div style="font-weight:700;">PCで開くためのコード</div>
+  <div class="code" id="pcCode">------</div>
+  <div class="sub" id="pcLeft"></div>
+  <div class="sub" style="text-align:left;line-height:1.7;">PCのLINE WORKSでポータルのリンクを開き(ブラウザが開きます)、このコードを入力してください。<br>コードは5分間・1回だけ使えます。人に教えないでください。</div>
+  <button class="btn" id="pcClose" style="margin-top:16px;">閉じる</button>
+</div></div>
 <div class="overlay" id="overlay"><div class="spinner"></div><div>開いています…</div></div>
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-10a';
+const PAGE_VERSION = '2026-10-10b';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -189,6 +202,8 @@ const ERRORS = {
   no_store_permission: 'この店舗のページを開く権限がありません。',
   unknown_tool: '開こうとしたツールが見つかりません。',
   bad_request: 'うまく確認できませんでした。\nもう一度開き直してください。',
+  pair_invalid: 'コードが正しくないか、期限が切れています。\nスマホでもう一度コードを出してください。',
+  pair_locked: 'コードの間違いが続いたため、しばらく受け付けを止めています。\n10分ほど待ってから試してください。',
   internal_error: '一時的なエラーが起きました。\n少し待ってから開き直してください。',
 };
 
@@ -212,6 +227,7 @@ async function start() {
   if (!woff.isLoggedIn()) {
     // アプリの外(PC版LINE WORKSから開いたChromeなど)でも、LINE WORKSのログイン画面を経由して本人を確認する
     const inClient = typeof woff.isInClient === 'function' ? woff.isInClient() : null;
+    if (inClient === false) { showPairInput(''); return; } // PCのブラウザなど：スマホで出したコードで入る
     let tried = null;
     try { tried = sessionStorage.getItem(KEY + '_login'); } catch (e) {}
     if (!tried) {
@@ -353,6 +369,57 @@ async function refreshFromHub(old, strict) {
 }
 function revalidate(old) { return refreshFromHub(old, false); }
 
+// ===== PCで開く(スマホで出した6桁のコード) =====
+function pcMode() { try { return sessionStorage.getItem('portal_pc') === '1'; } catch (e) { return false; } }
+function showPairInput(note) {
+  $('portal').style.display = 'none'; $('gate').style.display = 'flex';
+  show((note ? note + '\n\n' : '') + 'PCで開くには、スマホのLINE WORKSでポータルを開き、\n一番下の「PCで開く」を押して出た6桁のコードを入力してください。');
+  setAction('<div style="margin-top:16px;"><input class="codein" id="codeIn" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"></div>' +
+    '<button class="btn" id="codeGo">入る</button><div id="codeErr" style="color:#B42318;font-size:14px;margin-top:10px;white-space:pre-wrap;"></div>');
+  const go = async () => {
+    const code = String($('codeIn').value || '').replace(/\D/g, '');
+    if (code.length !== 6) { $('codeErr').textContent = '6桁の数字を入力してください。'; return; }
+    $('codeGo').disabled = true; $('codeErr').textContent = '';
+    let res = null;
+    try {
+      const r = await fetch(AUTH_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'pair.redeem', code: code }) });
+      res = JSON.parse(await r.text());
+    } catch (e) { res = { ok: false, error: 'internal_error' }; }
+    $('codeGo').disabled = false;
+    if (res.ok && res.maintenance && res.maintenance.all && !res.maintenance.tester) { show('ただいまメンテナンス中です。' + (res.maintenance.message ? '\n' + res.maintenance.message : ''), true); return; }
+    if (!res.ok || !res.items) { $('codeErr').textContent = ERRORS[res.error] || ERRORS.internal_error; return; }
+    try { sessionStorage.setItem('portal_pc', '1'); } catch (e) {}
+    PROFILE_ID = res.uid || '';
+    renderPortal(res);
+  };
+  $('codeGo').addEventListener('click', go);
+  $('codeIn').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  $('codeIn').focus();
+}
+
+// スマホ：PCで開くためのコードを出す(LINE WORKSで本人確認してから)
+let pcTimer = null;
+async function openPcCode() {
+  $('pcModal').style.display = 'flex'; $('pcCode').textContent = '------'; $('pcLeft').textContent = 'コードを作っています…';
+  let res = null;
+  try {
+    if (!(await ensureWoff())) throw new Error('login');
+    const r = await fetch(AUTH_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'pair.create', accessToken: woff.getAccessToken(), userId: (await woff.getProfile()).userId }) });
+    res = JSON.parse(await r.text());
+  } catch (e) { res = null; }
+  if (!res || !res.ok) { $('pcLeft').textContent = 'コードを作れませんでした。もう一度試してください。'; return; }
+  $('pcCode').textContent = res.code;
+  const until = Date.now() + res.expiresIn * 1000;
+  clearInterval(pcTimer);
+  const tick = () => {
+    const left = Math.max(0, Math.round((until - Date.now()) / 1000));
+    $('pcLeft').textContent = left ? 'あと ' + Math.floor(left / 60) + ':' + ('0' + (left % 60)).slice(-2) + ' 使えます' : '期限が切れました。閉じてもう一度出してください。';
+    if (!left) { clearInterval(pcTimer); $('pcCode').textContent = '------'; }
+  };
+  tick(); pcTimer = setInterval(tick, 1000);
+}
+
 // ===== ポータルの表示 =====
 let DATA = null, FETCHED_AT = 0;
 function renderPortal(res, at) {
@@ -365,9 +432,12 @@ function renderPortal(res, at) {
       sessionStorage.setItem(SESSION_KEY, JSON.stringify({ token: res.session, exp: res.sessionExp, name: res.name, apis: apis }));
       const show = Object.assign({}, res); delete show.session; // 表示用には通行証を持たない
       sessionStorage.setItem(SAVE_KEY, JSON.stringify({ at: FETCHED_AT, res: show }));
-      saveView(PROFILE_ID, show); // 閉じても消えない場所にも、この人の表示を覚える
+      if (!pcMode()) saveView(PROFILE_ID, show); // 閉じても消えない場所にも、この人の表示を覚える(スマホだけ)
     } catch (e) {}
   }
+  let inApp = false;
+  try { inApp = typeof woff !== 'undefined' && typeof woff.isInClient === 'function' && woff.isInClient() === true; } catch (e) { inApp = false; }
+  $('pcOpen').style.display = (!pcMode() && inApp) ? 'block' : 'none'; // 「PCで開く」はスマホのアプリの中だけ
   prefetchTools(res.items); // 締めチェック・シフト希望のデータを先に読んでおく(表示し終わってから。表示の速さには影響しない)
   warmTools(res.items);
   $('gate').style.display = 'none';
@@ -454,6 +524,7 @@ $('tools').addEventListener('click', async e => {
   if (!it) return;
   // メンテナンス中のツールは、確認用の人以外は開かない
   if (it.maintenance && !(DATA.maintenance && DATA.maintenance.tester)) { alert('このツールはメンテナンス中です。しばらくしてから開いてください。'); return; }
+  if (it.kind !== 'link' && !sessionOk() && pcMode()) { showPairInput('ログインの期限が近いので、もう一度コードを入力してください。'); return; }
   if (it.kind !== 'link' && !sessionOk()) {
     $('overlay').style.display = 'flex';
     // 裏で本人確認を進めていれば、それが終わるのを待つ。無ければ(または失敗していれば)ここで取り直す
@@ -475,6 +546,8 @@ $('tools').addEventListener('click', async e => {
 // ツールから「戻る」で帰ってきたときは、くるくるを消す
 window.addEventListener('pageshow', () => { $('overlay').style.display = 'none'; });
 
+$('pcOpen').addEventListener('click', openPcCode);
+$('pcClose').addEventListener('click', () => { clearInterval(pcTimer); $('pcModal').style.display = 'none'; });
 start();
 </script>
 </body>

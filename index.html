@@ -57,6 +57,10 @@
   .tile .tag { font-size: 12px; color: var(--c); background: var(--soft); border-radius: 999px; padding: 1px 8px; align-self: flex-start; }
   .tile .desc { font-size: 13px; color: var(--muted); }
   .empty { font-size: 15px; color: var(--muted); margin-top: 20px; text-align: center; }
+  .tile.mnt { background: #F1F2F4; color: #8A9199; cursor: not-allowed; }
+  .tile.mnt.tester { background: #FFF8E6; color: var(--ink); cursor: pointer; }
+  .tile .mtag { font-size: 12px; color: #8A5A00; background: #FCE9C2; border-radius: 999px; padding: 1px 8px; align-self: flex-start; }
+  .notice { background: #FFF8E6; border: 1px solid #F2D58A; border-radius: 14px; padding: 12px 16px; margin-top: 14px; font-size: 15px; white-space: pre-wrap; }
   .overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,.92); z-index: 50; align-items: center; justify-content: center; flex-direction: column; }
 </style>
 </head>
@@ -81,7 +85,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-07e';
+const PAGE_VERSION = '2026-10-08a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -197,6 +201,11 @@ async function start() {
   lap('LINE WORKS', T0);
   const res = await callAuth();
   if (!res) return;
+  if (res.ok && res.maintenance && res.maintenance.all && !res.maintenance.tester) {
+    // ポータル全体のメンテナンス中(確認用の人以外)
+    show('ただいまメンテナンス中です。' + (res.maintenance.message ? '\n' + res.maintenance.message : '\nしばらくしてから開き直してください。'), true);
+    return;
+  }
   if (res.ok && res.items) { renderPortal(res); return; }
   show(ERRORS[res.error] || ERRORS.internal_error, true);
   if (res.error === 'not_registered' && res.applyUrl) setAction('<a class="btn" href="' + esc(encodeURI(res.applyUrl)) + '">利用を申請する</a>');
@@ -292,15 +301,21 @@ function renderPortal(res, at) {
     $('today').innerHTML = '';
   }
 
+  // 確認用の人がメンテナンス中に開いたときは、そのことを上に表示する
+  const mt = res.maintenance || {};
+  const notice = mt.all ? 'ポータル全体がメンテナンス中です(確認用として表示しています)。' + (mt.message ? '\n' + mt.message : '') : '';
+  if (notice) $('today').insertAdjacentHTML('afterbegin', '<div class="notice">' + esc(notice) + '</div>');
+
   // ツールのカード(カテゴリごと。カテゴリは表に出てきた順)
   const cats = [];
   res.items.forEach(it => { const c = it.category || 'ツール'; if (cats.indexOf(c) === -1) cats.push(c); });
   $('tools').innerHTML = res.items.length ? cats.map(c =>
     '<div class="cat">' + esc(c) + '</div><div class="grid">' + res.items.filter(it => (it.category || 'ツール') === c).map(it =>
-      '<button class="tile" data-key="' + esc(it.key) + '">' +
+      '<button class="tile' + (it.maintenance ? ' mnt' + (mt.tester ? ' tester' : '') : '') + '" data-key="' + esc(it.key) + '">' +
       '<span class="icon">' + esc(it.icon || (it.kind === 'link' ? '🔗' : '📋')) + '</span>' +
       '<span class="name">' + esc(it.label) + '</span>' +
       (it.storeName ? '<span class="tag">' + esc(it.storeName) + '</span>' : '') +
+      (it.maintenance ? '<span class="mtag">' + (mt.tester ? 'メンテナンス中(確認用)' : 'メンテナンス中') + '</span>' : '') +
       (it.desc ? '<span class="desc">' + esc(it.desc) + '</span>' : '') + '</button>'
     ).join('') + '</div>'
   ).join('') : '<div class="empty">使えるツールはまだありません。</div>';
@@ -344,6 +359,8 @@ $('tools').addEventListener('click', async e => {
   const key = b.getAttribute('data-key');
   let it = DATA.items.find(x => x.key === key);
   if (!it) return;
+  // メンテナンス中のツールは、確認用の人以外は開かない
+  if (it.maintenance && !(DATA.maintenance && DATA.maintenance.tester)) { alert('このツールはメンテナンス中です。しばらくしてから開いてください。'); return; }
   if (it.kind !== 'link' && !sessionOk()) {
     $('overlay').style.display = 'flex';
     const res = await callAuth();

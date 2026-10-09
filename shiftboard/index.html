@@ -52,7 +52,20 @@
   .tl th.hr { text-align: left; padding: 3px 0 3px 2px; border-left: 1px solid var(--line); color: var(--muted); font-weight: 400; }
   .tl td.s { width: 14px; min-width: 14px; height: 24px; padding: 0; }
   .tl td.s.hb { border-left: 1px solid var(--line); }
-  .tl td.s.on { background: var(--req); }
+  .tl td.s.on { background: #FFF6B3; }
+  .tl td.s.cf { background: #2F6FBF; }
+  .tl td.s.cf.out { background: #E07A1F; }
+  .tl td.s.sel { background: #9CC2F0 !important; }
+  .tl tbody tr.staff td.s { cursor: pointer; }
+  .grid-wrap { user-select: none; -webkit-user-select: none; }
+  .bar2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 8px; }
+  #saveState { font-size: 13px; padding: 4px 10px; border-radius: 999px; background: #E9EFEC; }
+  #saveState.dirty { background: #FFF1D6; color: #8A5A00; }
+  #saveState.err { background: #FDECEA; color: var(--err); }
+  .warn { font-size: 11px; color: #B4581F; }
+  #editor { display: none; position: fixed; z-index: 70; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.15); padding: 12px 14px; }
+  #editor .row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+  .legend span { display: inline-block; width: 14px; height: 12px; vertical-align: middle; margin: 0 4px 0 10px; border-radius: 2px; }
   .tl tr.sum td { background: #F5F6F8; font-weight: 700; }
   .tl tr.sum td.s { text-align: center; font-size: 10px; color: var(--muted); }
   .tl tr.sum td.s.low { background: #F8B4B4; color: var(--err); }
@@ -86,6 +99,13 @@
       <span id="msg" class="muted"></span>
     </div>
     <div class="strip" id="strip"></div>
+    <div class="bar2">
+      <button class="btn" id="fillAll">全員を希望どおりに確定</button>
+      <button class="btn" id="clearDay">この日の確定を消す</button>
+      <button class="btn solid" id="saveDay">この日を保存</button>
+      <span id="saveState">保存済み</span>
+      <span class="muted legend"><span style="background:#FFF6B3;border:1px solid #E5D97A"></span>希望<span style="background:#2F6FBF"></span>確定<span style="background:#E07A1F"></span>確定(希望の外)</span>
+    </div>
     <div class="dayhead">
       <button class="btn" id="prev">‹ 前の日</button>
       <h2 id="dayTitle"></h2>
@@ -95,14 +115,20 @@
     <div class="grid-wrap"><table class="tl" id="grid"></table></div>
     <div class="side">
       <div class="box"><h3>この店舗の未提出(この月)</h3><div id="unsub" class="muted"></div></div>
-      <div class="box"><h3>見方</h3><div class="muted">黄色＝出勤できる時間(希望)。下の行は必要人数(シフト設定)・時間ごとの人数(必要人数に届かない時間は赤)・グレード集計(最低人数を下回る時間は赤)。<br>上の帯の数字＝その日にこの店舗で希望を出した人数。下線が赤い日は、人数かグレード集計に不足がある日。</div></div>
+      <div class="box"><h3>見方</h3><div class="muted">薄い黄色＝希望、青＝確定、オレンジ＝希望の外に置いた確定。<br>行の上をドラッグ＝その時間を確定／希望をクリック＝希望どおりに確定／確定をクリック＝時刻の変更・削除。<br>変更は2秒後に自動で保存(「この日を保存」ですぐ保存)。<br>下の行：必要人数・確定人数(必要人数に届かない時間は赤)・希望人数(参考)・グレード集計(確定で数える)。上の帯：確定人数/希望人数。下線が赤い日は確定に不足がある日。</div></div>
     </div>
     <div class="muted" id="ver" style="margin-top:10px;"></div>
   </div>
 </div>
 
+<div id="editor">
+  <div style="font-weight:700;" id="edTitle"></div>
+  <div class="row"><select id="edStart"></select>〜<select id="edEnd"></select></div>
+  <div class="row"><button class="btn solid" id="edOk">変更</button><button class="btn" id="edDel">削除</button><button class="btn" id="edClose">閉じる</button></div>
+  <div class="muted" id="edMsg" style="margin-top:6px;"></div>
+</div>
 <script>
-var PAGE_VERSION = '2026-10-11b';
+var PAGE_VERSION = '2026-10-12a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -133,63 +159,75 @@ var B = null;          // board.get の返事
 var STORE = '';        // 表示中の店舗
 var DAY = 1;           // 表示中の日
 var W = '日月火水木金土';
+// 確定シフト(画面で組んでいる中身)：CONF['店舗:日'] = [[uid, 開始, 終了], …] ／ VER = 読み込んだときの版 ／ DIRTY = 未保存の日
+var CONF = {}, VER = {}, DIRTY = {}, SAVING = false, saveTimer = null;
 function hm(t) { return ('0' + Math.floor(t / 60)).slice(-2) + ':' + ('0' + (t % 60)).slice(-2); }
 function mins(s) { var p = String(s).split(':'); return Number(p[0]) * 60 + Number(p[1]); }
 function storeOf(code) { return B.stores.filter(function (s) { return s.code === code; })[0]; }
 function cols() { var st = storeOf(STORE), out = []; for (var t = st.start; t < st.end; t += B.slot) out.push(t); return out; }
 function reqOf(day, store) { return B.req.filter(function (r) { return r[0] === day && (!store || r[1] === store); }); }
 function covered(rs, t) { return rs.some(function (r) { return mins(r[2]) <= t && t < mins(r[3]); }); }
+function key(store, day) { return store + ':' + day; }
+function confOf(store, day) { return CONF[key(store, day)] || []; }
+function confCovers(list, uid, t) { return list.some(function (c) { return c[0] === uid && mins(c[1]) <= t && t < mins(c[2]); }); }
 
-// その日の集計(人数・グレード集計)と、不足があるか
-function sums(day) {
-  var cs = cols(), rs = reqOf(day, STORE);
-  var uids = []; rs.forEach(function (r) { if (uids.indexOf(r[4]) === -1) uids.push(r[4]); });
-  var count = cs.map(function (t) { return uids.filter(function (u) { return covered(rs.filter(function (r) { return r[4] === u; }), t); }).length; });
-  var crit = (B.criteria || []).map(function (c) {
-    return { c: c, n: cs.map(function (t) { return uids.filter(function (u) {
-      var p = B.staff[u] || {}; return c.grades.indexOf(String(p.grade)) !== -1 && covered(rs.filter(function (r) { return r[4] === u; }), t);
-    }).length; }) };
-  });
-  // 必要人数(シフト設定の「必要人数」。その日のパターン)
-  var nd = ((B.needs || {})[STORE] || {})[day] || null;
-  var need = cs.map(function (t) { return nd ? nd.ranges.filter(function (x) { return x[0] <= t && t < x[1]; }).reduce(function (a, x) { return Math.max(a, x[2]); }, 0) : 0; });
-  var short = crit.some(function (x) { return x.c.min && x.n.some(function (n) { return n < x.c.min; }); }) ||
-    count.some(function (n, i) { return n < need[i]; });
-  return { cols: cs, uids: uids, count: count, crit: crit, short: short, need: need, pattern: nd ? nd.pattern : '' };
+function initConf() {
+  CONF = {}; VER = {}; DIRTY = {};
+  B.conf.forEach(function (c) { (CONF[key(c[1], c[0])] = CONF[key(c[1], c[0])] || []).push([c[4], c[2], c[3]]); });
+  Object.keys(B.ver || {}).forEach(function (st) { Object.keys(B.ver[st]).forEach(function (d) { VER[key(st, d)] = B.ver[st][d]; }); });
 }
 
-// ポータルが先読みしたデータ(3分以内)があれば、待たずに表示して、裏で最新を確かめる
+// その日の集計：希望人数・確定人数・必要人数・グレード集計(確定で数える)
+function sums(day) {
+  var cs = cols(), rs = reqOf(day, STORE), cf = confOf(STORE, day);
+  var reqU = [], cfU = [];
+  rs.forEach(function (r) { if (reqU.indexOf(r[4]) === -1) reqU.push(r[4]); });
+  cf.forEach(function (c) { if (cfU.indexOf(c[0]) === -1) cfU.push(c[0]); });
+  var reqCount = cs.map(function (t) { return reqU.filter(function (u) { return covered(rs.filter(function (r) { return r[4] === u; }), t); }).length; });
+  var count = cs.map(function (t) { return cfU.filter(function (u) { return confCovers(cf, u, t); }).length; });
+  var crit = (B.criteria || []).map(function (c) {
+    return { c: c, n: cs.map(function (t) { return cfU.filter(function (u) { var p = B.staff[u] || {}; return c.grades.indexOf(String(p.grade)) !== -1 && confCovers(cf, u, t); }).length; }) };
+  });
+  var nd = ((B.needs || {})[STORE] || {})[day] || null;
+  var need = cs.map(function (t) { return nd ? nd.ranges.filter(function (x) { return x[0] <= t && t < x[1]; }).reduce(function (a, x) { return Math.max(a, x[2]); }, 0) : 0; });
+  var short = crit.some(function (x) { return x.c.min && x.n.some(function (n) { return n < x.c.min; }); }) || count.some(function (n, i) { return n < need[i]; });
+  return { cols: cs, reqU: reqU, cfU: cfU, reqCount: reqCount, count: count, crit: crit, need: need, pattern: nd ? nd.pattern : '', short: short };
+}
+
+function load(month, quiet) {
+  if (!quiet) g('msg').textContent = '読み込んでいます…';
+  return api('board.get', month ? { month: month } : {}).then(function (res) {
+    if (!res.ok) {
+      if (quiet) return;
+      gate(res.error === 'AUTH' ? (res.reason === 'no_permission' ? 'シフト作成を使う権限がありません。' : 'ログインの期限が切れました。\nポータルから開き直してください。') : '開けませんでした：' + res.error, true);
+      return;
+    }
+    if (quiet && Object.keys(DIRTY).length) return; // 組んでいる途中なら、裏での読み直しで上書きしない
+    showBoard(res.board);
+  }).catch(function (e) { if (!quiet) { gate('通信に失敗しました。\n開き直してください。', true); g('gdetail').textContent = e.message; } });
+}
+var HOW = '取得';
 function readPrefetch() {
   try {
     var x = JSON.parse(sessionStorage.getItem('prefetch_shiftboard') || 'null');
     return x && Date.now() - x.at < 3 * 60 * 1000 && x.board ? x.board : null;
   } catch (e) { return null; }
 }
-var HOW = '取得';
-function load(month, quiet) {
-  if (!quiet) g('msg').textContent = '読み込んでいます…';
-  return api('board.get', month ? { month: month } : {}).then(function (res) {
-    if (!res.ok) {
-      if (quiet) return; // 裏での確認の失敗は、表示中の内容をそのまま使う
-      gate(res.error === 'AUTH' ? (res.reason === 'no_permission' ? 'シフト作成を使う権限がありません。' : 'ログインの期限が切れました。\nポータルから開き直してください。') : '開けませんでした：' + res.error, true);
-      return;
-    }
-    showBoard(res.board);
-  }).catch(function (e) { if (!quiet) { gate('通信に失敗しました。\n開き直してください。', true); g('gdetail').textContent = e.message; } });
-}
 function showBoard(board) {
-    B = board;
-    if (!STORE || !storeOf(STORE)) STORE = B.stores[0] ? B.stores[0].code : '';
-    if (DAY > B.days.length) DAY = 1;
-    g('gate').style.display = 'none'; g('app').style.display = 'block';
-    g('me').textContent = S.name ? S.name + ' さん' : '';
-    g('msg').textContent = '';
-    if (!showBoard.shown) {
-      showBoard.shown = true;
-      g('ver').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + ((Date.now() - T0) / 1000).toFixed(1) + '秒(' + HOW + ')' +
-        (B.timing ? '(サーバー：データ ' + (B.timing['データ'] / 1000).toFixed(1) + '秒)' : '');
-    }
-    renderAll();
+  B = board;
+  initConf();
+  if (!STORE || !storeOf(STORE)) STORE = B.stores[0] ? B.stores[0].code : '';
+  if (DAY > B.days.length) DAY = 1;
+  g('gate').style.display = 'none'; g('app').style.display = 'block';
+  g('me').textContent = S.name ? S.name + ' さん' : '';
+  g('msg').textContent = '';
+  if (!showBoard.shown) {
+    showBoard.shown = true;
+    g('ver').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + ((Date.now() - T0) / 1000).toFixed(1) + '秒(' + HOW + ')' +
+      (B.timing ? '(サーバー：データ ' + (B.timing['データ'] / 1000).toFixed(1) + '秒)' : '');
+  }
+  setState('保存済み', '');
+  renderAll();
 }
 
 function renderAll() {
@@ -203,25 +241,29 @@ function renderAll() {
 
 function renderStrip() {
   g('strip').innerHTML = B.days.map(function (x) {
-    var n = []; reqOf(x.d, STORE).forEach(function (r) { if (n.indexOf(r[4]) === -1) n.push(r[4]); });
-    var cls = (x.w === 0 || x.hol ? ' sun' : (x.w === 6 ? ' sat' : '')) + (x.d === DAY ? ' on' : '') + (sums(x.d).short ? ' short' : '');
-    return '<div class="dcell' + cls + '" data-d="' + x.d + '" title="' + esc(x.hol) + '">' + x.d + '(' + W.charAt(x.w) + ')<div class="n">' + n.length + '</div></div>';
+    var sm = sums(x.d);
+    var cls = (x.w === 0 || x.hol ? ' sun' : (x.w === 6 ? ' sat' : '')) + (x.d === DAY ? ' on' : '') + (sm.short ? ' short' : '');
+    return '<div class="dcell' + cls + '" data-d="' + x.d + '" title="確定/希望の人数' + (x.hol ? '・' + esc(x.hol) : '') + '">' + x.d + '(' + W.charAt(x.w) + ')<div class="n">' +
+      sm.cfU.length + '<span class="muted">/' + sm.reqU.length + '</span>' + (DIRTY[key(STORE, x.d)] ? '*' : '') + '</div></div>';
   }).join('');
 }
 
 function renderDay() {
   var x = B.days[DAY - 1];
   g('dayTitle').textContent = B.label + DAY + '日(' + W.charAt(x.w) + ')' + (x.hol ? ' ' + x.hol : '');
-  var sm = sums(DAY), cs = sm.cols, perHour = 60 / B.slot;
-  var h = '<thead><tr><th class="fix c0">氏名</th><th class="fix c1">グレード</th><th class="fix c2">希望</th>';
+  var sm = sums(DAY), cs = sm.cols, cf = confOf(STORE, DAY);
+  var h = '<thead><tr><th class="fix c0">氏名</th><th class="fix c1">グレード</th><th class="fix c2">希望・確定</th>';
   cs.forEach(function (t, i) { if (t % 60 === 0 || i === 0) { var span = 0; for (var j = i; j < cs.length && (j === i || cs[j] % 60 !== 0); j++) span++; h += '<th class="hr" colspan="' + span + '">' + Math.floor(t / 60) + '</th>'; } });
   h += '</tr></thead><tbody>';
   var all = reqOf(DAY);
-  var uids = sm.uids.slice().sort(function (a, b) {
-    var fa = Math.min.apply(null, all.filter(function (r) { return r[4] === a && r[1] === STORE; }).map(function (r) { return mins(r[2]); }));
-    var fb = Math.min.apply(null, all.filter(function (r) { return r[4] === b && r[1] === STORE; }).map(function (r) { return mins(r[2]); }));
-    return fa - fb;
-  });
+  var first = function (u) {
+    var ts = all.filter(function (r) { return r[4] === u && r[1] === STORE; }).map(function (r) { return mins(r[2]); })
+      .concat(cf.filter(function (c) { return c[0] === u; }).map(function (c) { return mins(c[1]); }));
+    return ts.length ? Math.min.apply(null, ts) : 99999;
+  };
+  var uids = sm.reqU.slice();
+  sm.cfU.forEach(function (u) { if (uids.indexOf(u) === -1) uids.push(u); });
+  uids.sort(function (a, b) { return first(a) - first(b); });
   if (g('showAll').checked) {
     Object.keys(B.staff).forEach(function (u) {
       var p = B.staff[u];
@@ -232,24 +274,31 @@ function renderDay() {
     var p = B.staff[u] || { name: u, grade: '' };
     var mine = all.filter(function (r) { return r[4] === u && r[1] === STORE; });
     var others = all.filter(function (r) { return r[4] === u && r[1] !== STORE; });
-    var otherTxt = others.map(function (r) { return (storeOf(r[1]) ? storeOf(r[1]).name : r[1]) + ' ' + r[2] + '-' + r[3]; }).join(' / ');
-    h += '<tr' + (mine.length ? '' : ' class="none"') + '><td class="fix c0">' + esc(p.name) + '</td><td class="fix c1">' + esc(p.grade) + '</td>' +
-      '<td class="fix c2">' + esc(mine.map(function (r) { return r[2] + '-' + r[3]; }).join(' / ') || '(希望なし)') +
-      (otherTxt ? '<div class="other">他店舗：' + esc(otherTxt) + '</div>' : '') + '</td>';
-    cs.forEach(function (t, i) { h += '<td class="s' + (t % 60 === 0 ? ' hb' : '') + (covered(mine, t) ? ' on' : '') + '" title="' + esc(p.name) + ' ' + hm(t) + '"></td>'; });
+    var myCf = cf.filter(function (c) { return c[0] === u; });
+    var otherCf = [];
+    B.stores.forEach(function (st) { if (st.code !== STORE) confOf(st.code, DAY).forEach(function (c) { if (c[0] === u) otherCf.push(st.name + ' ' + c[1] + '-' + c[2]); }); });
+    var outside = myCf.some(function (c) { for (var t = mins(c[1]); t < mins(c[2]); t += B.slot) if (!covered(mine, t)) return true; return false; });
+    h += '<tr class="staff' + (mine.length || myCf.length ? '' : ' none') + '" data-u="' + esc(u) + '"><td class="fix c0">' + esc(p.name) + '</td><td class="fix c1">' + esc(p.grade) + '</td>' +
+      '<td class="fix c2">希望 ' + esc(mine.map(function (r) { return r[2] + '-' + r[3]; }).join(' / ') || 'なし') +
+      (myCf.length ? '<div>確定 <b>' + esc(myCf.map(function (c) { return c[1] + '-' + c[2]; }).join(' / ')) + '</b>' + (outside ? ' <span class="warn">希望の外あり</span>' : '') + '</div>' : '') +
+      (others.length ? '<div class="other">他店舗の希望：' + esc(others.map(function (r) { return (storeOf(r[1]) ? storeOf(r[1]).name : r[1]) + ' ' + r[2] + '-' + r[3]; }).join(' / ')) + '</div>' : '') +
+      (otherCf.length ? '<div class="other">他店舗で確定：' + esc(otherCf.join(' / ')) + '</div>' : '') + '</td>';
+    cs.forEach(function (t) {
+      var on = covered(mine, t), c = confCovers(cf, u, t);
+      h += '<td class="s' + (t % 60 === 0 ? ' hb' : '') + (on ? ' on' : '') + (c ? ' cf' + (on ? '' : ' out') : '') + '" data-t="' + t + '" title="' + esc(p.name) + ' ' + hm(t) + '"></td>';
+    });
     h += '</tr>';
   });
-  if (!uids.length) h += '<tr class="none"><td class="fix c0" colspan="3">この日の希望はありません</td>' + cs.map(function () { return '<td class="s"></td>'; }).join('') + '</tr>';
-  if (sm.need.some(function (n) { return n > 0; })) {
-    h += '<tr class="sum"><td class="fix c0">必要人数</td><td class="fix c1"></td><td class="fix c2">' + esc(sm.pattern) + '</td>' +
-      sm.need.map(function (n, i) { return '<td class="s' + (cs[i] % 60 === 0 ? ' hb' : '') + '">' + (n || '') + '</td>'; }).join('') + '</tr>';
-  }
-  h += '<tr class="sum"><td class="fix c0">人数</td><td class="fix c1"></td><td class="fix c2">' + (sm.need.some(function (n) { return n > 0; }) ? '赤＝必要人数に届かない' : '') + '</td>' +
-    sm.count.map(function (n, i) { return '<td class="s' + (cs[i] % 60 === 0 ? ' hb' : '') + (n < sm.need[i] ? ' low' : '') + '">' + (n || '') + '</td>'; }).join('') + '</tr>';
-  sm.crit.forEach(function (x) {
-    h += '<tr class="sum"><td class="fix c0">' + esc(x.c.name) + '</td><td class="fix c1"></td><td class="fix c2">' + (x.c.min ? '最低' + x.c.min + '人' : '') + '</td>' +
-      x.n.map(function (n, i) { return '<td class="s' + (cs[i] % 60 === 0 ? ' hb' : '') + (x.c.min && n < x.c.min ? ' low' : '') + '">' + (n || '') + '</td>'; }).join('') + '</tr>';
-  });
+  if (!uids.length) h += '<tr class="none"><td class="fix c0" colspan="3">この日の希望はありません(「希望のない人も表示」で全員を出せます)</td>' + cs.map(function () { return '<td class="s"></td>'; }).join('') + '</tr>';
+  var hasNeed = sm.need.some(function (n) { return n > 0; });
+  var row = function (label, sub, arr, lowFn) {
+    return '<tr class="sum"><td class="fix c0">' + label + '</td><td class="fix c1"></td><td class="fix c2">' + sub + '</td>' +
+      arr.map(function (n, i) { return '<td class="s' + (cs[i] % 60 === 0 ? ' hb' : '') + (lowFn && lowFn(n, i) ? ' low' : '') + '">' + (n || '') + '</td>'; }).join('') + '</tr>';
+  };
+  if (hasNeed) h += row('必要人数', esc(sm.pattern), sm.need);
+  h += row('確定人数', hasNeed ? '赤＝必要人数に届かない' : '', sm.count, function (n, i) { return n < sm.need[i]; });
+  h += row('希望人数', '(参考)', sm.reqCount);
+  sm.crit.forEach(function (x) { h += row(esc(x.c.name), (x.c.min ? '最低' + x.c.min + '人(確定)' : ''), x.n, function (n) { return x.c.min && n < x.c.min; }); });
   g('grid').innerHTML = h + '</tbody>';
   g('prev').disabled = DAY <= 1; g('next').disabled = DAY >= B.days.length;
 }
@@ -259,18 +308,154 @@ function renderUnsub() {
   g('unsub').textContent = list.length ? list.join('、') : 'なし';
 }
 
-// ===== 操作 =====
-g('month').addEventListener('change', function () { DAY = 1; load(g('month').value); });
-g('tabs').addEventListener('click', function (e) { var b = e.target.closest('.tab'); if (!b) return; STORE = b.getAttribute('data-s'); renderAll(); });
-g('strip').addEventListener('click', function (e) { var c = e.target.closest('.dcell'); if (!c) return; DAY = Number(c.getAttribute('data-d')); renderStrip(); renderDay(); });
-g('prev').addEventListener('click', function () { if (DAY > 1) { DAY--; renderStrip(); renderDay(); } });
-g('next').addEventListener('click', function () { if (DAY < B.days.length) { DAY++; renderStrip(); renderDay(); } });
+// ===== 確定シフトの編集 =====
+// 同じ人の時間帯が重なる・隣り合うときは1つにまとめる
+function addConf(uid, s, e) {
+  var k = key(STORE, DAY);
+  var list = (CONF[k] || []).slice();
+  var mine = list.filter(function (c) { return c[0] === uid; }).concat([[uid, hm(s), hm(e)]]);
+  var rest = list.filter(function (c) { return c[0] !== uid; });
+  mine.sort(function (a, b) { return mins(a[1]) - mins(b[1]); });
+  var merged = [];
+  mine.forEach(function (c) {
+    var last = merged[merged.length - 1];
+    if (last && mins(c[1]) <= mins(last[2])) { if (mins(c[2]) > mins(last[2])) last[2] = c[2]; }
+    else merged.push([c[0], c[1], c[2]]);
+  });
+  CONF[k] = rest.concat(merged);
+  changed();
+}
+function changed() {
+  DIRTY[key(STORE, DAY)] = true;
+  setState('未保存(2秒後に保存)', 'dirty');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(function () { saveDay(STORE, DAY); }, 2000);
+  renderStrip(); renderDay();
+}
+function setState(t, cls) { g('saveState').textContent = t; g('saveState').className = cls || ''; }
+
+// 店舗×日を保存する(自動保存・「この日を保存」・別の日に移るとき)
+function saveDay(store, day) {
+  var k = key(store, day);
+  if (!DIRTY[k]) return Promise.resolve(true);
+  if (SAVING) return new Promise(function (ok) { setTimeout(function () { ok(saveDay(store, day)); }, 300); });
+  SAVING = true; clearTimeout(saveTimer);
+  setState('保存しています…', 'dirty');
+  var shifts = (CONF[k] || []).map(function (c) { return [c[0], c[1], c[2]]; });
+  return api('board.save', { month: B.month, store: store, day: day, shifts: shifts, ver: VER[k] || '' }).then(function (res) {
+    SAVING = false;
+    if (res.ok) {
+      VER[k] = res.ver; delete DIRTY[k];
+      var n = new Date(); setState('保存済み ' + n.getHours() + ':' + ('0' + n.getMinutes()).slice(-2), '');
+      renderStrip();
+      return true;
+    }
+    if (res.error === 'conflict') {
+      setState('ほかの人がこの日を変更しました', 'err');
+      g('msg').innerHTML = '<a href="#" id="reloadBoard">読み込み直す</a>(この日の、まだ保存していない変更は消えます)';
+      g('reloadBoard').addEventListener('click', function (e) { e.preventDefault(); DIRTY = {}; load(B.month); });
+      return false;
+    }
+    setState(res.error === 'AUTH' ? 'ログインの期限切れ(ポータルから開き直す)' : '保存できませんでした：' + res.error, 'err');
+    return false;
+  }).catch(function () { SAVING = false; setState('通信に失敗しました(もう一度「この日を保存」)', 'err'); return false; });
+}
+// 別の日・店舗・月に移る前に、未保存の分を保存する
+function leaveDay() { return saveDay(STORE, DAY); }
+
+// ドラッグ＝その時間を確定 ／ 希望をクリック＝希望どおりに確定 ／ 確定をクリック＝変更・削除
+var drag = null;
+g('grid').addEventListener('mousedown', function (e) {
+  var td = e.target.closest('td.s'), tr = e.target.closest('tr.staff');
+  if (!td || !tr) return;
+  e.preventDefault();
+  drag = { uid: tr.getAttribute('data-u'), t0: Number(td.getAttribute('data-t')), t1: Number(td.getAttribute('data-t')), tr: tr };
+  td.classList.add('sel');
+});
+g('grid').addEventListener('mouseover', function (e) {
+  if (!drag) return;
+  var td = e.target.closest('td.s'), tr = e.target.closest('tr.staff');
+  if (!td || tr !== drag.tr) return;
+  drag.t1 = Number(td.getAttribute('data-t'));
+  var a = Math.min(drag.t0, drag.t1), b = Math.max(drag.t0, drag.t1);
+  Array.prototype.forEach.call(drag.tr.querySelectorAll('td.s'), function (c) { var t = Number(c.getAttribute('data-t')); c.classList.toggle('sel', t >= a && t <= b); });
+});
+document.addEventListener('mouseup', function (e) {
+  if (!drag) return;
+  var d = drag; drag = null;
+  var a = Math.min(d.t0, d.t1), b = Math.max(d.t0, d.t1);
+  if (a !== b) { addConf(d.uid, a, b + B.slot); return; }
+  // クリック
+  var cf = confOf(STORE, DAY);
+  var hit = cf.filter(function (c) { return c[0] === d.uid && mins(c[1]) <= a && a < mins(c[2]); })[0];
+  if (hit) { openEditor(hit, e.clientX, e.clientY); renderDay(); return; }
+  var req = reqOf(DAY, STORE).filter(function (r) { return r[4] === d.uid && mins(r[2]) <= a && a < mins(r[3]); })[0];
+  if (req) { addConf(d.uid, mins(req[2]), mins(req[3])); return; }
+  renderDay(); // 何もない所のクリックは、選択を消すだけ
+});
+
+// 確定の時刻の変更・削除
+var editing = null;
+function openEditor(c, x, y) {
+  editing = c;
+  var st = storeOf(STORE), opts = [];
+  for (var t = st.start; t <= st.end; t += B.slot) opts.push(hm(t));
+  var p = B.staff[c[0]] || { name: c[0] };
+  g('edTitle').textContent = p.name + ' の確定';
+  g('edStart').innerHTML = opts.slice(0, -1).map(function (o) { return '<option' + (o === c[1] ? ' selected' : '') + '>' + o + '</option>'; }).join('');
+  g('edEnd').innerHTML = opts.slice(1).map(function (o) { return '<option' + (o === c[2] ? ' selected' : '') + '>' + o + '</option>'; }).join('');
+  g('edMsg').textContent = '';
+  var ed = g('editor');
+  ed.style.display = 'block';
+  ed.style.left = Math.min(x, window.innerWidth - 280) + 'px';
+  ed.style.top = Math.min(y + 10, window.innerHeight - 160) + 'px';
+}
+function closeEditor() { g('editor').style.display = 'none'; editing = null; }
+g('edClose').addEventListener('click', closeEditor);
+g('edDel').addEventListener('click', function () {
+  var k = key(STORE, DAY);
+  CONF[k] = (CONF[k] || []).filter(function (c) { return c !== editing; });
+  closeEditor(); changed();
+});
+g('edOk').addEventListener('click', function () {
+  var s1 = mins(g('edStart').value), e1 = mins(g('edEnd').value);
+  if (s1 >= e1) { g('edMsg').textContent = '開始は終了より前にしてください'; return; }
+  var k = key(STORE, DAY), uid = editing[0];
+  CONF[k] = (CONF[k] || []).filter(function (c) { return c !== editing; });
+  closeEditor();
+  addConf(uid, s1, e1);
+});
+
+g('fillAll').addEventListener('click', function () {
+  var cf = confOf(STORE, DAY), done = {};
+  cf.forEach(function (c) { done[c[0]] = true; });
+  var n = 0;
+  reqOf(DAY, STORE).forEach(function (r) { if (!done[r[4]]) { addConfQuiet(r[4], mins(r[2]), mins(r[3])); n++; } });
+  if (n) changed(); else g('msg').textContent = '希望どおりに確定できる人はいません(全員確定済みか、希望がありません)';
+});
+function addConfQuiet(uid, s, e) { var k = key(STORE, DAY); (CONF[k] = CONF[k] || []).push([uid, hm(s), hm(e)]); }
+g('clearDay').addEventListener('click', function () {
+  if (!confOf(STORE, DAY).length) return;
+  if (!confirm('この日(この店舗)の確定をすべて消しますか？')) return;
+  CONF[key(STORE, DAY)] = []; changed();
+});
+g('saveDay').addEventListener('click', function () { DIRTY[key(STORE, DAY)] = DIRTY[key(STORE, DAY)] || false; saveDay(STORE, DAY); });
+
+// ===== 操作(移動の前に保存する) =====
+g('month').addEventListener('change', function () { var m = g('month').value; leaveDay().then(function () { DAY = 1; load(m); }); });
+g('tabs').addEventListener('click', function (e) { var b = e.target.closest('.tab'); if (!b) return; var s2 = b.getAttribute('data-s'); leaveDay().then(function () { STORE = s2; closeEditor(); renderAll(); }); });
+g('strip').addEventListener('click', function (e) { var c = e.target.closest('.dcell'); if (!c) return; var d = Number(c.getAttribute('data-d')); leaveDay().then(function () { DAY = d; closeEditor(); renderStrip(); renderDay(); }); });
+g('prev').addEventListener('click', function () { if (DAY > 1) leaveDay().then(function () { DAY--; closeEditor(); renderStrip(); renderDay(); }); });
+g('next').addEventListener('click', function () { if (DAY < B.days.length) leaveDay().then(function () { DAY++; closeEditor(); renderStrip(); renderDay(); }); });
 g('showAll').addEventListener('change', renderDay);
 document.addEventListener('keydown', function (e) {
   if (!B || e.target.tagName === 'SELECT') return;
   if (e.key === 'ArrowLeft') g('prev').click();
   if (e.key === 'ArrowRight') g('next').click();
+  if (e.key === 'Escape') closeEditor();
 });
+// 閉じるときに未保存があれば知らせる
+window.addEventListener('beforeunload', function (e) { if (Object.keys(DIRTY).length) { e.preventDefault(); e.returnValue = ''; } });
 g('export').addEventListener('click', function () {
   g('export').disabled = true; g('msg').textContent = '書き出しています…';
   api('board.export', { month: B.month, store: STORE }).then(function (res) {

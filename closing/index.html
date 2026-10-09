@@ -108,7 +108,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-10-08a';
+var PAGE_VERSION = '2026-10-09a';
 var PORTAL_URL = '../';            // ポータル(同じサイト)
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -352,6 +352,113 @@ function startForm(D) {
   }
   progress();
 
+  // ---- 入力途中の内容の自動保存と復元 ----
+  // スマホの画面を消すとLINE WORKSのアプリ内のページが閉じることがあるので、入力のたびに端末の中に保存し、開き直したら戻す
+  // 保存するのは「この店舗・この営業日」の入力だけ(通行証などの秘密は含めない)。提出したら消す。36時間より古いものは開いたときに掃除する
+  var DRAFT_PREFIX = 'draft_closing_';
+  var DRAFT_MAX_MS = 36 * 60 * 60 * 1000;
+  var draftKeyNow = '';
+  var lastSaved = '';
+  function draftKey() { return DRAFT_PREFIX + D.store.code + '_' + $('date').value; }
+  function hasInput() {
+    return Object.keys(A).some(function (k) { return A[k] === true || (A[k] !== false && A[k] != null && String(A[k]).trim() !== ''); });
+  }
+  function saveDraft() {
+    try {
+      var key = draftKey();
+      var json = JSON.stringify(A);
+      if (key === draftKeyNow && json === lastSaved) return;
+      if (draftKeyNow && draftKeyNow !== key) localStorage.removeItem(draftKeyNow); // 営業日を切り替えたら、前の営業日の下書きは移す
+      draftKeyNow = key;
+      lastSaved = json;
+      if (hasInput()) localStorage.setItem(key, JSON.stringify({ at: Date.now(), answers: A }));
+      else localStorage.removeItem(key);
+    } catch (e) {}
+  }
+  function clearDraft() { try { localStorage.removeItem(draftKey()); lastSaved = ''; } catch (e) {} }
+  function cleanOldDrafts() {
+    try {
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var k = localStorage.key(i);
+        if (!k || k.indexOf(DRAFT_PREFIX) !== 0) continue;
+        var x = JSON.parse(localStorage.getItem(k) || 'null');
+        if (!x || Date.now() - x.at > DRAFT_MAX_MS) localStorage.removeItem(k);
+      }
+    } catch (e) {}
+  }
+  function sel(id) { return '[data-id="' + String(id).replace(/["\\]/g, '') + '"]'; }
+  // 下書きの値を画面に戻す(項目マスタから消えた項目は無視する)
+  function applyAnswers(ans) {
+    Object.keys(ans).forEach(function (id) {
+      var it = itemOf(id);
+      if (!it) return;
+      var v = ans[id];
+      if (it.type === 'チェック') {
+        A[id] = v === true;
+        var el = document.querySelector('.check' + sel(id));
+        if (el) { el.classList.toggle('on', A[id]); el.querySelector('.box').textContent = A[id] ? '✓' : ''; }
+      } else if (it.type === '選択') {
+        A[id] = v || '';
+        var box = document.querySelector('.chips' + sel(id));
+        if (box) Array.prototype.forEach.call(box.querySelectorAll('.chip'), function (c) { c.classList.toggle('on', c.getAttribute('data-v') === A[id]); });
+      } else {
+        var inp = document.querySelector('input' + sel(id) + ', textarea' + sel(id));
+        if (inp) { inp.value = v == null ? '' : String(v); inp.dispatchEvent(new Event('input')); }
+      }
+    });
+    progress();
+    updateRequired();
+  }
+  function restoreDraft() {
+    try {
+      var x = JSON.parse(localStorage.getItem(draftKey()) || 'null');
+      draftKeyNow = draftKey();
+      if (!x || !x.answers || Date.now() - x.at > DRAFT_MAX_MS) return;
+      applyAnswers(x.answers);
+      lastSaved = JSON.stringify(A);
+      var t = new Date(x.at);
+      $('main').insertAdjacentHTML('afterbegin', '<div class="card" id="draftNote" style="background:#FFF8E6;border-color:#F2D58A;font-size:15px;">' +
+        '入力途中の内容を戻しました(' + t.getHours() + ':' + ('0' + t.getMinutes()).slice(-2) + 'に保存)。' +
+        '<br><a href="#" id="draftReset">最初から入力する</a></div>');
+      $('draftReset').addEventListener('click', function (e) {
+        e.preventDefault();
+        if (!window.confirm('入力した内容を消して、最初から入力しますか？')) return;
+        clearDraft();
+        location.reload();
+      });
+    } catch (e) {}
+  }
+  cleanOldDrafts();
+  restoreDraft();
+  // 入力のたび(各項目の処理が終わった直後)・3秒おき・画面を離れるときに保存する
+  $('main').addEventListener('input', function () { setTimeout(saveDraft, 0); });
+  $('main').addEventListener('click', function () { setTimeout(saveDraft, 0); });
+  $('date').addEventListener('change', function () { setTimeout(saveDraft, 0); });
+  setInterval(saveDraft, 3000);
+  window.addEventListener('pagehide', saveDraft);
+
+  // ---- フォームを開いている間は、画面が自動で消えないようにする(対応している端末だけ) ----
+  var wakeLock = null, finished = false;
+  function wakeStatus(t) { var el = $('wakeState'); if (el) el.textContent = t; }
+  function requestWake() {
+    if (!('wakeLock' in navigator)) { wakeStatus('・画面オフ抑止：非対応'); return; }
+    navigator.wakeLock.request('screen').then(function (l) {
+      wakeLock = l; wakeStatus('・画面オフ抑止：有効');
+      l.addEventListener('release', function () { wakeStatus('・画面オフ抑止：解除'); });
+    }).catch(function () { wakeStatus('・画面オフ抑止：使えません'); });
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') saveDraft();
+    else if (!finished) requestWake(); // 画面に戻ってきたら、もう一度お願いする(離れると自動で解除されるため)
+  });
+  $('timing').insertAdjacentHTML('beforeend', '<span id="wakeState"></span>');
+  requestWake();
+  function finishForm() {
+    finished = true;
+    clearDraft();
+    if (wakeLock) { try { wakeLock.release(); } catch (e) {} }
+  }
+
   function cardOf(el) { return el.closest('.card'); }
   function clearMissing(el) { var c = cardOf(el); if (c) c.classList.remove('missing'); $('error').textContent = ''; }
 
@@ -391,6 +498,7 @@ function startForm(D) {
           if (window.confirm('この営業日の締めチェックは提出済みです。\n内容を上書きしますか？')) submit(true);
           return;
         }
+        finishForm(); // 提出できたので、下書きを消し、画面オフの抑止を解除する
         $('main').style.display = 'none';
         $('bar').style.display = 'none';
         $('doneMsg').textContent = res.notified ? 'チャットに報告しました。' : '記録しました（チャットへの報告は失敗したため、管理者に通知しました）。';

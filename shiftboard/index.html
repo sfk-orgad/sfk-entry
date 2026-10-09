@@ -102,7 +102,7 @@
 </div>
 
 <script>
-var PAGE_VERSION = '2026-10-11a';
+var PAGE_VERSION = '2026-10-11b';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -158,22 +158,38 @@ function sums(day) {
   return { cols: cs, uids: uids, count: count, crit: crit, short: short, need: need, pattern: nd ? nd.pattern : '' };
 }
 
-function load(month) {
-  g('msg').textContent = '読み込んでいます…';
+// ポータルが先読みしたデータ(3分以内)があれば、待たずに表示して、裏で最新を確かめる
+function readPrefetch() {
+  try {
+    var x = JSON.parse(sessionStorage.getItem('prefetch_shiftboard') || 'null');
+    return x && Date.now() - x.at < 3 * 60 * 1000 && x.board ? x.board : null;
+  } catch (e) { return null; }
+}
+var HOW = '取得';
+function load(month, quiet) {
+  if (!quiet) g('msg').textContent = '読み込んでいます…';
   return api('board.get', month ? { month: month } : {}).then(function (res) {
     if (!res.ok) {
+      if (quiet) return; // 裏での確認の失敗は、表示中の内容をそのまま使う
       gate(res.error === 'AUTH' ? (res.reason === 'no_permission' ? 'シフト作成を使う権限がありません。' : 'ログインの期限が切れました。\nポータルから開き直してください。') : '開けませんでした：' + res.error, true);
       return;
     }
-    B = res.board;
+    showBoard(res.board);
+  }).catch(function (e) { if (!quiet) { gate('通信に失敗しました。\n開き直してください。', true); g('gdetail').textContent = e.message; } });
+}
+function showBoard(board) {
+    B = board;
     if (!STORE || !storeOf(STORE)) STORE = B.stores[0] ? B.stores[0].code : '';
     if (DAY > B.days.length) DAY = 1;
     g('gate').style.display = 'none'; g('app').style.display = 'block';
     g('me').textContent = S.name ? S.name + ' さん' : '';
     g('msg').textContent = '';
-    g('ver').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + ((Date.now() - T0) / 1000).toFixed(1) + '秒';
+    if (!showBoard.shown) {
+      showBoard.shown = true;
+      g('ver').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + ((Date.now() - T0) / 1000).toFixed(1) + '秒(' + HOW + ')' +
+        (B.timing ? '(サーバー：データ ' + (B.timing['データ'] / 1000).toFixed(1) + '秒)' : '');
+    }
     renderAll();
-  }).catch(function (e) { gate('通信に失敗しました。\n開き直してください。', true); g('gdetail').textContent = e.message; });
 }
 
 function renderAll() {
@@ -266,7 +282,11 @@ g('export').addEventListener('click', function () {
 
 if (!S || !S.token || S.exp < Date.now()) gate('ポータルから開き直してください。\n(ログインの期限が切れたか、直接開かれました)', true);
 else if (!API) gate('シフト作成を開く権限がないか、ポータルの設定が足りません。\nポータルから開き直してください。', true);
-else load('');
+else {
+  var pre = readPrefetch();
+  if (pre) { HOW = '先読み'; showBoard(pre); load(pre.month, true); } // 表示してから裏で最新を確かめる
+  else load('');
+}
 </script>
 </body>
 </html>

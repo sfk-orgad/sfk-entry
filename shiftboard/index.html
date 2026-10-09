@@ -128,7 +128,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-10-12a';
+var PAGE_VERSION = '2026-10-12b';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -173,6 +173,8 @@ function confCovers(list, uid, t) { return list.some(function (c) { return c[0] 
 
 function initConf() {
   CONF = {}; VER = {}; DIRTY = {};
+  // Botが古い版(確定シフトを返さない)ときや、更新前に先読みしたデータでも止まらないように
+  B.conf = B.conf || []; B.ver = B.ver || {}; B.needs = B.needs || {}; B.criteria = B.criteria || [];
   B.conf.forEach(function (c) { (CONF[key(c[1], c[0])] = CONF[key(c[1], c[0])] || []).push([c[4], c[2], c[3]]); });
   Object.keys(B.ver || {}).forEach(function (st) { Object.keys(B.ver[st]).forEach(function (d) { VER[key(st, d)] = B.ver[st][d]; }); });
 }
@@ -210,10 +212,17 @@ var HOW = '取得';
 function readPrefetch() {
   try {
     var x = JSON.parse(sessionStorage.getItem('prefetch_shiftboard') || 'null');
-    return x && Date.now() - x.at < 3 * 60 * 1000 && x.board ? x.board : null;
+    return x && Date.now() - x.at < 3 * 60 * 1000 && x.board && x.board.conf ? x.board : null; // 確定シフトを含まない古いデータは使わない
   } catch (e) { return null; }
 }
 function showBoard(board) {
+  try { showBoardInner(board); }
+  catch (e) {
+    gate('画面を表示できませんでした。\nBotが新しい版になっているか確認してください。', true);
+    g('gdetail').textContent = '[表示] ' + (e && e.message ? e.message : e);
+  }
+}
+function showBoardInner(board) {
   B = board;
   initConf();
   if (!STORE || !storeOf(STORE)) STORE = B.stores[0] ? B.stores[0].code : '';

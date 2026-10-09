@@ -95,14 +95,14 @@
     <div class="grid-wrap"><table class="tl" id="grid"></table></div>
     <div class="side">
       <div class="box"><h3>この店舗の未提出(この月)</h3><div id="unsub" class="muted"></div></div>
-      <div class="box"><h3>見方</h3><div class="muted">黄色＝出勤できる時間(希望)。下の行は時間ごとの人数と、グレード集計(最低人数を下回る時間は赤)。<br>上の帯の数字＝その日にこの店舗で希望を出した人数。下線が赤い日は、営業時間の中に集計の不足がある日。</div></div>
+      <div class="box"><h3>見方</h3><div class="muted">黄色＝出勤できる時間(希望)。下の行は必要人数(シフト設定)・時間ごとの人数(必要人数に届かない時間は赤)・グレード集計(最低人数を下回る時間は赤)。<br>上の帯の数字＝その日にこの店舗で希望を出した人数。下線が赤い日は、人数かグレード集計に不足がある日。</div></div>
     </div>
     <div class="muted" id="ver" style="margin-top:10px;"></div>
   </div>
 </div>
 
 <script>
-var PAGE_VERSION = '2026-10-10b';
+var PAGE_VERSION = '2026-10-11a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -150,8 +150,12 @@ function sums(day) {
       var p = B.staff[u] || {}; return c.grades.indexOf(String(p.grade)) !== -1 && covered(rs.filter(function (r) { return r[4] === u; }), t);
     }).length; }) };
   });
-  var short = crit.some(function (x) { return x.c.min && x.n.some(function (n) { return n < x.c.min; }); });
-  return { cols: cs, uids: uids, count: count, crit: crit, short: short };
+  // 必要人数(シフト設定の「必要人数」。その日のパターン)
+  var nd = ((B.needs || {})[STORE] || {})[day] || null;
+  var need = cs.map(function (t) { return nd ? nd.ranges.filter(function (x) { return x[0] <= t && t < x[1]; }).reduce(function (a, x) { return Math.max(a, x[2]); }, 0) : 0; });
+  var short = crit.some(function (x) { return x.c.min && x.n.some(function (n) { return n < x.c.min; }); }) ||
+    count.some(function (n, i) { return n < need[i]; });
+  return { cols: cs, uids: uids, count: count, crit: crit, short: short, need: need, pattern: nd ? nd.pattern : '' };
 }
 
 function load(month) {
@@ -220,7 +224,12 @@ function renderDay() {
     h += '</tr>';
   });
   if (!uids.length) h += '<tr class="none"><td class="fix c0" colspan="3">この日の希望はありません</td>' + cs.map(function () { return '<td class="s"></td>'; }).join('') + '</tr>';
-  h += '<tr class="sum"><td class="fix c0">人数</td><td class="fix c1"></td><td class="fix c2"></td>' + sm.count.map(function (n, i) { return '<td class="s' + (cs[i] % 60 === 0 ? ' hb' : '') + '">' + (n || '') + '</td>'; }).join('') + '</tr>';
+  if (sm.need.some(function (n) { return n > 0; })) {
+    h += '<tr class="sum"><td class="fix c0">必要人数</td><td class="fix c1"></td><td class="fix c2">' + esc(sm.pattern) + '</td>' +
+      sm.need.map(function (n, i) { return '<td class="s' + (cs[i] % 60 === 0 ? ' hb' : '') + '">' + (n || '') + '</td>'; }).join('') + '</tr>';
+  }
+  h += '<tr class="sum"><td class="fix c0">人数</td><td class="fix c1"></td><td class="fix c2">' + (sm.need.some(function (n) { return n > 0; }) ? '赤＝必要人数に届かない' : '') + '</td>' +
+    sm.count.map(function (n, i) { return '<td class="s' + (cs[i] % 60 === 0 ? ' hb' : '') + (n < sm.need[i] ? ' low' : '') + '">' + (n || '') + '</td>'; }).join('') + '</tr>';
   sm.crit.forEach(function (x) {
     h += '<tr class="sum"><td class="fix c0">' + esc(x.c.name) + '</td><td class="fix c1"></td><td class="fix c2">' + (x.c.min ? '最低' + x.c.min + '人' : '') + '</td>' +
       x.n.map(function (n, i) { return '<td class="s' + (cs[i] % 60 === 0 ? ' hb' : '') + (x.c.min && n < x.c.min ? ' low' : '') + '">' + (n || '') + '</td>'; }).join('') + '</tr>';

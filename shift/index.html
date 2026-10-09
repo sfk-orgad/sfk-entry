@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>シフト希望</title>
+<meta charset="UTF-8">
+<style>
+  :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; --sun: #B42318; --sat: #1D5BB8; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 17px; line-height: 1.5; }
+  .wrap { max-width: 600px; margin: 0 auto; padding: 0 12px 130px; }
+  header { background: var(--c); color: #fff; padding: 10px 16px 16px; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; min-height: 28px; font-size: 14px; margin-bottom: 4px; }
+  .topbar a { color: #fff; text-decoration: none; opacity: .9; padding: 4px 0; }
+  .topbar .me { opacity: .9; }
+  header h1 { font-size: 24px; margin: 0; }
+  header .sub { font-size: 15px; opacity: .9; margin-top: 4px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-top: 14px; }
+  .card-title { font-size: 18px; font-weight: 700; margin: 0 0 10px; }
+  .note { font-size: 14px; color: var(--muted); }
+  select, textarea { font-size: 17px; padding: 10px 8px; border: 1px solid #B9C0C8; border-radius: 10px; background: #fff; color: var(--ink); font-family: inherit; }
+  textarea { width: 100%; min-height: 80px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+  .chip { font-size: 16px; padding: 8px 14px; border: 1px solid #B9C0C8; border-radius: 999px; background: #fff; cursor: pointer; font-family: inherit; color: var(--ink); }
+  .chip.on { background: var(--c); border-color: var(--c); color: #fff; font-weight: 700; }
+  .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .btn { font-size: 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--c); background: #fff; color: var(--c); cursor: pointer; font-family: inherit; font-weight: 700; }
+  .btn.solid { background: var(--c); color: #fff; }
+  .day { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-top: 8px; }
+  .day.bad { border: 2px solid var(--err); }
+  .day-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .date { font-size: 18px; font-weight: 700; }
+  .date.sun { color: var(--sun); } .date.sat { color: var(--sat); }
+  .hol { font-size: 13px; color: var(--sun); margin-left: 6px; font-weight: 400; }
+  .rng { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .rng select { flex: 1; min-width: 0; }
+  .x { font-size: 18px; width: 40px; height: 40px; border: 1px solid #C9CFD6; border-radius: 10px; background: #fff; cursor: pointer; }
+  .mini { font-size: 14px; padding: 6px 10px; border: 1px solid #C9CFD6; border-radius: 8px; background: #fff; cursor: pointer; font-family: inherit; color: var(--ink); margin-left: 4px; }
+  .empty { font-size: 14px; color: var(--muted); }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line); padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .bar .inner { max-width: 600px; margin: 0 auto; }
+  .progress { font-size: 14px; color: var(--muted); text-align: center; margin-bottom: 6px; }
+  .submit { width: 100%; padding: 16px; font-size: 19px; font-weight: 700; color: #fff; background: var(--c); border: none; border-radius: 12px; cursor: pointer; font-family: inherit; }
+  .submit:disabled { opacity: .5; }
+  #error { color: var(--err); font-size: 16px; font-weight: 700; margin-top: 12px; white-space: pre-wrap; }
+  .overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,.95); z-index: 50; align-items: center; justify-content: center; flex-direction: column; font-size: 18px; }
+  .spinner { width: 44px; height: 44px; border: 5px solid var(--soft); border-top-color: var(--c); border-radius: 50%; animation: spin .9s linear infinite; margin-bottom: 14px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #done { display: none; text-align: center; padding: 56px 20px; }
+  .gspin { width: 40px; height: 40px; margin: 0 auto 16px; border: 5px solid #E8EEF0; border-top-color: #16323A; border-radius: 50%; animation: spin .9s linear infinite; }
+  .gbtn { display: inline-block; padding: 14px 22px; border-radius: 12px; background: #16323A; color: #fff; text-decoration: none; font-weight: 700; }
+  #done h2 { font-size: 24px; color: var(--c); margin: 0 0 10px; }
+</style>
+</head>
+<body>
+<!--
+  シフト希望の画面(GitHub Pages の shift/index.html。ポータルと同じサイト)
+  開き方：ポータルのカードから。通行証とデータの入口(BotのGASのURL)は、ポータルがブラウザの中に置いたものを使う。秘密は置かない
+-->
+<div id="gate" style="min-height:70vh;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;">
+  <div><div class="gspin" id="gspin"></div><div id="gmsg" style="font-size:18px;line-height:1.7;white-space:pre-wrap;">準備しています…</div>
+  <div id="gact" style="margin-top:18px;"></div>
+  <div id="gdetail" style="font-size:12px;color:#5F6670;margin-top:14px;word-break:break-all;text-align:left;"></div>
+  <div id="gver" style="font-size:11px;color:#9AA3AD;margin-top:16px;"></div></div>
+</div>
+<div id="app" style="display:none">
+
+<header>
+  <div class="topbar"><a id="back" href="#" style="visibility:hidden">‹ ポータル</a><span class="me" id="me"></span></div>
+  <h1 id="title"></h1>
+  <div class="sub" id="sub"></div>
+</header>
+<div id="timing" style="text-align:center;font-size:11px;color:#9AA3AD;margin:6px 0 0;"></div>
+
+<div class="wrap" id="main">
+  <div class="card" id="storeCard" style="display:none">
+    <div class="card-title">店舗</div>
+    <select id="store"></select>
+  </div>
+
+  <div class="card">
+    <div class="card-title">まとめて入れる</div>
+    <div class="note">曜日を選んで時間を入れると、その曜日の日にまとめて入ります(すでに入っている日は上書き)。</div>
+    <div class="chips" id="wchips"></div>
+    <div class="row"><select id="bs"></select>〜<select id="be"></select>
+      <button class="btn solid" id="bulk">まとめて入れる</button></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="clearAll">全部消す</button></div>
+  </div>
+
+  <div class="note" style="margin:14px 4px 0">出勤できない日は、空欄のままで大丈夫です。1日に時間帯は<span id="maxr"></span>つまで入れられます。</div>
+  <div id="days"></div>
+
+  <div class="card">
+    <div class="card-title">備考</div>
+    <textarea id="note" placeholder="例：テスト期間なので土日中心で"></textarea>
+  </div>
+  <div id="error"></div>
+</div>
+
+<div class="bar" id="bar"><div class="inner">
+  <div class="progress" id="progress"></div>
+  <button class="submit" id="submitBtn">提出する</button>
+</div></div>
+
+<div id="done">
+  <h2>提出しました</h2>
+  <p id="doneMsg"></p>
+  <p><button class="btn" id="again">内容を確認・修正する</button></p>
+  <p id="backWrap" style="display:none"><a class="btn" id="back2" href="#" style="text-decoration:none;display:inline-block">ポータルに戻る</a></p>
+</div>
+<div class="overlay" id="overlay"><div class="spinner"></div>送信しています…</div>
+
+</div>
+
+<script>
+// ===== 版の番号・設定 =====
+var PAGE_VERSION = '2026-10-09a';
+var PORTAL_URL = '../';
+var T0 = Date.now();
+function g(id) { return document.getElementById(id); }
+function gate(msg, linkToPortal) {
+  g('gspin').style.display = 'none';
+  g('gmsg').textContent = msg;
+  if (linkToPortal) g('gact').innerHTML = '<a class="gbtn" href="' + PORTAL_URL + '">ポータルに戻る</a>';
+}
+g('gver').textContent = 'ver ' + PAGE_VERSION;
+
+// ===== ポータルから受け取った通行証とデータの入口 =====
+var S = null;
+try { S = JSON.parse(sessionStorage.getItem('portal_session') || 'null'); } catch (e) { S = null; }
+var API = S && S.apis ? S.apis.shift : '';
+
+// データの入口(BotのGAS)とやりとりする。retry が true なら、一時的なエラーのとき1回だけやり直す
+function api(action, extra, retry) {
+  var body = JSON.stringify(Object.assign({ app: 'shift', action: action, token: S.token }, extra || {}));
+  function once() {
+    var status = 0;
+    return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
+      .then(function (r) { status = r.status; return r.text(); }, function (e) {
+        var err = new Error('通信できませんでした(' + (e && e.message ? e.message : e) + ')'); err.stage = 'fetch'; throw err;
+      })
+      .then(function (t) {
+        try { return JSON.parse(t); } catch (e) {
+          var err = new Error('正しい返事ではありませんでした(' + status + '): ' + String(t).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 160));
+          err.stage = 'response'; throw err;
+        }
+      });
+  }
+  return once().catch(function (e) {
+    if (!retry) throw e;
+    return new Promise(function (ok) { setTimeout(ok, 800); }).then(once);
+  });
+}
+
+function authMessage(res) {
+  return res.reason === 'no_permission' ? 'このツールは今使えません(メンテナンス中か、使う権限がありません)。\nポータルに戻ってください。'
+    : 'ログインの期限が切れました。\nポータルから開き直してください。';
+}
+
+if (!S || !S.token || S.exp < Date.now()) {
+  gate('ポータルから開き直してください。\n(ログインの期限が切れたか、直接開かれました)', true);
+} else if (!API) {
+  gate('開くツールが分かりませんでした。\nポータルから開き直してください。', true);
+} else {
+  // ポータルが先読みしたデータ(3分以内)があれば、待たずに表示して、裏で最新を確かめる
+  var pre = readPrefetch();
+  if (pre) {
+    showForm(pre, '先読み');
+    api('shift.init', {}, true).then(function (res) {
+      if (res.ok && window.__refreshShift) window.__refreshShift(res.init);
+    }).catch(function () {});
+  } else {
+    loadNow();
+  }
+}
+
+function readPrefetch() {
+  try {
+    var x = JSON.parse(sessionStorage.getItem('prefetch_shift') || 'null');
+    return x && Date.now() - x.at < 3 * 60 * 1000 && x.init ? x.init : null;
+  } catch (e) { return null; }
+}
+
+function showForm(D, how) {
+  D.portalUrl = PORTAL_URL;
+  D.clientMs = Date.now() - T0;
+  D.how = how;
+  g('gate').style.display = 'none';
+  g('app').style.display = 'block';
+  startForm(D);
+}
+
+function loadNow() {
+  api('shift.init', {}, true).then(function (res) {
+    if (!res.ok) { gate(res.error === 'AUTH' ? authMessage(res) : '開けませんでした：' + res.error, true); return; }
+    showForm(res.init, '取得');
+  }).catch(function (e) {
+    gate(e && e.stage === 'response' ? 'データを受け取れませんでした。\n管理者に連絡してください。' : '通信に失敗しました。\n電波の良いところで開き直してください。', true);
+    g('gdetail').textContent = '[' + (e && e.stage || '?') + '] ' + (e && e.message ? e.message : e);
+  });
+}
+
+function startForm(D) {
+  var W = '日月火水木金土';
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clone(o) { return JSON.parse(JSON.stringify(o || {})); }
+  function mins(t) { var p = String(t).split(':'); return Number(p[0]) * 60 + Number(p[1]); }
+
+  $('title').textContent = D.month.label + 'のシフト希望';
+  if (D.name) $('me').textContent = D.name + ' さん';
+  $('timing').innerHTML = esc('ver ' + PAGE_VERSION + '・開くまで ' + (D.clientMs / 1000).toFixed(1) + '秒(' + D.how + ')') + '<span id="wakeState"></span>';
+  if (D.portalUrl) { // ポータルに戻る(同じサイトの中の移動)
+    $('back').href = D.portalUrl; $('back').style.visibility = 'visible';
+    $('back2').href = D.portalUrl; $('backWrap').style.display = 'block';
+  }
+  $('sub').textContent = '締め切り：' + D.month.deadline + '(締め切りまでは何度でも修正できます)';
+  $('maxr').textContent = D.maxRanges;
+
+  if (!D.stores.length) {
+    $('main').innerHTML = '<div class="card">シフト希望を出せる店舗がありません。管理者に連絡してください。</div>';
+    $('bar').style.display = 'none';
+    return;
+  }
+
+  var cur = { store: '', days: {}, note: '' };
+  var dirty = false;
+  function storeOf(code) { return D.stores.filter(function (s) { return s.code === code; })[0]; }
+  function times() { return storeOf(cur.store).times; }
+  function opts(sel, ph) {
+    return '<option value="">' + ph + '</option>' + times().map(function (t) { return '<option' + (t === sel ? ' selected' : '') + '>' + t + '</option>'; }).join('');
+  }
+
+  // 店舗
+  $('store').innerHTML = D.stores.map(function (s) { return '<option value="' + esc(s.code) + '">' + esc(s.name) + '</option>'; }).join('');
+  if (D.stores.length > 1) $('storeCard').style.display = '';
+  $('store').addEventListener('change', function () {
+    saveDraft(); // 入力中の内容は店舗ごとの下書きに残るので、確認せずに切り替える
+    load($('store').value);
+  });
+
+  function load(code) {
+    cur.store = code;
+    var ex = D.existing[code];
+    cur.days = ex ? clone(ex.days) : {};
+    cur.note = ex ? ex.note : '';
+    dirty = false;
+    var note = $('draftNote');
+    if (note) note.parentNode.removeChild(note);
+    // 入力途中の下書きがあれば、そちらを戻す
+    var dr = readDraft(code);
+    if (dr) {
+      cur.days = clone(dr.days);
+      cur.note = dr.note || '';
+      dirty = true;
+      var t = new Date(dr.at);
+      $('main').insertAdjacentHTML('afterbegin', '<div class="card" id="draftNote" style="background:#FFF8E6;border-color:#F2D58A;font-size:15px;">' +
+        '入力途中の内容を戻しました(' + (t.getMonth() + 1) + '/' + t.getDate() + ' ' + t.getHours() + ':' + ('0' + t.getMinutes()).slice(-2) + 'に保存)。' +
+        '<br><a href="#" id="draftReset">' + (ex ? '提出済みの内容に戻す' : '最初から入力する') + '</a></div>');
+      $('draftReset').addEventListener('click', function (e) {
+        e.preventDefault();
+        if (!window.confirm('入力途中の内容を消しますか？')) return;
+        clearDraft(code);
+        load(code);
+      });
+    }
+    $('note').value = cur.note;
+    $('bs').innerHTML = opts('', '開始');
+    $('be').innerHTML = opts('', '終了');
+    render();
+  }
+
+  // ---- 入力途中の内容の自動保存(店舗×月ごと。端末の中に保存。通行証は含めない。提出したら消す。7日より古いものは掃除) ----
+  var DRAFT_PREFIX = 'draft_shift_';
+  var DRAFT_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+  function draftKey(code) { return DRAFT_PREFIX + (code || cur.store) + '_' + D.month.key; }
+  function readDraft(code) {
+    try {
+      var x = JSON.parse(localStorage.getItem(draftKey(code)) || 'null');
+      return x && x.days && Date.now() - x.at < DRAFT_MAX_MS ? x : null;
+    } catch (e) { return null; }
+  }
+  function saveDraft() {
+    if (!cur.store || !dirty) return;
+    try {
+      cur.note = $('note').value;
+      var json = JSON.stringify({ days: cur.days, note: cur.note });
+      if (json === saveDraft.last) return;
+      saveDraft.last = json;
+      localStorage.setItem(draftKey(), JSON.stringify({ at: Date.now(), days: cur.days, note: cur.note }));
+    } catch (e) {}
+  }
+  function clearDraft(code) { try { localStorage.removeItem(draftKey(code)); saveDraft.last = ''; } catch (e) {} }
+  (function cleanOldDrafts() {
+    try {
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var k = localStorage.key(i);
+        if (!k || k.indexOf(DRAFT_PREFIX) !== 0) continue;
+        var x = JSON.parse(localStorage.getItem(k) || 'null');
+        if (!x || Date.now() - x.at > DRAFT_MAX_MS) localStorage.removeItem(k);
+      }
+    } catch (e) {}
+  })();
+
+  // まとめて入れる(曜日＋祝日)
+  var wsel = {};
+  $('wchips').innerHTML = W.split('').map(function (w, i) { return '<button type="button" class="chip" data-w="' + i + '">' + w + '</button>'; }).join('') +
+    '<button type="button" class="chip" data-w="hol">祝</button>';
+  $('wchips').addEventListener('click', function (e) {
+    var b = e.target.closest('.chip'); if (!b) return;
+    var k = b.getAttribute('data-w'); wsel[k] = !wsel[k]; b.classList.toggle('on', wsel[k]);
+  });
+  $('bulk').addEventListener('click', function () {
+    var s = $('bs').value, en = $('be').value;
+    if (!s || !en) { alert('開始と終了を選んでください'); return; }
+    if (mins(s) >= mins(en)) { alert('開始は終了より前にしてください'); return; }
+    var hit = D.days.filter(function (x) { return (x.hol && wsel.hol) || wsel[String(x.w)]; });
+    if (!hit.length) { alert('曜日を選んでください'); return; }
+    hit.forEach(function (x) { cur.days[x.d] = [[s, en]]; });
+    dirty = true; render();
+  });
+  $('clearAll').addEventListener('click', function () {
+    if (!confirm('入力した時間をすべて消しますか？')) return;
+    cur.days = {}; dirty = true; render();
+  });
+
+  // 日ごとの入力
+  function render() {
+    $('days').innerHTML = D.days.map(function (x) {
+      var rs = cur.days[x.d] || [];
+      var cls = x.w === 0 || x.hol ? 'sun' : (x.w === 6 ? 'sat' : '');
+      var h = '<div class="day" id="day-' + x.d + '"><div class="day-head"><div class="date ' + cls + '">' + x.d + '日(' + W.charAt(x.w) + ')' +
+        (x.hol ? '<span class="hol">' + esc(x.hol) + '</span>' : '') + '</div><div>' +
+        (x.d > 1 ? '<button type="button" class="mini" data-act="copy" data-d="' + x.d + '">前の日と同じ</button>' : '') +
+        (rs.length < D.maxRanges ? '<button type="button" class="mini" data-act="add" data-d="' + x.d + '">＋時間帯</button>' : '') + '</div></div>';
+      if (!rs.length) h += '<div class="empty">出勤できない(空欄)</div>';
+      rs.forEach(function (r, i) {
+        h += '<div class="rng"><select data-d="' + x.d + '" data-i="' + i + '" data-k="0">' + opts(r[0], '開始') + '</select>〜' +
+          '<select data-d="' + x.d + '" data-i="' + i + '" data-k="1">' + opts(r[1], '終了') + '</select>' +
+          '<button type="button" class="x" data-act="del" data-d="' + x.d + '" data-i="' + i + '">×</button></div>';
+      });
+      return h + '</div>';
+    }).join('');
+    progress();
+  }
+  $('days').addEventListener('change', function (e) {
+    var s = e.target; if (s.tagName !== 'SELECT') return;
+    var d = s.getAttribute('data-d'), i = Number(s.getAttribute('data-i')), k = Number(s.getAttribute('data-k'));
+    cur.days[d][i][k] = s.value; dirty = true; markOk(d); progress();
+  });
+  $('days').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    var act = b.getAttribute('data-act'), d = Number(b.getAttribute('data-d'));
+    if (act === 'add') { (cur.days[d] = cur.days[d] || []).push(['', '']); }
+    if (act === 'del') { cur.days[d].splice(Number(b.getAttribute('data-i')), 1); if (!cur.days[d].length) delete cur.days[d]; }
+    if (act === 'copy') { if (cur.days[d - 1]) cur.days[d] = clone(cur.days[d - 1]); else delete cur.days[d]; }
+    dirty = true; render();
+  });
+  $('note').addEventListener('input', function () { dirty = true; });
+  function markOk(d) { var el = $('day-' + d); if (el) el.classList.remove('bad'); $('error').textContent = ''; }
+  function progress() {
+    var n = Object.keys(cur.days).filter(function (d) { return (cur.days[d] || []).length; }).length;
+    $('progress').textContent = '入力した日：' + n + '日 / ' + D.days.length + '日';
+  }
+
+  // 入力のチェック(サーバーでも同じチェックをする)
+  function check() {
+    var bad = [];
+    Object.keys(cur.days).forEach(function (d) {
+      var rs = (cur.days[d] || []).filter(function (r) { return r[0] || r[1]; });
+      var msg = '';
+      rs.forEach(function (r) { if (!r[0] || !r[1]) msg = '開始と終了の両方を選んでください'; else if (mins(r[0]) >= mins(r[1])) msg = '開始は終了より前にしてください'; });
+      if (!msg) {
+        var s = rs.slice().sort(function (a, b) { return mins(a[0]) - mins(b[0]); });
+        for (var i = 1; i < s.length; i++) if (mins(s[i][0]) < mins(s[i - 1][1])) msg = '時間帯が重なっています';
+      }
+      if (msg) bad.push({ d: d, msg: msg });
+    });
+    return bad;
+  }
+
+  $('submitBtn').addEventListener('click', function () {
+    $('error').textContent = '';
+    var bad = check();
+    if (bad.length) {
+      bad.forEach(function (b) { var el = $('day-' + b.d); if (el) el.classList.add('bad'); });
+      $('error').textContent = '直してほしい日があります：\n' + bad.map(function (b) { return b.d + '日：' + b.msg; }).join('\n');
+      $('day-' + bad[0].d).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    $('overlay').style.display = 'flex'; $('submitBtn').disabled = true;
+    // 提出は二重送信を避けるため、自動のやり直しはしない
+    api('shift.submit', { store: cur.store, month: D.month.key, days: cur.days, note: $('note').value }, false)
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error === 'AUTH' ? 'AUTH:' + (res.reason || '') : res.error);
+        $('overlay').style.display = 'none'; $('submitBtn').disabled = false;
+        D.existing[cur.store] = { days: res.days, note: res.note, updatedAt: res.updatedAt };
+        clearDraft(cur.store); // 提出できたので下書きを消す
+        dirty = false;
+        var dn = $('draftNote'); if (dn) dn.parentNode.removeChild(dn);
+        $('doneMsg').textContent = storeOf(cur.store).name + '・' + D.month.label + '分を受け付けました(' + res.updatedAt + ')。締め切りまでは何度でも修正できます。';
+        $('main').style.display = 'none'; $('bar').style.display = 'none'; $('done').style.display = 'block'; window.scrollTo(0, 0);
+      })
+      .catch(function (e) {
+        $('overlay').style.display = 'none'; $('submitBtn').disabled = false;
+        var m = String(e && e.message ? e.message : e);
+        $('error').innerHTML = m.indexOf('AUTH:') !== -1
+          ? esc('ログインの有効期限が切れたため、送信できませんでした。入力内容は下書きとして残っています。') + '<br><a href="' + PORTAL_URL + '">ポータルから開き直す</a>'
+          : esc('送信できませんでした：' + m);
+      });
+  });
+  $('again').addEventListener('click', function () {
+    $('done').style.display = 'none'; $('main').style.display = ''; $('bar').style.display = '';
+    load(cur.store);
+  });
+  // 入力のたび・3秒おき・画面を離れるときに下書きを保存する(画面オフでページが閉じても続きから入力できる)
+  $('main').addEventListener('click', function () { setTimeout(saveDraft, 0); });
+  $('main').addEventListener('change', function () { setTimeout(saveDraft, 0); });
+  $('main').addEventListener('input', function () { setTimeout(saveDraft, 0); });
+  setInterval(saveDraft, 3000);
+  window.addEventListener('pagehide', saveDraft);
+
+  // ---- フォームを開いている間は、画面が自動で消えないようにする(対応している端末だけ) ----
+  var wakeLock = null;
+  function wakeStatus(t) { var el = $('wakeState'); if (el) el.textContent = t; }
+  function requestWake() {
+    if (!('wakeLock' in navigator)) { wakeStatus('・画面オフ抑止：非対応'); return; }
+    navigator.wakeLock.request('screen').then(function (l) {
+      wakeLock = l; wakeStatus('・画面オフ抑止：有効');
+      l.addEventListener('release', function () { wakeStatus('・画面オフ抑止：解除'); });
+    }).catch(function () { wakeStatus('・画面オフ抑止：使えません'); });
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') saveDraft();
+    else if ($('done').style.display !== 'block') requestWake();
+  });
+  requestWake();
+
+  // 先読みで表示したあと、裏で受け取った最新の内容を反映する(入力していなければ表示し直す)
+  window.__refreshShift = function (N) {
+    if (N.month.key !== D.month.key || JSON.stringify(N.stores) !== JSON.stringify(D.stores)) {
+      $('error').innerHTML = '内容が更新されています。<a href="#" id="reloadNow">読み込み直す</a>(入力途中の内容は下書きに残ります)';
+      $('reloadNow').addEventListener('click', function (e) { e.preventDefault(); saveDraft(); try { sessionStorage.removeItem('prefetch_shift'); } catch (x) {} location.reload(); });
+      return;
+    }
+    D.existing = N.existing;
+    if (!dirty) load(cur.store);
+  };
+
+  load(D.stores[0].code);
+}
+</script>
+</body>
+</html>

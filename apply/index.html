@@ -37,6 +37,8 @@
     <div class="muted" id="who"></div>
     <label for="name">氏名(フルネーム)</label>
     <input id="name" maxlength="40" autocomplete="name" placeholder="例：山田 太郎">
+    <label for="mail">連絡先(メールアドレス)</label>
+    <input id="mail" type="email" inputmode="email" autocomplete="email" maxlength="120" placeholder="例：taro@example.com">
     <label for="emp">雇用区分</label>
     <select id="emp"></select>
     <label for="affil">所属(主に働く店舗)</label>
@@ -76,6 +78,7 @@ if (!X || !X.token || Date.now() - X.at > 60 * 60 * 1000) {
     say(res.pending ? '申請を受け付けています。管理者の承認をお待ちください。\n内容を直すときは、下で送り直してください。' : 'スタッフとしてポータルを使うための申請です。\n管理者が承認すると、使えるようになります。');
     g('who').textContent = 'LINE WORKSの名前：' + (res.lwName || '');
     g('name').value = p['氏名'] || res.lwName || '';
+    g('mail').value = p['メール'] || '';
     g('emp').innerHTML = opts(res.emps, p['雇用区分'] || '', '選んでください');
     g('affil').innerHTML = opts(res.affils, p['所属'] || '', '選んでください');
     NEED_PIN = !!res.needPin;
@@ -85,11 +88,12 @@ if (!X || !X.token || Date.now() - X.at > 60 * 60 * 1000) {
 }
 g('send').addEventListener('click', function () {
   g('err').textContent = '';
-  var name = g('name').value.trim(), emp = g('emp').value, affil = g('affil').value, pin = g('pin').value.trim();
-  if (!name || !emp || !affil) { g('err').textContent = '氏名・雇用区分・所属をすべて入れてください'; return; }
+  var name = g('name').value.trim(), mail = g('mail').value.trim(), emp = g('emp').value, affil = g('affil').value, pin = g('pin').value.trim();
+  if (!name || !mail || !emp || !affil) { g('err').textContent = '氏名・メールアドレス・雇用区分・所属をすべて入れてください'; return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) { g('err').textContent = 'メールアドレスを正しく入れてください'; return; }
   if (NEED_PIN && !pin) { g('err').textContent = '暗証番号を入れてください'; return; }
   g('send').disabled = true;
-  api('apply.submit', { name: name, emp: emp, affil: affil, pin: pin }).then(function (res) {
+  api('apply.submit', { name: name, mail: mail, emp: emp, affil: affil, pin: pin }).then(function (res) {
     g('send').disabled = false;
     if (!res.ok) { g('err').textContent = res.error === 'already' ? 'すでに登録されています。ポータルを開き直してください。' : (res.error === 'invalid_token' ? 'ログインの期限が切れました。ポータルから開き直してください。' : res.error); return; }
     g('form').style.display = 'none';

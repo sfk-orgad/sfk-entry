@@ -80,10 +80,23 @@
       <button class="btn solid" id="icsShow">自分専用のURLを表示</button>
       <div id="icsBox" style="display:none;">
         <div class="url" id="icsUrl"></div>
-        <a class="btn solid" id="icsGoogle" target="_blank" rel="noopener">Googleカレンダーに登録</a>
+        <div id="icsPc">
+          <a class="btn solid" id="icsGoogle" target="_blank" rel="noopener">Googleカレンダーに登録</a>
+          <div class="muted" style="margin-top:6px;">うまくいかないとき：Googleカレンダーの左の「他のカレンダー」の＋ →「URLで追加」に、上のURLを貼る。</div>
+        </div>
+        <div id="icsIos">
+          <a class="btn solid" id="icsApple">iPhoneのカレンダーに登録</a>
+          <div class="muted" style="margin-top:6px;">iPhoneの標準のカレンダーに入ります。うまくいかないとき：「設定 → カレンダー → アカウント → アカウントを追加 → その他 → 照会するカレンダーを追加」に、上のURLを貼る。</div>
+        </div>
+        <div id="icsGoogleHow">
+          <div style="font-weight:700;margin-top:10px;">Googleカレンダーに入れるには(PCで1回だけ)</div>
+          <div class="muted">スマホのGoogleカレンダーは、URLでの登録ができません。PCで一度登録すると、スマホのGoogleカレンダーのアプリにも出ます。<br>
+          ① 下の「URLを自分にメールで送る」でURLを送る ② PCでGoogleカレンダー(calendar.google.com)を開き、左の「他のカレンダー」の＋ →「URLで追加」にURLを貼る ③ スマホのアプリに出ないときは、アプリの設定でそのカレンダーの「同期」をオンにする</div>
+          <a class="btn" id="icsMail">URLを自分にメールで送る</a>
+        </div>
         <button class="btn" id="icsCopy">URLをコピー</button>
         <button class="btn" id="icsReset">URLを作り直す</button>
-        <div class="muted" style="margin-top:6px;">うまく登録できないとき：PCのGoogleカレンダーで「他のカレンダー」の＋ →「URLで追加」にURLを貼る。iPhoneは「設定 → カレンダー → アカウント → アカウントを追加 → その他 → 照会するカレンダーを追加」。<br>このURLを知っている人は、あなたの公開されたシフトを見られます。人に教えないでください。知られたときは「URLを作り直す」(前のURLは使えなくなります)。</div>
+        <div class="muted" style="margin-top:6px;">このURLを知っている人は、あなたの公開されたシフトを見られます。人に教えないでください。知られたときは「URLを作り直す」(前のURLは使えなくなります)。</div>
         <div class="muted" id="icsMsg"></div>
       </div>
     </div>
@@ -92,7 +105,7 @@
 </div>
 
 <script>
-var PAGE_VERSION = '2026-10-13b';
+var PAGE_VERSION = '2026-10-15a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 var COLORS = ['#1F7A6B', '#7A4FB5', '#C2571A', '#2F6FBF', '#A23B72', '#4D7A1F']; // 店舗ごとの色(店舗シートの順)
@@ -208,10 +221,21 @@ function gcalUrl(d, store, s, e) {
 }
 
 // 購読(自動で更新)のURL
+// 端末に合わせて出し分ける：PC＝Googleカレンダーに登録 ／ iPhone＝標準のカレンダーに登録＋Googleは PCで ／ Android＝Googleは PCで
+var UA = navigator.userAgent || '';
+var IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && 'ontouchend' in document);
+var IS_ANDROID = /Android/.test(UA);
 function showIcs(url) {
   g('icsBox').style.display = 'block';
   g('icsUrl').textContent = url;
-  g('icsGoogle').href = 'https://calendar.google.com/calendar/render?cid=' + encodeURIComponent(url.replace(/^https:/, 'webcal:'));
+  var webcal = url.replace(/^https:/, 'webcal:');
+  g('icsGoogle').href = 'https://calendar.google.com/calendar/render?cid=' + encodeURIComponent(webcal);
+  g('icsApple').href = webcal;
+  g('icsMail').href = 'mailto:?subject=' + encodeURIComponent('シフトカレンダーの登録用URL') + '&body=' +
+    encodeURIComponent('PCのGoogleカレンダー(calendar.google.com)を開き、左の「他のカレンダー」の＋ →「URLで追加」に、次のURLを貼ってください。\n\n' + url + '\n\nこのURLは人に教えないでください。');
+  g('icsPc').style.display = (!IS_IOS && !IS_ANDROID) ? 'block' : 'none';
+  g('icsIos').style.display = IS_IOS ? 'block' : 'none';
+  g('icsGoogleHow').style.display = (IS_IOS || IS_ANDROID) ? 'block' : 'none';
 }
 g('icsShow').addEventListener('click', function () {
   g('icsShow').disabled = true;

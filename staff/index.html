@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>スタッフ一覧</title>
+<!--
+  スタッフ一覧(社員以上)：GitHub Pages の staff/index.html。ポータルと同じサイト
+  ・スタッフ名簿(StaffMaster)から、氏名・雇用区分・所属・メール・ステータス・グレード・オンボーディング(準備：の列)の状況を表示
+  ・データは認証基盤から受け取る(ツール一覧の staff の行の API＝認証基盤のURL)。通行証の staff の権限が必要
+  通行証とデータの入口は、ポータルがブラウザの中に置いたものを使う。秘密は置かない
+-->
+<style>
+  :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; --ok: #1F7A4D; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 15px; }
+  #gate { min-height: 70vh; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+  .gspin { width: 40px; height: 40px; margin: 0 auto 16px; border: 5px solid var(--soft); border-top-color: var(--c); border-radius: 50%; animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .gbtn { display: inline-block; padding: 12px 20px; border-radius: 10px; background: var(--c); color: #fff; text-decoration: none; font-weight: 700; }
+  #app { display: none; }
+  header { background: var(--c); color: #fff; padding: 10px 18px 14px; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+  .topbar a { color: #fff; text-decoration: none; opacity: .9; }
+  header h1 { margin: 4px 0 0; font-size: 20px; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 12px 14px 40px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  input[type=search], select { font-size: 15px; padding: 8px 10px; border: 1px solid #B9C0C8; border-radius: 8px; background: #fff; font-family: inherit; }
+  input[type=search] { min-width: 180px; }
+  label.ck { font-size: 13px; color: var(--muted); }
+  .count { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+  .tbl { background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid #EEF1F4; text-align: left; white-space: nowrap; vertical-align: top; }
+  th { color: var(--muted); font-weight: 400; font-size: 12px; background: #FAFBFC; position: sticky; top: 0; cursor: pointer; }
+  td.nm { font-weight: 700; }
+  td.mail a { color: #1A73E8; text-decoration: none; }
+  .st { font-size: 12px; border-radius: 999px; padding: 1px 8px; }
+  .st.on { background: #E6F4EC; color: var(--ok); }
+  .st.off { background: #EEF1F4; color: var(--muted); }
+  .bar { display: inline-block; width: 60px; height: 8px; background: #EEF1F4; border-radius: 4px; vertical-align: middle; margin-right: 6px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--ok); }
+  .todo { font-size: 12px; color: #B4581F; white-space: normal; max-width: 260px; }
+  .done { font-size: 12px; color: var(--ok); }
+  #ver { font-size: 11px; color: #9AA3AD; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div id="gate"><div>
+  <div class="gspin" id="gspin"></div><div id="gmsg" style="font-size:18px;line-height:1.7;white-space:pre-wrap;">準備しています…</div>
+  <div id="gact" style="margin-top:18px;"></div>
+</div></div>
+
+<div id="app">
+  <header>
+    <div class="topbar"><a href="../">‹ ポータル</a><span id="me"></span></div>
+    <h1>スタッフ一覧</h1>
+  </header>
+  <div class="wrap">
+    <div class="tools">
+      <input type="search" id="q" placeholder="名前・メールで探す">
+      <select id="fAffil"></select>
+      <select id="fEmp"></select>
+      <label class="ck"><input type="checkbox" id="fAll"> 休職・退職も表示</label>
+      <label class="ck"><input type="checkbox" id="fTodo"> 準備が終わっていない人だけ</label>
+    </div>
+    <div class="count" id="count"></div>
+    <div class="tbl"><table id="tbl"></table></div>
+    <div id="ver"></div>
+  </div>
+</div>
+
+<script>
+var PAGE_VERSION = '2026-10-14a';
+var PORTAL_URL = '../';
+var T0 = Date.now();
+function g(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function gate(msg, link) { g('gspin').style.display = 'none'; g('gmsg').textContent = msg; if (link) g('gact').innerHTML = '<a class="gbtn" href="' + PORTAL_URL + '">ポータルに戻る</a>'; }
+
+var S = null;
+try { S = JSON.parse(sessionStorage.getItem('portal_session') || 'null'); } catch (e) { S = null; }
+var API = S && S.apis ? S.apis.staff : '';
+var D = null, SORT = { k: 'sid', asc: true };
+
+function opts(list, label) { return '<option value="">' + label + '(すべて)</option>' + list.map(function (v) { return '<option>' + esc(v) + '</option>'; }).join(''); }
+function prepDone(x) { return D.prepKeys.filter(function (k) { return x.prep[k]; }).length; }
+
+function render() {
+  var q = g('q').value.trim().toLowerCase(), fa = g('fAffil').value, fe = g('fEmp').value;
+  var list = D.staff.filter(function (x) {
+    if (!g('fAll').checked && x.status !== '在籍') return false;
+    if (fa && x.affilLabel.split('・').indexOf(fa) === -1) return false;
+    if (fe && x.emp !== fe) return false;
+    if (g('fTodo').checked && prepDone(x) === D.prepKeys.length) return false;
+    if (q && (x.name + ' ' + x.mail).toLowerCase().indexOf(q) === -1) return false;
+    return true;
+  });
+  var key = function (x) { return SORT.k === 'prep' ? prepDone(x) : String(x[SORT.k] || ''); };
+  list.sort(function (a, b) { var A = key(a), B = key(b); return (A < B ? -1 : A > B ? 1 : 0) * (SORT.asc ? 1 : -1); });
+  var cols = [['sid', 'StaffID'], ['name', '氏名'], ['emp', '雇用区分'], ['affilLabel', '所属'], ['mail', 'メール'], ['status', 'ステータス'], ['grade', 'グレード']];
+  if (D.prepKeys.length) cols.push(['prep', 'オンボーディング']);
+  var h = '<tr>' + cols.map(function (c) { return '<th data-k="' + c[0] + '">' + c[1] + (SORT.k === c[0] ? (SORT.asc ? ' ▲' : ' ▼') : '') + '</th>'; }).join('') + '</tr>';
+  list.forEach(function (x) {
+    var n = prepDone(x), total = D.prepKeys.length;
+    var todo = D.prepKeys.filter(function (k) { return !x.prep[k]; }).map(function (k) { return k.replace(/^準備：/, ''); });
+    h += '<tr><td>' + esc(x.sid) + '</td><td class="nm">' + esc(x.name) + '</td><td>' + esc(x.emp) + '</td><td>' + esc(x.affilLabel) + '</td>' +
+      '<td class="mail">' + (x.mail ? '<a href="mailto:' + esc(x.mail) + '">' + esc(x.mail) + '</a>' : '') + '</td>' +
+      '<td><span class="st ' + (x.status === '在籍' ? 'on' : 'off') + '">' + esc(x.status) + '</span></td><td>' + esc(x.grade) + '</td>' +
+      (total ? '<td><span class="bar"><i style="width:' + Math.round(n / total * 100) + '%"></i></span>' + n + '/' + total +
+        (todo.length ? '<div class="todo">未：' + esc(todo.join('、')) + '</div>' : '<div class="done">すべて完了</div>') + '</td>' : '') + '</tr>';
+  });
+  g('tbl').innerHTML = h;
+  g('count').textContent = list.length + '人' + (g('fAll').checked ? '' : '(在籍)');
+}
+
+function show(res) {
+  D = res;
+  g('gate').style.display = 'none'; g('app').style.display = 'block';
+  g('me').textContent = S.name ? S.name + ' さん' : '';
+  var affils = [], emps = [];
+  D.staff.forEach(function (x) {
+    x.affilLabel.split('・').forEach(function (a) { if (a && affils.indexOf(a) === -1) affils.push(a); });
+    if (x.emp && emps.indexOf(x.emp) === -1) emps.push(x.emp);
+  });
+  g('fAffil').innerHTML = opts(affils, '所属');
+  g('fEmp').innerHTML = opts(emps, '雇用区分');
+  g('ver').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + ((Date.now() - T0) / 1000).toFixed(1) + '秒' + (D.prepCols.length ? '・オンボーディングの項目：' + D.prepCols.join('、') : '');
+  render();
+}
+
+['q', 'fAffil', 'fEmp', 'fAll', 'fTodo'].forEach(function (id) { g(id).addEventListener(id === 'q' ? 'input' : 'change', render); });
+g('tbl').addEventListener('click', function (e) {
+  var th = e.target.closest('th[data-k]'); if (!th) return;
+  var k = th.getAttribute('data-k');
+  SORT = { k: k, asc: SORT.k === k ? !SORT.asc : true };
+  render();
+});
+
+if (!S || !S.token || S.exp < Date.now()) gate('ポータルから開き直してください。\n(ログインの期限が切れたか、直接開かれました)', true);
+else if (!API) gate('スタッフ一覧を開く権限がないか、ポータルの設定が足りません。\nポータルから開き直してください。', true);
+else {
+  fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'staff.list', token: S.token }) })
+    .then(function (r) { return r.text(); }).then(function (t) {
+      var res = JSON.parse(t);
+      if (!res.ok) { gate(res.error === 'AUTH' ? (res.reason === 'no_permission' ? 'スタッフ一覧を見る権限がありません。' : 'ログインの期限が切れました。\nポータルから開き直してください。') : '開けませんでした：' + res.error, true); return; }
+      show(res);
+    }).catch(function () { gate('通信に失敗しました。\n開き直してください。', true); });
+}
+</script>
+</body>
+</html>

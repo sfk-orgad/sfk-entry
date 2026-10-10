@@ -98,7 +98,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-13a';
+const PAGE_VERSION = '2026-10-14a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -271,7 +271,11 @@ async function start() {
   }
   if (res.ok && res.items) { renderPortal(res); return; }
   show(ERRORS[res.error] || ERRORS.internal_error, true);
-  if (res.error === 'not_registered' && res.applyUrl) setAction('<a class="btn" href="' + esc(encodeURI(res.applyUrl)) + '">利用を申請する</a>');
+  if (res.error === 'not_registered') {
+    // 申請の画面(apply/)に、本人確認に使った情報を引き継ぐ(同じサイトの中だけ。URLには出さない)
+    try { sessionStorage.setItem('apply_ctx', JSON.stringify({ token: LAST_LW.token, userId: LAST_LW.userId, api: AUTH_API, at: Date.now() })); } catch (e) {}
+    setAction('<a class="btn" href="' + esc(res.applyUrl ? encodeURI(res.applyUrl) : 'apply/') + '">利用を申請する</a>');
+  }
 }
 
 // 覚えていた内容で表示したあと、通行証を取り直すときに WOFF を準備する(1回だけ)
@@ -286,6 +290,7 @@ async function ensureWoff() {
 }
 
 // 認証基盤に問い合わせる(失敗したら画面にメッセージを出して null を返す)
+let LAST_LW = { token: '', userId: '' }; // 申請の画面に引き継ぐ(未登録だったとき)
 async function callAuth() {
   let accessToken, profile, r, text, res;
   if (!(await ensureWoff())) {
@@ -295,6 +300,7 @@ async function callAuth() {
     accessToken = woff.getAccessToken();
     profile = await woff.getProfile();
     PROFILE_ID = profile.userId;
+    LAST_LW = { token: accessToken, userId: profile.userId };
   } catch (e) {
     show('LINE WORKSから情報を受け取れませんでした。\nアプリから開き直してください。', true); detail('profile', e); return null;
   }

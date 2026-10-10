@@ -110,8 +110,12 @@
     <div class="tools">
       <select id="month"></select>
       <span id="tabs"></span>
+      <label class="muted" id="otherWrap"><input type="checkbox" id="showOther"> 他店舗も表示</label>
       <label class="muted"><input type="checkbox" id="showAll"> 希望のない人も表示</label>
-      <button class="btn solid" id="export">スプシに書き出す</button>
+      <button class="btn" id="export">タイムラインを書き出す</button>
+      <button class="btn" id="kinmu">勤務表を書き出す(スマレジの形)</button>
+      <button class="btn solid" id="pub"></button>
+      <span id="pubState" class="muted"></span>
       <span id="msg" class="muted"></span>
     </div>
     <div class="strip" id="strip"></div>
@@ -146,7 +150,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-10-12c';
+var PAGE_VERSION = '2026-10-13a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -182,6 +186,9 @@ var CONF = {}, VER = {}, DIRTY = {}, SAVING = false, saveTimer = null;
 function hm(t) { return ('0' + Math.floor(t / 60)).slice(-2) + ':' + ('0' + (t % 60)).slice(-2); }
 function mins(s) { var p = String(s).split(':'); return Number(p[0]) * 60 + Number(p[1]); }
 function storeOf(code) { return B.stores.filter(function (s) { return s.code === code; })[0]; }
+function myStores() { return (B.myStores && B.myStores.length) ? B.myStores : B.stores.map(function (s) { return s.code; }); }
+function visibleStores() { return g('showOther').checked ? B.stores : B.stores.filter(function (s) { return myStores().indexOf(s.code) !== -1; }); }
+function isVisible(code) { return visibleStores().some(function (s) { return s.code === code; }); }
 function cols() { var st = storeOf(STORE), out = []; for (var t = st.start; t < st.end; t += B.slot) out.push(t); return out; }
 function reqOf(day, store) { return B.req.filter(function (r) { return r[0] === day && (!store || r[1] === store); }); }
 function covered(rs, t) { return rs.some(function (r) { return mins(r[2]) <= t && t < mins(r[3]); }); }
@@ -243,7 +250,8 @@ function showBoard(board) {
 function showBoardInner(board) {
   B = board;
   initConf();
-  if (!STORE || !storeOf(STORE)) STORE = B.stores[0] ? B.stores[0].code : '';
+  if (!STORE || !storeOf(STORE) || !isVisible(STORE)) STORE = visibleStores()[0] ? visibleStores()[0].code : (B.stores[0] ? B.stores[0].code : '');
+  g('otherWrap').style.display = myStores().length < B.stores.length ? '' : 'none'; // 全店舗が自分の店舗なら出さない
   if (DAY > B.days.length) DAY = 1;
   g('gate').style.display = 'none'; g('app').style.display = 'block';
   g('me').textContent = S.name ? S.name + ' さん' : '';
@@ -261,7 +269,8 @@ function renderAll() {
   g('month').innerHTML = B.months.map(function (m) {
     return '<option value="' + m + '"' + (m === B.month ? ' selected' : '') + '>' + m.replace('-', '年') + '月' + (m === B.target ? '(受付中)' : '') + '</option>';
   }).join('');
-  g('tabs').innerHTML = B.stores.map(function (s) { return '<button class="tab' + (s.code === STORE ? ' on' : '') + '" data-s="' + esc(s.code) + '">' + esc(s.name) + '</button>'; }).join(' ');
+  renderPub();
+  g('tabs').innerHTML = visibleStores().map(function (s) { return '<button class="tab' + (s.code === STORE ? ' on' : '') + '" data-s="' + esc(s.code) + '">' + esc(s.name) + '</button>'; }).join(' ');
   g('slotInfo').textContent = B.slot + '分刻み';
   renderStrip(); renderDay(); renderUnsub();
 }
@@ -374,7 +383,7 @@ function selHtml(list, v, f, attrs) {
   return '<select data-f="' + f + '" ' + attrs + '>' + list.map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select>';
 }
 function storeSel(v, attrs) {
-  return '<select data-f="st" ' + attrs + '>' + B.stores.map(function (s) { return '<option value="' + esc(s.code) + '"' + (s.code === v ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select>';
+  return '<select data-f="st" ' + attrs + '>' + visibleStores().map(function (s) { return '<option value="' + esc(s.code) + '"' + (s.code === v ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select>';
 }
 function renderPanel() {
   var bad = badLines();
@@ -386,7 +395,9 @@ function renderPanel() {
   uids.forEach(function (u) {
     var p = B.staff[u] || { name: u, grade: '' };
     var mine = all.filter(function (r) { return r[4] === u; });
-    var lines = personLines(u);
+    var allLines = personLines(u);
+    var lines = allLines.filter(function (l) { return isVisible(l.store); });
+    var hidden = allLines.filter(function (l) { return !isVisible(l.store); });
     var hasConf = lines.some(function (l) { return l.kind === 'conf'; });
     h += '<tr data-u="' + esc(u) + '"><td class="nm">' + esc(p.name) + '</td><td>' + esc(p.grade) + '</td><td class="rq">' +
       (mine.length ? esc(mine.map(function (r) { return (storeOf(r[1]) ? storeOf(r[1]).name : r[1]) + ' ' + r[2] + '-' + r[3]; }).join(' / ')) : '希望なし') + '</td><td>';
@@ -403,7 +414,8 @@ function renderPanel() {
           (bad[k] ? '<span class="tag2 t-bad">' + bad[k] + '</span>' : (inReq ? '' : '<span class="tag2 t-out">希望の外</span>')) + '</div>';
       }
     });
-    h += '<div class="ln"><button class="mini2" data-act="add">＋時間帯</button>' + (hasConf ? '' : '<span class="tag2 t-no">入れない</span>') + '</div></td></tr>';
+    if (hidden.length) h += '<div class="ln muted">表示していない店舗：' + esc(hidden.map(function (l) { return (storeOf(l.store) ? storeOf(l.store).name : l.store) + ' ' + l.s + '-' + l.e + (l.kind === 'conf' ? '(確定)' : '(希望)'); }).join(' / ')) + '</div>';
+    h += '<div class="ln"><button class="mini2" data-act="add">＋時間帯</button>' + (hasConf || hidden.some(function (l) { return l.kind === 'conf'; }) ? '' : '<span class="tag2 t-no">入れない</span>') + '</div></td></tr>';
   });
   g('panelBody').innerHTML = h + '</table>';
 }
@@ -585,11 +597,12 @@ g('edOk').addEventListener('click', function () {
 });
 
 g('fillAll').addEventListener('click', function () {
+  if (!confirm('この日の、まだ確定のない人の希望を、すべて希望どおりに確定しますか？\n(あとから1人ずつ外したり、時間を変えたりできます)')) return;
   // その日、まだどの店舗にも確定のない人の希望を、希望の店舗のまま採用する
   var done = {}, touched = [];
   B.stores.forEach(function (st) { confOf(st.code, DAY).forEach(function (c) { done[c[0]] = true; }); });
   reqOf(DAY).forEach(function (r) {
-    if (done[r[4]]) return;
+    if (done[r[4]] || !isVisible(r[1])) return;
     addConfTo(r[1], r[4], r[2], r[3]);
     if (touched.indexOf(r[1]) === -1) touched.push(r[1]);
   });
@@ -605,6 +618,35 @@ g('saveDay').addEventListener('click', function () {
   if (!Object.keys(DIRTY).some(function (k) { return DIRTY[k]; })) { setState('保存済み(変更はありません)', ''); return; }
   saveDayAll(DAY);
 });
+
+// ===== 公開(スタッフのシフトカレンダーに出す)・勤務表の書き出し =====
+function renderPub() {
+  var p = ((B.published || {})[STORE] || {})[B.month];
+  var st = storeOf(STORE);
+  g('pub').textContent = p ? 'この月の公開をやめる' : (st ? st.name : '') + 'のこの月を公開する';
+  g('pubState').textContent = p ? '公開中(' + p.at + '・' + p.by + ')' : '未公開(スタッフのカレンダーには出ません)';
+}
+g('pub').addEventListener('click', function () {
+  var on = !(((B.published || {})[STORE] || {})[B.month]);
+  var st = storeOf(STORE);
+  if (!confirm(on ? st.name + 'の' + B.label + 'のシフトを、スタッフのカレンダーに公開しますか？\n(公開後に直した分も、そのまま反映されます)' : st.name + 'の' + B.label + 'の公開をやめますか？\n(スタッフのカレンダーに出なくなります)')) return;
+  leaveDay().then(function () {
+    return api('board.publish', { month: B.month, store: STORE, on: on });
+  }).then(function (res) {
+    if (!res || !res.ok) { g('msg').textContent = '公開を変えられませんでした：' + (res ? res.error : ''); return; }
+    B.published = res.published; renderPub();
+    g('msg').textContent = on ? '公開しました' : '公開をやめました';
+  });
+});
+g('kinmu').addEventListener('click', function () {
+  g('kinmu').disabled = true; g('msg').textContent = '勤務表を書き出しています…';
+  leaveDay().then(function () { return api('board.kinmu', { month: B.month, store: STORE }); }).then(function (res) {
+    g('kinmu').disabled = false;
+    if (!res.ok) { g('msg').textContent = '書き出せませんでした：' + (res.error === 'AUTH' ? 'ログインの期限切れ' : res.error); return; }
+    g('msg').innerHTML = '書き出しました：<a href="' + esc(res.url) + '" target="_blank" rel="noopener">' + esc(res.sheet) + ' を開く</a>(Excelが必要なら、スプシの「ファイル→ダウンロード」)';
+  }).catch(function () { g('kinmu').disabled = false; g('msg').textContent = '通信に失敗しました'; });
+});
+g('showOther').addEventListener('change', function () { leaveDay().then(function () { if (!isVisible(STORE)) STORE = visibleStores()[0].code; renderAll(); }); });
 
 // ===== 操作(移動の前に保存する) =====
 g('month').addEventListener('change', function () { var m = g('month').value; leaveDay().then(function () { DAY = 1; load(m); }); });

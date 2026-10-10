@@ -48,6 +48,11 @@
   .who { font-size: 14px; padding: 3px 0; border-bottom: 1px solid #EEF1F4; display: flex; justify-content: space-between; }
   .who.me { font-weight: 700; }
   .muted { color: var(--muted); font-size: 13px; }
+  .gcal { font-size: 12px; margin-left: 6px; color: #1A73E8; text-decoration: none; border: 1px solid #C6DAFC; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+  .sync h3 { margin: 0 0 6px; font-size: 15px; }
+  .sync .btn { display: inline-block; font-size: 14px; padding: 8px 12px; border: 1px solid #B9C0C8; border-radius: 10px; background: #fff; cursor: pointer; font-family: inherit; color: var(--ink); text-decoration: none; margin: 4px 6px 0 0; }
+  .sync .btn.solid { background: var(--c); color: #fff; border-color: var(--c); }
+  .url { font-size: 12px; word-break: break-all; background: #F5F6F8; border-radius: 8px; padding: 8px; margin-top: 8px; user-select: all; }
   #ver { font-size: 11px; color: #9AA3AD; text-align: center; margin-top: 12px; }
 </style>
 </head>
@@ -69,12 +74,25 @@
     <div class="cal" id="cal"></div>
     <div class="card detail" id="detail" style="margin-top:12px;"></div>
     <div class="muted" id="note"></div>
+    <div class="card sync" id="sync" style="margin-top:12px;">
+      <h3>Googleカレンダーなどに自動で入るようにする</h3>
+      <div class="muted">自分専用のURLを登録すると、公開された自分のシフトが自動で入り、変更も反映されます(反映はカレンダー側の都合で数時間〜1日ほどかかります)。<br>1件ずつ入れたいときは、日を押して「Googleカレンダーに追加」を押してください。</div>
+      <button class="btn solid" id="icsShow">自分専用のURLを表示</button>
+      <div id="icsBox" style="display:none;">
+        <div class="url" id="icsUrl"></div>
+        <a class="btn solid" id="icsGoogle" target="_blank" rel="noopener">Googleカレンダーに登録</a>
+        <button class="btn" id="icsCopy">URLをコピー</button>
+        <button class="btn" id="icsReset">URLを作り直す</button>
+        <div class="muted" style="margin-top:6px;">うまく登録できないとき：PCのGoogleカレンダーで「他のカレンダー」の＋ →「URLで追加」にURLを貼る。iPhoneは「設定 → カレンダー → アカウント → アカウントを追加 → その他 → 照会するカレンダーを追加」。<br>このURLを知っている人は、あなたの公開されたシフトを見られます。人に教えないでください。知られたときは「URLを作り直す」(前のURLは使えなくなります)。</div>
+        <div class="muted" id="icsMsg"></div>
+      </div>
+    </div>
     <div id="ver"></div>
   </div>
 </div>
 
 <script>
-var PAGE_VERSION = '2026-10-13a';
+var PAGE_VERSION = '2026-10-13b';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 var COLORS = ['#1F7A6B', '#7A4FB5', '#C2571A', '#2F6FBF', '#A23B72', '#4D7A1F']; // 店舗ごとの色(店舗シートの順)
@@ -163,11 +181,52 @@ function renderDetail() {
     if (!list.length) return;
     any = true;
     h += '<div class="st"><div class="sn" style="color:' + colorOf(s.code) + '">' + esc(s.name) + '(' + list.length + '人)</div>' +
-      list.map(function (t) { return '<div class="who' + (t[4] === C.name ? ' me' : '') + '"><span>' + esc(t[4]) + '</span><span>' + hmShort(t[2]) + '〜' + hmShort(t[3]) + '</span></div>'; }).join('') + '</div>';
+      list.map(function (t) {
+        var me = t[4] === C.name;
+        return '<div class="who' + (me ? ' me' : '') + '"><span>' + esc(t[4]) + '</span><span>' + hmShort(t[2]) + '〜' + hmShort(t[3]) +
+          (me ? '<a class="gcal" target="_blank" rel="noopener" href="' + esc(gcalUrl(x.d, s.code, t[2], t[3])) + '">Googleカレンダーに追加</a>' : '') + '</span></div>';
+      }).join('') + '</div>';
   });
   if (!any) h += '<div class="muted">この日の公開されたシフトはありません。</div>';
   g('detail').innerHTML = h;
 }
+
+// Googleカレンダーの予定の追加画面のURL(25:00 などは翌日として入れる)
+function gcalUrl(d, store, s, e) {
+  var ym = C.month.split('-').map(Number);
+  var t = function (hm) {
+    var p = hm.split(':').map(Number), m = p[0] * 60 + p[1];
+    var dt = new Date(ym[0], ym[1] - 1, d + Math.floor(m / 1440)), mm = m % 1440;
+    var two = function (n) { return ('0' + n).slice(-2); };
+    return dt.getFullYear() + two(dt.getMonth() + 1) + two(dt.getDate()) + 'T' + two(Math.floor(mm / 60)) + two(mm % 60) + '00';
+  };
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
+    '&text=' + encodeURIComponent(storeName(store) + ' 勤務') +
+    '&dates=' + t(s) + '/' + t(e) + '&ctz=Asia%2FTokyo' +
+    '&location=' + encodeURIComponent(storeName(store)) +
+    '&details=' + encodeURIComponent(s + '〜' + e + '(シフトカレンダーより)');
+}
+
+// 購読(自動で更新)のURL
+function showIcs(url) {
+  g('icsBox').style.display = 'block';
+  g('icsUrl').textContent = url;
+  g('icsGoogle').href = 'https://calendar.google.com/calendar/render?cid=' + encodeURIComponent(url.replace(/^https:/, 'webcal:'));
+}
+g('icsShow').addEventListener('click', function () {
+  g('icsShow').disabled = true;
+  api('cal.ics.get').then(function (res) { g('icsShow').disabled = false; if (res.ok) showIcs(res.url); else g('icsMsg').textContent = '表示できませんでした：' + res.error; })
+    .catch(function () { g('icsShow').disabled = false; });
+});
+g('icsCopy').addEventListener('click', function () {
+  var u = g('icsUrl').textContent;
+  (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(function () { g('icsMsg').textContent = 'コピーしました'; })
+    .catch(function () { g('icsMsg').textContent = 'URLを長押しして選び、コピーしてください'; });
+});
+g('icsReset').addEventListener('click', function () {
+  if (!confirm('URLを作り直しますか？\n前のURLで登録したカレンダーには、シフトが入らなくなります(新しいURLで登録し直してください)。')) return;
+  api('cal.ics.reset').then(function (res) { if (res.ok) { showIcs(res.url); g('icsMsg').textContent = '作り直しました。新しいURLで登録し直してください。'; } });
+});
 
 g('cal').addEventListener('click', function (e) { var c = e.target.closest('.day[data-d]'); if (!c) return; DAY = Number(c.getAttribute('data-d')); renderCal(); renderDetail(); });
 g('month').addEventListener('change', function () { DAY = 0; load(g('month').value); });

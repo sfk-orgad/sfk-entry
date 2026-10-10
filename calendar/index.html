@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>シフトカレンダー</title>
+<!--
+  シフトカレンダー(スタッフ用)：GitHub Pages の calendar/index.html。ポータルと同じサイト
+  ・自分の確定シフトを、2店舗まとめて1つの月カレンダーで見る(店舗ごとに色分け)
+  ・日を押すと、その日に誰がどの店舗に入っているかが見える(グレードは出さない)
+  ・管理者がシフト作成で「公開」した店舗・月だけが出る
+  通行証とデータの入口(BotのGASのURL)は、ポータルがブラウザの中に置いたものを使う。秘密は置かない
+-->
+<style>
+  :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; --sat: #1D5BB8; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 16px; }
+  #gate { min-height: 70vh; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+  .gspin { width: 40px; height: 40px; margin: 0 auto 16px; border: 5px solid var(--soft); border-top-color: var(--c); border-radius: 50%; animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .gbtn { display: inline-block; padding: 12px 20px; border-radius: 10px; background: var(--c); color: #fff; text-decoration: none; font-weight: 700; }
+  #app { display: none; }
+  header { background: var(--c); color: #fff; padding: 10px 16px 14px; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+  .topbar a { color: #fff; text-decoration: none; opacity: .9; }
+  header h1 { margin: 6px 0 0; font-size: 21px; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 12px 10px 40px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; }
+  .next { font-size: 15px; }
+  .next b { font-size: 17px; }
+  .monthbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .monthbar select { font-size: 16px; padding: 8px 10px; border: 1px solid #B9C0C8; border-radius: 10px; background: #fff; font-family: inherit; }
+  .legend { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 10px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; margin-right: 3px; }
+  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .wk { text-align: center; font-size: 12px; color: var(--muted); padding: 4px 0; }
+  .wk.sun { color: var(--err); } .wk.sat { color: var(--sat); }
+  .day { background: #fff; border: 1px solid var(--line); border-radius: 8px; min-height: 64px; padding: 3px; cursor: pointer; overflow: hidden; }
+  .day.empty { background: transparent; border: none; cursor: default; }
+  .day.on { border: 2px solid var(--c); }
+  .day .n { font-size: 13px; font-weight: 700; }
+  .day.sun .n, .day.hol .n { color: var(--err); } .day.sat .n { color: var(--sat); }
+  .day.today { background: #FFFBE6; }
+  .chip { display: block; font-size: 10px; line-height: 1.25; color: #fff; border-radius: 4px; padding: 1px 3px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .detail h2 { margin: 0 0 8px; font-size: 17px; }
+  .st { margin-top: 8px; }
+  .st .sn { font-weight: 700; font-size: 14px; margin-bottom: 2px; }
+  .who { font-size: 14px; padding: 3px 0; border-bottom: 1px solid #EEF1F4; display: flex; justify-content: space-between; }
+  .who.me { font-weight: 700; }
+  .muted { color: var(--muted); font-size: 13px; }
+  #ver { font-size: 11px; color: #9AA3AD; text-align: center; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div id="gate"><div>
+  <div class="gspin" id="gspin"></div><div id="gmsg" style="font-size:18px;line-height:1.7;white-space:pre-wrap;">準備しています…</div>
+  <div id="gact" style="margin-top:18px;"></div>
+  <div id="gdetail" style="font-size:12px;color:#5F6670;margin-top:14px;word-break:break-all;text-align:left;"></div>
+</div></div>
+
+<div id="app">
+  <header>
+    <div class="topbar"><a href="../">‹ ポータル</a><span id="me"></span></div>
+    <h1>シフトカレンダー</h1>
+  </header>
+  <div class="wrap">
+    <div class="card next" id="next"></div>
+    <div class="monthbar"><select id="month"></select><div class="legend" id="legend"></div></div>
+    <div class="cal" id="cal"></div>
+    <div class="card detail" id="detail" style="margin-top:12px;"></div>
+    <div class="muted" id="note"></div>
+    <div id="ver"></div>
+  </div>
+</div>
+
+<script>
+var PAGE_VERSION = '2026-10-13a';
+var PORTAL_URL = '../';
+var T0 = Date.now();
+var COLORS = ['#1F7A6B', '#7A4FB5', '#C2571A', '#2F6FBF', '#A23B72', '#4D7A1F']; // 店舗ごとの色(店舗シートの順)
+var W = '日月火水木金土';
+function g(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function gate(msg, link) { g('gspin').style.display = 'none'; g('gmsg').textContent = msg; if (link) g('gact').innerHTML = '<a class="gbtn" href="' + PORTAL_URL + '">ポータルに戻る</a>'; }
+function hmShort(t) { return String(t).replace(/^0/, ''); }
+
+var S = null;
+try { S = JSON.parse(sessionStorage.getItem('portal_session') || 'null'); } catch (e) { S = null; }
+var API = S && S.apis ? S.apis.calendar : '';
+function api(action, extra) {
+  var body = JSON.stringify(Object.assign({ app: 'shift', action: action, token: S.token }, extra || {}));
+  function once() {
+    return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
+      .then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); });
+  }
+  return once().catch(function () { return new Promise(function (ok) { setTimeout(ok, 800); }).then(once); });
+}
+
+var C = null, DAY = 0, HOW = '取得';
+function colorOf(code) { var i = C.stores.map(function (s) { return s.code; }).indexOf(code); return COLORS[(i < 0 ? 0 : i) % COLORS.length]; }
+function storeName(code) { var s = C.stores.filter(function (x) { return x.code === code; })[0]; return s ? s.name : code; }
+
+function show(cal) {
+  C = cal;
+  g('gate').style.display = 'none'; g('app').style.display = 'block';
+  g('me').textContent = C.name ? C.name + ' さん' : '';
+  if (!show.done) { show.done = true; g('ver').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + ((Date.now() - T0) / 1000).toFixed(1) + '秒(' + HOW + ')'; }
+  if (!C.months.length) {
+    g('next').innerHTML = 'まだ公開されたシフトはありません。<br><span class="muted">管理者がシフトを公開すると、ここに出ます。</span>';
+    g('cal').innerHTML = ''; g('detail').style.display = 'none'; g('month').style.display = 'none';
+    return;
+  }
+  g('month').innerHTML = C.months.map(function (m) { return '<option value="' + m + '"' + (m === C.month ? ' selected' : '') + '>' + m.replace('-', '年').replace(/年0?/, '年') + '月</option>'; }).join('');
+  g('legend').innerHTML = C.stores.map(function (s) { return '<span><i style="background:' + colorOf(s.code) + '"></i>' + esc(s.name) + (s.open ? '' : '(未公開)') + '</span>'; }).join('');
+  var now = new Date(), todayKey = now.getFullYear() + '-' + ('0' + (now.getMonth() + 1)).slice(-2);
+  if (!DAY) DAY = (C.month === todayKey) ? now.getDate() : 1;
+  renderNext(); renderCal(); renderDetail();
+  var closed = C.stores.filter(function (s) { return !s.open; }).map(function (s) { return s.name; });
+  g('note').textContent = closed.length ? closed.join('・') + 'は、この月はまだ公開されていません。' : '';
+}
+
+// 今日以降の、次の自分のシフト
+function renderNext() {
+  var now = new Date();
+  var ym = C.month.split('-').map(Number);
+  var upcoming = C.mine.filter(function (x) {
+    var d = new Date(ym[0], ym[1] - 1, x[0]);
+    return d >= new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  });
+  if (!upcoming.length) { g('next').innerHTML = C.label + 'の、これからの自分のシフトはありません。'; return; }
+  var f = upcoming[0], w = new Date(ym[0], ym[1] - 1, f[0]).getDay();
+  var same = upcoming.filter(function (x) { return x[0] === f[0]; });
+  g('next').innerHTML = '次のシフト：<b>' + ym[1] + '/' + f[0] + '(' + W.charAt(w) + ')</b> ' +
+    same.map(function (x) { return '<span style="color:' + colorOf(x[1]) + ';font-weight:700;">' + esc(storeName(x[1])) + '</span> ' + hmShort(x[2]) + '〜' + hmShort(x[3]); }).join('、') +
+    '<div class="muted">' + C.label + 'の自分のシフト：' + uniqDays(C.mine) + '日</div>';
+}
+function uniqDays(list) { var u = {}; list.forEach(function (x) { u[x[0]] = 1; }); return Object.keys(u).length; }
+
+function renderCal() {
+  var ym = C.month.split('-').map(Number), now = new Date();
+  var first = new Date(ym[0], ym[1] - 1, 1).getDay();
+  var h = W.split('').map(function (w, i) { return '<div class="wk' + (i === 0 ? ' sun' : (i === 6 ? ' sat' : '')) + '">' + w + '</div>'; }).join('');
+  for (var i = 0; i < first; i++) h += '<div class="day empty"></div>';
+  C.days.forEach(function (x) {
+    var mine = C.mine.filter(function (m) { return m[0] === x.d; });
+    var isToday = now.getFullYear() === ym[0] && now.getMonth() + 1 === ym[1] && now.getDate() === x.d;
+    h += '<div class="day' + (x.w === 0 ? ' sun' : (x.w === 6 ? ' sat' : '')) + (x.hol ? ' hol' : '') + (isToday ? ' today' : '') + (x.d === DAY ? ' on' : '') + '" data-d="' + x.d + '">' +
+      '<div class="n">' + x.d + '</div>' +
+      mine.map(function (m) { return '<span class="chip" style="background:' + colorOf(m[1]) + '">' + hmShort(m[2]) + '-' + hmShort(m[3]) + '</span>'; }).join('') + '</div>';
+  });
+  g('cal').innerHTML = h;
+}
+
+// その日の、店舗ごとの全員の確定(自分の行は太字)
+function renderDetail() {
+  var x = C.days[DAY - 1]; if (!x) return;
+  var ym = C.month.split('-').map(Number);
+  g('detail').style.display = 'block';
+  var h = '<h2>' + ym[1] + '/' + x.d + '(' + W.charAt(x.w) + ')' + (x.hol ? ' <span style="color:#B42318;font-size:14px;">' + esc(x.hol) + '</span>' : '') + '</h2>';
+  var any = false;
+  C.stores.filter(function (s) { return s.open; }).forEach(function (s) {
+    var list = C.team.filter(function (t) { return t[0] === x.d && t[1] === s.code; });
+    if (!list.length) return;
+    any = true;
+    h += '<div class="st"><div class="sn" style="color:' + colorOf(s.code) + '">' + esc(s.name) + '(' + list.length + '人)</div>' +
+      list.map(function (t) { return '<div class="who' + (t[4] === C.name ? ' me' : '') + '"><span>' + esc(t[4]) + '</span><span>' + hmShort(t[2]) + '〜' + hmShort(t[3]) + '</span></div>'; }).join('') + '</div>';
+  });
+  if (!any) h += '<div class="muted">この日の公開されたシフトはありません。</div>';
+  g('detail').innerHTML = h;
+}
+
+g('cal').addEventListener('click', function (e) { var c = e.target.closest('.day[data-d]'); if (!c) return; DAY = Number(c.getAttribute('data-d')); renderCal(); renderDetail(); });
+g('month').addEventListener('change', function () { DAY = 0; load(g('month').value); });
+
+function load(month, quiet) {
+  return api('cal.get', month ? { month: month } : {}).then(function (res) {
+    if (!res.ok) {
+      if (quiet) return;
+      gate(res.error === 'AUTH' ? (res.reason === 'no_permission' ? 'シフトカレンダーを使う権限がありません。' : 'ログインの期限が切れました。\nポータルから開き直してください。') : '開けませんでした：' + res.error, true);
+      return;
+    }
+    show(res.cal);
+  }).catch(function (e) { if (!quiet) { gate('通信に失敗しました。\n電波の良いところで開き直してください。', true); g('gdetail').textContent = e.message; } });
+}
+function readPrefetch() {
+  try { var x = JSON.parse(sessionStorage.getItem('prefetch_calendar') || 'null'); return x && Date.now() - x.at < 3 * 60 * 1000 && x.cal ? x.cal : null; } catch (e) { return null; }
+}
+
+if (!S || !S.token || S.exp < Date.now()) gate('ポータルから開き直してください。\n(ログインの期限が切れたか、直接開かれました)', true);
+else if (!API) gate('シフトカレンダーを開く権限がないか、ポータルの設定が足りません。\nポータルから開き直してください。', true);
+else {
+  var pre = readPrefetch();
+  if (pre) { HOW = '先読み'; show(pre); load(pre.month, true); }
+  else load('');
+}
+</script>
+</body>
+</html>

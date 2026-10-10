@@ -122,8 +122,8 @@
     <div class="bar2">
       <button class="btn" id="fillAll">全員を希望どおりに確定</button>
       <button class="btn" id="clearDay">この日の確定を消す</button>
-      <button class="btn solid" id="saveDay">今すぐ保存</button>
       <span id="saveState">保存済み</span>
+      <button class="btn" id="saveDay" style="display:none">もう一度保存</button>
       <span class="muted">変更は2秒後に自動で保存されます</span>
       <span class="muted legend"><span style="background:#FFF6B3;border:1px solid #E5D97A"></span>希望<span style="background:#2F6FBF"></span>確定<span style="background:#E07A1F"></span>確定(希望の外)</span>
     </div>
@@ -150,7 +150,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-10-13a';
+var PAGE_VERSION = '2026-10-13b';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -499,7 +499,11 @@ function addConf(uid, s, e) {
   changed();
 }
 function changed() { changedKeys([STORE]); }
-function setState(t, cls) { g('saveState').textContent = t; g('saveState').className = cls || ''; }
+function setState(t, cls) {
+  g('saveState').textContent = t; g('saveState').className = cls || '';
+  // 保存に失敗したとき(通信など)だけ「もう一度保存」を出す。重なりの赤い行や、ほかの人の変更のときは出さない
+  g('saveDay').style.display = (cls === 'err' && /保存できませんでした|通信に失敗/.test(t)) ? '' : 'none';
+}
 
 // 店舗×日を保存する(自動保存・「この日を保存」・別の日に移るとき)
 function saveDay(store, day) {
@@ -525,7 +529,7 @@ function saveDay(store, day) {
     }
     setState(res.error === 'AUTH' ? 'ログインの期限切れ(ポータルから開き直す)' : '保存できませんでした：' + res.error, 'err');
     return false;
-  }).catch(function () { SAVING = false; setState('通信に失敗しました(もう一度「この日を保存」)', 'err'); return false; });
+  }).catch(function () { SAVING = false; setState('通信に失敗しました', 'err'); return false; });
 }
 // 別の日・店舗・月に移る前に、未保存の分を保存する
 function leaveDay() {

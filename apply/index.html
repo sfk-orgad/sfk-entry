@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>利用の申請</title>
+<!--
+  スタッフの申請(GitHub Pages の apply/index.html。ポータルと同じサイト)
+  開き方：まだスタッフ名簿にない人がポータルを開くと出る「利用を申請する」から
+  ・ポータルが本人確認に使ったLINE WORKSの情報を引き継ぐ(書き換える値はない)。UserIdは自動で付く
+  ・氏名・雇用区分・所属を送ると、スタッフ名簿の「申請」シートに入る。管理者が「承認」に○を付けると StaffMaster に追加される
+-->
+<style>
+  :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 17px; line-height: 1.6; }
+  header { background: var(--c); color: #fff; padding: 12px 18px 16px; }
+  header a { color: #fff; text-decoration: none; opacity: .9; font-size: 14px; }
+  header h1 { margin: 6px 0 0; font-size: 22px; }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 16px 14px 40px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  label { display: block; font-weight: 700; margin: 14px 0 6px; }
+  label:first-child { margin-top: 0; }
+  input, select { width: 100%; font-size: 18px; padding: 12px; border: 1px solid #B9C0C8; border-radius: 10px; font-family: inherit; background: #fff; }
+  .btn { display: block; width: 100%; margin-top: 18px; padding: 15px; font-size: 18px; font-weight: 700; color: #fff; background: var(--c); border: none; border-radius: 12px; cursor: pointer; font-family: inherit; }
+  .btn:disabled { opacity: .6; }
+  .muted { color: var(--muted); font-size: 14px; }
+  #err { color: var(--err); font-weight: 700; margin-top: 10px; white-space: pre-wrap; }
+  #msg { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<header><a href="../">‹ ポータル</a><h1>利用の申請</h1></header>
+<div class="wrap">
+  <div class="card" id="msgCard"><div id="msg">準備しています…</div></div>
+  <div class="card" id="form" style="display:none;">
+    <div class="muted" id="who"></div>
+    <label for="name">氏名(フルネーム)</label>
+    <input id="name" maxlength="40" autocomplete="name" placeholder="例：山田 太郎">
+    <label for="emp">雇用区分</label>
+    <select id="emp"></select>
+    <label for="affil">所属(主に働く店舗)</label>
+    <select id="affil"></select>
+    <button class="btn" id="send">申請する</button>
+    <div id="err"></div>
+  </div>
+</div>
+<script>
+function g(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+var X = null;
+try { X = JSON.parse(sessionStorage.getItem('apply_ctx') || 'null'); } catch (e) { X = null; }
+function say(t) { g('msg').textContent = t; g('msgCard').style.display = 'block'; }
+function api(action, extra) {
+  return fetch(X.api, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(Object.assign({ action: action, accessToken: X.token, userId: X.userId }, extra || {})) })
+    .then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); });
+}
+function opts(list, sel, ph) {
+  return '<option value="">' + ph + '</option>' + list.map(function (o) {
+    var v = typeof o === 'string' ? o : o.value, l = typeof o === 'string' ? o : o.label;
+    return '<option value="' + esc(v) + '"' + (v === sel ? ' selected' : '') + '>' + esc(l) + '</option>';
+  }).join('');
+}
+if (!X || !X.token || Date.now() - X.at > 60 * 60 * 1000) {
+  say('ポータルから開き直してください。\n(LINE WORKSのアプリでポータルを開き、「利用を申請する」を押してください)');
+} else {
+  api('apply.info').then(function (res) {
+    if (!res.ok) { say(res.error === 'invalid_token' ? 'ログインを確認できませんでした。\nポータルから開き直してください。' : '開けませんでした：' + res.error); return; }
+    if (res.already) { say('すでにスタッフとして登録されています。\nポータルを開き直してください。'); return; }
+    var p = res.pending || {};
+    say(res.pending ? '申請を受け付けています。管理者の承認をお待ちください。\n内容を直すときは、下で送り直してください。' : 'スタッフとしてポータルを使うための申請です。\n管理者が承認すると、使えるようになります。');
+    g('who').textContent = 'LINE WORKSの名前：' + (res.lwName || '');
+    g('name').value = p['氏名'] || res.lwName || '';
+    g('emp').innerHTML = opts(res.emps, p['雇用区分'] || '', '選んでください');
+    g('affil').innerHTML = opts(res.affils, p['所属'] || '', '選んでください');
+    g('form').style.display = 'block';
+  }).catch(function () { say('通信に失敗しました。\n電波の良いところで開き直してください。'); });
+}
+g('send').addEventListener('click', function () {
+  g('err').textContent = '';
+  var name = g('name').value.trim(), emp = g('emp').value, affil = g('affil').value;
+  if (!name || !emp || !affil) { g('err').textContent = '氏名・雇用区分・所属をすべて入れてください'; return; }
+  g('send').disabled = true;
+  api('apply.submit', { name: name, emp: emp, affil: affil }).then(function (res) {
+    g('send').disabled = false;
+    if (!res.ok) { g('err').textContent = res.error === 'already' ? 'すでに登録されています。ポータルを開き直してください。' : (res.error === 'invalid_token' ? 'ログインの期限が切れました。ポータルから開き直してください。' : res.error); return; }
+    g('form').style.display = 'none';
+    say('申請しました。\n管理者が承認すると、ポータルが使えるようになります。\n承認のあと、LINE WORKSのリンクからポータルを開き直してください。');
+  }).catch(function () { g('send').disabled = false; g('err').textContent = '通信に失敗しました。もう一度押してください。'; });
+});
+</script>
+</body>
+</html>

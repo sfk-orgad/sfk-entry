@@ -150,7 +150,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-10-13b';
+var PAGE_VERSION = '2026-10-16a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -474,11 +474,35 @@ function changedKeys(stores) {
   }
   renderStrip(); renderDay();
 }
-// その日の、未保存の店舗をすべて保存する
+// その日の、未保存の店舗をすべて「1回で」保存する(全部保存するか、どれも保存しないか)
 function saveDayAll(day) {
   if (Object.keys(badLines()).length) { setState('直してほしい時間帯があります(赤い行)。直すと保存します', 'err'); return Promise.resolve(false); }
   var keys = Object.keys(DIRTY).filter(function (k) { return DIRTY[k] && Number(k.split(':')[1]) === day; });
-  return keys.reduce(function (p, k) { return p.then(function (ok) { return ok && saveDay(k.split(':')[0], day); }); }, Promise.resolve(true));
+  if (!keys.length) return Promise.resolve(true);
+  if (SAVING) return new Promise(function (ok) { setTimeout(function () { ok(saveDayAll(day)); }, 300); });
+  SAVING = true; clearTimeout(saveTimer);
+  setState('保存しています…', 'dirty');
+  var items = keys.map(function (k) {
+    return { store: k.split(':')[0], shifts: (CONF[k] || []).map(function (c) { return [c[0], c[1], c[2]]; }), ver: VER[k] || '' };
+  });
+  return api('board.save', { month: B.month, day: day, items: items }).then(function (res) {
+    SAVING = false;
+    if (res.ok) {
+      keys.forEach(function (k) { VER[k] = (res.vers || {})[k.split(':')[0]] || ''; delete DIRTY[k]; });
+      var n = new Date(); setState('保存済み ' + n.getHours() + ':' + ('0' + n.getMinutes()).slice(-2), '');
+      renderStrip();
+      return true;
+    }
+    if (res.error === 'conflict') {
+      var names = (res.stores || []).map(function (c) { var st = storeOf(c); return st ? st.name : c; }).join('・');
+      setState('ほかの人が' + (names ? names + 'の' : '') + 'この日を変更しました(保存していません)', 'err');
+      g('msg').innerHTML = '<a href="#" id="reloadBoard">読み込み直す</a>(この日の、まだ保存していない変更は消えます)';
+      g('reloadBoard').addEventListener('click', function (e) { e.preventDefault(); DIRTY = {}; load(B.month); });
+      return false;
+    }
+    setState(res.error === 'AUTH' ? 'ログインの期限切れ(ポータルから開き直す)' : '保存できませんでした：' + res.error, 'err');
+    return false;
+  }).catch(function () { SAVING = false; setState('通信に失敗しました', 'err'); return false; });
 }
 
 // ===== 確定シフトの編集(タイムラインのドラッグ・クリック) =====
@@ -505,32 +529,6 @@ function setState(t, cls) {
   g('saveDay').style.display = (cls === 'err' && /保存できませんでした|通信に失敗/.test(t)) ? '' : 'none';
 }
 
-// 店舗×日を保存する(自動保存・「この日を保存」・別の日に移るとき)
-function saveDay(store, day) {
-  var k = key(store, day);
-  if (!DIRTY[k]) return Promise.resolve(true);
-  if (SAVING) return new Promise(function (ok) { setTimeout(function () { ok(saveDay(store, day)); }, 300); });
-  SAVING = true; clearTimeout(saveTimer);
-  setState('保存しています…', 'dirty');
-  var shifts = (CONF[k] || []).map(function (c) { return [c[0], c[1], c[2]]; });
-  return api('board.save', { month: B.month, store: store, day: day, shifts: shifts, ver: VER[k] || '' }).then(function (res) {
-    SAVING = false;
-    if (res.ok) {
-      VER[k] = res.ver; delete DIRTY[k];
-      var n = new Date(); setState('保存済み ' + n.getHours() + ':' + ('0' + n.getMinutes()).slice(-2), '');
-      renderStrip();
-      return true;
-    }
-    if (res.error === 'conflict') {
-      setState('ほかの人がこの日を変更しました', 'err');
-      g('msg').innerHTML = '<a href="#" id="reloadBoard">読み込み直す</a>(この日の、まだ保存していない変更は消えます)';
-      g('reloadBoard').addEventListener('click', function (e) { e.preventDefault(); DIRTY = {}; load(B.month); });
-      return false;
-    }
-    setState(res.error === 'AUTH' ? 'ログインの期限切れ(ポータルから開き直す)' : '保存できませんでした：' + res.error, 'err');
-    return false;
-  }).catch(function () { SAVING = false; setState('通信に失敗しました', 'err'); return false; });
-}
 // 別の日・店舗・月に移る前に、未保存の分を保存する
 function leaveDay() {
   if (Object.keys(badLines()).length) { alert('赤い行(時間帯の重なりなど)を直してから移ってください'); return new Promise(function () {}); }

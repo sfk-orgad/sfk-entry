@@ -27,6 +27,7 @@
   .num { display: flex; align-items: center; gap: 10px; }
   .num input { flex: 1; text-align: right; }
   .num .unit { font-size: 18px; color: var(--muted); min-width: 2em; }
+  .num .sign { flex: 0 0 auto; font-size: 20px; width: 52px; height: 48px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); cursor: pointer; }
   .note { font-size: 14px; color: var(--muted); margin-top: 4px; }
   .note.warn { color: var(--warn); font-weight: 700; }
   .check { display: flex; align-items: center; gap: 14px; padding: 15px 14px; border: 1px solid #C9CFD6; border-radius: 12px; cursor: pointer; user-select: none; margin-bottom: 10px; font-size: 18px; }
@@ -108,7 +109,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-10-09a';
+var PAGE_VERSION = '2026-10-18a';
 var PORTAL_URL = '../';            // ポータル(同じサイト)
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -270,7 +271,9 @@ function startForm(D) {
           (it.min !== null && it.max !== null && it.min === it.max ? it.min + esc(it.unit) + ' 以外は報告で注意表示されます'
             : '目安：' + (it.min !== null ? it.min : '') + '〜' + (it.max !== null ? it.max : '') + esc(it.unit)) + '</div>';
       }
-      h += '<div class="num"><input type="text" inputmode="decimal" data-id="' + esc(it.id) + '" placeholder="0"><span class="unit">' + esc(it.unit) + '</span></div>' + range;
+      // 「±」でマイナスにできる(スマホの数字のキーボードには「-」が無いことがあるため)
+      h += '<div class="num"><button type="button" class="sign" data-sign="' + esc(it.id) + '" aria-label="プラス・マイナスを切り替え">±</button>' +
+        '<input type="text" inputmode="decimal" data-id="' + esc(it.id) + '" placeholder="0"><span class="unit">' + esc(it.unit) + '</span></div>' + range;
     } else if (it.type === '選択') {
       h += '<div class="chips" data-id="' + esc(it.id) + '">' + it.choices.map(function (c) {
         return '<button type="button" class="chip" data-v="' + esc(c) + '">' + esc(c) + '</button>';
@@ -321,6 +324,16 @@ function startForm(D) {
       Array.prototype.forEach.call(box.querySelectorAll('.chip'), function (c) { c.classList.toggle('on', c.getAttribute('data-v') === A[id]); });
       clearMissing(box);
       updateRequired();
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('button[data-sign]'), function (b) {
+    b.addEventListener('click', function () {
+      var el = document.querySelector('input[data-id="' + b.getAttribute('data-sign') + '"]');
+      if (!el) return;
+      var v = String(el.value || '').trim();
+      el.value = v.charAt(0) === '-' ? v.slice(1) : '-' + v;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.focus();
     });
   });
   Array.prototype.forEach.call(document.querySelectorAll('input[data-id], textarea[data-id]'), function (el) {

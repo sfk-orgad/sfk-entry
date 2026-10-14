@@ -118,6 +118,7 @@
       <span id="pubState" class="muted"></span>
       <span id="msg" class="muted"></span>
     </div>
+    <div id="roNote" style="display:none;background:#FFF8E6;border:1px solid #F2D58A;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:14px;">過去の月(アーカイブ済み)です。<b>見るだけ</b>で、編集・公開はできません。勤務表・タイムラインの書き出しはできます。</div>
     <div class="strip" id="strip"></div>
     <div class="bar2">
       <button class="btn" id="fillAll">全員を希望どおりに確定</button>
@@ -150,7 +151,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-10-16a';
+var PAGE_VERSION = '2026-10-17a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -266,9 +267,14 @@ function showBoardInner(board) {
 }
 
 function renderAll() {
-  g('month').innerHTML = B.months.map(function (m) {
-    return '<option value="' + m + '"' + (m === B.month ? ' selected' : '') + '>' + m.replace('-', '年') + '月' + (m === B.target ? '(受付中)' : '') + '</option>';
-  }).join('');
+  var opt = function (m, tag) { return '<option value="' + m + '"' + (m === B.month ? ' selected' : '') + '>' + m.replace('-', '年') + '月' + tag + '</option>'; };
+  g('month').innerHTML = B.months.map(function (m) { return opt(m, m === B.target ? '(受付中)' : ''); }).join('') +
+    ((B.archived || []).length ? '<optgroup label="過去の月(見るだけ)">' + B.archived.slice().reverse().map(function (m) { return opt(m, '(過去)'); }).join('') + '</optgroup>' : '');
+  // 過去の月は見るだけ：編集・公開のボタンを隠す
+  var ro = !!B.readonly;
+  g('roNote').style.display = ro ? 'block' : 'none';
+  ['fillAll', 'clearDay', 'pub'].forEach(function (id) { g(id).style.display = ro ? 'none' : ''; });
+  g('pubState').style.display = ro ? 'none' : '';
   renderPub();
   g('tabs').innerHTML = visibleStores().map(function (s) { return '<button class="tab' + (s.code === STORE ? ' on' : '') + '" data-s="' + esc(s.code) + '">' + esc(s.name) + '</button>'; }).join(' ');
   g('slotInfo').textContent = B.slot + '分刻み';
@@ -418,6 +424,7 @@ function renderPanel() {
     h += '<div class="ln"><button class="mini2" data-act="add">＋時間帯</button>' + (hasConf || hidden.some(function (l) { return l.kind === 'conf'; }) ? '' : '<span class="tag2 t-no">入れない</span>') + '</div></td></tr>';
   });
   g('panelBody').innerHTML = h + '</table>';
+  if (B.readonly) Array.prototype.forEach.call(g('panelBody').querySelectorAll('input, select, button'), function (el) { el.disabled = true; });
 }
 // 確定を、指定の店舗に足す(同じ人の重なる・隣り合う確定は1つにまとめる)
 function addConfTo(store, uid, s, e) {
@@ -538,6 +545,7 @@ function leaveDay() {
 // ドラッグ＝その時間を確定 ／ 希望をクリック＝希望どおりに確定 ／ 確定をクリック＝変更・削除
 var drag = null;
 g('grid').addEventListener('mousedown', function (e) {
+  if (B && B.readonly) return; // 過去の月は見るだけ
   var td = e.target.closest('td.s'), tr = e.target.closest('tr.staff');
   if (!td || !tr) return;
   e.preventDefault();

@@ -37,12 +37,17 @@
   header h1 { margin: 0; font-size: 22px; }
   .me { position: absolute; top: 10px; right: 14px; font-size: 14px; opacity: .9; }
   .wrap { max-width: 640px; margin: 0 auto; padding: 0 12px 40px; }
-  .news { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-top: 14px; }
-  .news h2 { margin: 0 0 6px; font-size: 16px; }
-  .news a { display: block; padding: 8px 0; border-bottom: 1px solid #EEF1F4; color: var(--ink); text-decoration: none; font-size: 16px; }
-  .news a:last-of-type { border-bottom: none; }
+  .news { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px 8px; margin-top: 14px; }
+  .news h2 { margin: 0 0 4px; font-size: 16px; }
+  .news table { width: 100%; border-collapse: collapse; }
+  .news td { padding: 9px 4px; border-bottom: 1px solid #EEF1F4; vertical-align: top; font-size: 16px; }
+  .news tr:last-child td { border-bottom: none; }
+  .news td.d { width: 3.6em; color: var(--muted); font-size: 14px; white-space: nowrap; }
+  .news a { color: var(--ink); text-decoration: none; display: block; }
   .news a.imp { color: #B42318; font-weight: 700; }
-  .news .all { font-size: 14px; color: var(--muted); text-align: right; padding-top: 6px; }
+  .news .new { display: inline-block; font-size: 11px; font-weight: 700; color: #fff; background: var(--c); border-radius: 999px; padding: 0 7px; margin-left: 6px; vertical-align: middle; }
+  .news .none { color: var(--muted); font-size: 14px; padding: 6px 4px; }
+  .news .more { display: block; text-align: right; font-size: 15px; color: var(--c); text-decoration: none; padding: 6px 2px 2px; font-weight: 700; }
   .today { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-top: 14px; }
   .today h2 { font-size: 16px; margin: 0 0 8px; color: var(--muted); font-weight: 700; }
   .store { padding: 8px 0; border-top: 1px solid #EEF1F4; }
@@ -87,8 +92,8 @@
 <div id="portal">
   <header><div class="me" id="me"></div><h1>業務ポータル</h1></header>
   <div class="wrap">
-    <div id="news"></div>
     <div id="today"></div>
+    <div id="news"></div>
     <div id="tools"></div>
     <button class="pcbtn" id="pcOpen" style="display:none">PCで開く(コードを表示)</button>
     <div class="ver" id="ver2"></div>
@@ -105,7 +110,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-20a';
+const PAGE_VERSION = '2026-10-21a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -469,14 +474,17 @@ function renderPortal(res, at) {
     $('today').innerHTML = '';
   }
 
-  // お知らせ(未読のものを上に。押すとお知らせの画面でその本文が開き、既読になる)
+  // お知らせ(今日の営業のすぐ下に、新しい順に5件の表。押すとその本文が開いて既読になる。「もっと見る」で一覧へ)
   const noticeTool = (res.items || []).find(it => it.tool === 'notice');
-  const unread = (res.notices || []).filter(n => !n.read);
-  if (noticeTool && unread.length) {
-    const url = id => noticeTool.url + (noticeTool.url.indexOf('?') === -1 ? '?' : '&') + 'id=' + encodeURIComponent(id);
-    $('news').innerHTML = '<div class="news"><h2>📢 お知らせ(未読 ' + unread.length + '件)</h2>' +
-      unread.slice(0, 3).map(n => '<a href="' + esc(url(n.id)) + '"' + (n.important ? ' class="imp"' : '') + '>' + (n.important ? '⚠ ' : '') + esc(n.title) + '</a>').join('') +
-      (unread.length > 3 ? '<div class="all">ほか ' + (unread.length - 3) + '件は「お知らせ」から</div>' : '') + '</div>';
+  if (noticeTool) {
+    const url = id => noticeTool.url + (id ? (noticeTool.url.indexOf('?') === -1 ? '?' : '&') + 'id=' + encodeURIComponent(id) : '');
+    const md = s => { const m = String(s || '').match(/\d{4}\/(\d{1,2})\/(\d{1,2})/); return m ? Number(m[1]) + '/' + Number(m[2]) : ''; };
+    const list = res.notices || [];
+    $('news').innerHTML = '<div class="news"><h2>📢 お知らせ</h2>' +
+      (list.length ? '<table>' + list.map(n => '<tr><td class="d">' + esc(md(n.start)) + '</td><td><a href="' + esc(url(n.id)) + '"' + (n.important ? ' class="imp"' : '') + '>' +
+        (n.important ? '⚠ ' : '') + esc(n.title) + (n.read ? '' : '<span class="new">未読</span>') + '</a></td></tr>').join('') + '</table>'
+        : '<div class="none">掲載中のお知らせはありません</div>') +
+      '<a class="more" href="' + esc(url('')) + '">もっと見る ›</a></div>';
   } else {
     $('news').innerHTML = '';
   }
@@ -486,11 +494,12 @@ function renderPortal(res, at) {
   const notice = mt.all ? 'ポータル全体がメンテナンス中です(確認用として表示しています)。' + (mt.message ? '\n' + mt.message : '') : '';
   if (notice) $('today').insertAdjacentHTML('afterbegin', '<div class="notice">' + esc(notice) + '</div>');
 
-  // ツールのカード(カテゴリごと。カテゴリは表に出てきた順)
+  // ツールのカード(カテゴリごと。カテゴリは表に出てきた順)。お知らせは上の表が入口なのでカードにしない
+  const cards = res.items.filter(it => it.tool !== 'notice');
   const cats = [];
-  res.items.forEach(it => { const c = it.category || 'ツール'; if (cats.indexOf(c) === -1) cats.push(c); });
-  $('tools').innerHTML = res.items.length ? cats.map(c =>
-    '<div class="cat">' + esc(c) + '</div><div class="grid">' + res.items.filter(it => (it.category || 'ツール') === c).map(it =>
+  cards.forEach(it => { const c = it.category || 'ツール'; if (cats.indexOf(c) === -1) cats.push(c); });
+  $('tools').innerHTML = cards.length ? cats.map(c =>
+    '<div class="cat">' + esc(c) + '</div><div class="grid">' + cards.filter(it => (it.category || 'ツール') === c).map(it =>
       '<button class="tile' + (it.maintenance ? ' mnt' + (mt.tester ? ' tester' : '') : '') + '" data-key="' + esc(it.key) + '">' +
       '<span class="icon">' + esc(it.icon || (it.kind === 'link' ? '🔗' : '📋')) + '</span>' +
       '<span class="name">' + esc(it.label) + '</span>' +

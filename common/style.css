@@ -1,0 +1,71 @@
+/*
+ * common/style.css ― ポータルのツールのページで共通の見た目(GitHub Pages)
+ *   読み込み方：<link rel="stylesheet" href="../common/style.css?v=1">
+ *   直したら：各ページの「?v=」の番号を上げる
+ *   部品の名前は p- で始める(ページ独自の見た目とぶつからないように)
+ *   高齢のお客様・スタッフにも見やすいよう、文字は大きめ・余白は広め
+ */
+:root {
+  --p-c: #16323A;       /* 主の色(ヘッダー・主なボタン) */
+  --p-soft: #E8EEF0;    /* うすい主の色 */
+  --p-ink: #1F2328;     /* 文字 */
+  --p-muted: #5F6670;   /* うすい文字 */
+  --p-line: #D5DAE0;    /* 線 */
+  --p-bg: #F5F6F8;      /* 背景 */
+  --p-card: #FFFFFF;    /* カード */
+  --p-err: #B42318;     /* 赤(エラー・日曜) */
+  --p-ok: #1F7A4D;      /* 緑(完了) */
+  --p-warn: #B4581F;    /* オレンジ(注意) */
+  --p-sat: #1D5BB8;     /* 青(土曜) */
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--p-bg); color: var(--p-ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 16px; line-height: 1.6; }
+[hidden] { display: none !important; }
+
+/* 入口の画面(準備中・エラー) */
+.p-gate { min-height: 70vh; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+.p-spin { width: 40px; height: 40px; margin: 0 auto 16px; border: 5px solid var(--p-soft); border-top-color: var(--p-c); border-radius: 50%; animation: p-spin .9s linear infinite; }
+@keyframes p-spin { to { transform: rotate(360deg); } }
+.p-gmsg { font-size: 18px; line-height: 1.7; white-space: pre-wrap; }
+.p-gact { margin-top: 18px; }
+.p-gdetail { font-size: 12px; color: var(--p-muted); margin-top: 14px; word-break: break-all; text-align: left; white-space: pre-wrap; }
+
+/* ヘッダー */
+.p-header { background: var(--p-c); color: #fff; padding: 10px 18px 14px; }
+.p-header .p-top { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+.p-header a { color: #fff; text-decoration: none; opacity: .9; }
+.p-header h1 { margin: 6px 0 0; font-size: 21px; }
+
+/* 本文 */
+.p-wrap { max-width: 720px; margin: 0 auto; padding: 14px 12px 40px; }
+.p-wrap.p-wide { max-width: 1100px; }
+.p-card { background: var(--p-card); border: 1px solid var(--p-line); border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; }
+.p-card h2 { margin: 0 0 8px; font-size: 17px; }
+.p-muted { color: var(--p-muted); font-size: 14px; }
+.p-note { color: var(--p-muted); font-size: 13px; }
+.p-ver { font-size: 11px; color: #9AA3AD; text-align: center; margin-top: 14px; }
+
+/* ボタン */
+.p-btn { display: inline-block; font-size: 16px; padding: 10px 16px; border: 1px solid #B9C0C8; border-radius: 10px; background: #fff; color: var(--p-ink); text-decoration: none; cursor: pointer; font-family: inherit; }
+.p-btn.p-solid { background: var(--p-c); color: #fff; border-color: var(--p-c); font-weight: 700; }
+.p-btn.p-big { display: block; width: 100%; font-size: 18px; padding: 15px; border-radius: 12px; }
+.p-btn:disabled { opacity: .55; cursor: default; }
+
+/* 入力 */
+.p-label { display: block; font-weight: 700; margin: 14px 0 6px; }
+.p-input, .p-select, .p-textarea { width: 100%; font-size: 17px; padding: 11px 12px; border: 1px solid #B9C0C8; border-radius: 10px; background: #fff; font-family: inherit; color: var(--p-ink); }
+.p-textarea { min-height: 90px; }
+.p-err { color: var(--p-err); font-weight: 700; white-space: pre-wrap; }
+
+/* 小さな印 */
+.p-tag { display: inline-block; font-size: 12px; border-radius: 999px; padding: 1px 9px; }
+.p-tag.p-on { background: #E6F4EC; color: var(--p-ok); }
+.p-tag.p-off { background: #EEF1F4; color: var(--p-muted); }
+.p-tag.p-warn { background: #FCE9D9; color: var(--p-warn); }
+.p-tag.p-bad { background: #FDECEA; color: var(--p-err); }
+
+/* 表 */
+.p-tbl { background: #fff; border: 1px solid var(--p-line); border-radius: 12px; overflow-x: auto; }
+.p-tbl table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.p-tbl th, .p-tbl td { padding: 8px 10px; border-bottom: 1px solid #EEF1F4; text-align: left; white-space: nowrap; vertical-align: top; }
+.p-tbl th { color: var(--p-muted); font-weight: 400; font-size: 12px; background: #FAFBFC; position: sticky; top: 0; }

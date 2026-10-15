@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>お知らせ</title>
+<!-- 守り：このページが通信できる先を Google Apps Script だけに絞る。URLを他サイトに渡さない -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  お知らせ(GitHub Pages の notice/index.html)。共通部品で作った最初のツール
+  ・見る：対象のお知らせの一覧と本文。開いたら既読になる(認証基盤に記録)
+  ・書く(notice_edit の権限＝社員)：新しく書く・直す・取り下げる、既読の状況(読んだ人・まだの人)を見る
+  データは認証基盤から(ツール一覧の notice の行の API＝認証基盤のURL)。?id=お知らせID で、そのお知らせを開いた状態で始まる
+-->
+<style>
+  .n-item { display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--p-line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; cursor: pointer; font-family: inherit; font-size: 16px; color: var(--p-ink); }
+  .n-item.unread { border-left: 6px solid var(--p-c); }
+  .n-item.imp { border-color: #F2B8B5; background: #FFF7F6; }
+  .n-item .t { font-weight: 700; }
+  .n-item .m { font-size: 13px; color: var(--p-muted); margin-top: 2px; }
+  .n-body { white-space: pre-wrap; word-break: break-word; line-height: 1.8; }
+  .n-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .n-checks label { display: inline-flex; align-items: center; gap: 4px; margin: 4px 12px 4px 0; font-size: 15px; }
+  .n-split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .n-who { font-size: 14px; line-height: 1.9; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div id="toolbar" class="n-row" style="margin:0 0 10px;"></div>
+    <div id="view"></div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-10-20a';
+var g = Portal.$, esc = Portal.esc;
+var P = Portal.start({ tool: 'notice', title: 'お知らせ' });
+var D = null;           // notice.list の返事
+var OPEN = '';          // 開いているお知らせのID
+
+function load(openId) {
+  return P.call('notice.list', {}, { retry: true }).then(function (res) {
+    if (!res.ok) { Portal.gate(Portal.authMessage(res, 'お知らせ'), { back: true }); return; }
+    D = res;
+    Portal.showApp();
+    g('ver').textContent = Portal.timing(PAGE_VERSION);
+    if (openId && D.notices.some(function (n) { return n.id === openId; })) openNotice(openId); else showList();
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
+}
+
+function targetText(n) {
+  var st = (n.stores || []).map(function (c) { var s = (D.stores || []).filter(function (x) { return x.code === c; })[0]; return s ? s.name : c; });
+  return (n.emps && n.emps.length ? n.emps.join('・') : '全員') + '／' + (st.length ? st.join('・') : '全店舗');
+}
+
+// ===== 一覧 =====
+function showList() {
+  OPEN = '';
+  g('toolbar').innerHTML = D.canEdit ? '<button class="p-btn p-solid" id="newBtn">＋ 新しいお知らせを書く</button>' : '';
+  if (D.canEdit) g('newBtn').addEventListener('click', function () { showEdit(null); });
+  var list = D.notices.filter(function (n) { return D.canEdit || n.mine; });
+  if (!list.length) { g('view').innerHTML = '<div class="p-card p-muted">お知らせはありません。</div>'; return; }
+  var live = list.filter(function (n) { return n.live; }), other = list.filter(function (n) { return !n.live; });
+  var item = function (n) {
+    var state = !n.enabled ? '<span class="p-tag p-off">取り下げ</span> ' : (!n.live ? '<span class="p-tag p-off">掲載前／終了</span> ' : '');
+    return '<button class="n-item' + (n.read ? '' : ' unread') + (n.important ? ' imp' : '') + '" data-id="' + esc(n.id) + '">' +
+      '<div class="t">' + state + (n.important ? '⚠ ' : '') + esc(n.title) + (n.read ? '' : ' <span class="p-tag p-warn">未読</span>') + '</div>' +
+      '<div class="m">' + esc(n.start) + (D.canEdit ? '・対象：' + esc(targetText(n)) : '') + '</div></button>';
+  };
+  g('view').innerHTML = (live.length ? live.map(item).join('') : '<div class="p-card p-muted">掲載中のお知らせはありません。</div>') +
+    (other.length ? '<h2 style="font-size:15px;color:var(--p-muted);margin:18px 4px 8px;">' + (D.canEdit ? '掲載前・終了・取り下げ' : '終わったお知らせ') + '</h2>' + other.map(item).join('') : '');
+  Array.prototype.forEach.call(document.querySelectorAll('.n-item'), function (b) { b.addEventListener('click', function () { openNotice(b.getAttribute('data-id')); }); });
+}
+
+// ===== 本文(開いたら既読) =====
+function openNotice(id) {
+  var n = D.notices.filter(function (x) { return x.id === id; })[0];
+  if (!n) { showList(); return; }
+  OPEN = id;
+  g('toolbar').innerHTML = '<button class="p-btn" id="backList">‹ 一覧へ</button>' + (D.canEdit ? '<button class="p-btn" id="editBtn">直す</button><button class="p-btn" id="readsBtn">既読の状況</button>' : '');
+  g('backList').addEventListener('click', showList);
+  if (D.canEdit) {
+    g('editBtn').addEventListener('click', function () { showEdit(n); });
+    g('readsBtn').addEventListener('click', function () { showReads(n); });
+  }
+  g('view').innerHTML = '<div class="p-card"><h2>' + (n.important ? '⚠ ' : '') + esc(n.title) + '</h2>' +
+    '<div class="p-note">' + esc(n.start) + (n.end ? ' 〜 ' + esc(n.end) : '') + (n.author ? '・' + esc(n.author) : '') + '</div>' +
+    '<div class="n-body" style="margin-top:10px;">' + esc(n.body) + '</div></div>';
+  if (!n.read && n.mine && n.live) {
+    P.call('notice.read', { id: id }, { retry: true }).then(function (r) { if (r.ok) n.read = true; }).catch(function () {});
+  }
+}
+
+// ===== 既読の状況(書ける人) =====
+function showReads(n) {
+  g('view').innerHTML = '<div class="p-card">読み込んでいます…</div>';
+  P.call('notice.reads', { id: n.id }, { retry: true }).then(function (r) {
+    if (!r.ok) { g('view').innerHTML = '<div class="p-card p-err">' + esc(Portal.authMessage(r, '既読の状況')) + '</div>'; return; }
+    g('view').innerHTML = '<div class="p-card"><h2>' + esc(r.title) + '</h2><div class="p-note">対象：' + esc(targetText(n)) + '(在籍の人)</div>' +
+      '<div class="n-split" style="margin-top:10px;"><div><b>読んだ ' + r.read.length + '人</b><div class="n-who">' +
+      (r.read.map(function (x) { return esc(x.name) + ' <span class="p-note">' + esc(x.at) + '</span>'; }).join('<br>') || '—') + '</div></div>' +
+      '<div><b>まだ ' + r.unread.length + '人</b><div class="n-who">' + (r.unread.map(function (x) { return esc(x.name); }).join('<br>') || '—') + '</div></div></div></div>';
+  }).catch(function () { g('view').innerHTML = '<div class="p-card p-err">通信に失敗しました</div>'; });
+}
+
+// ===== 書く・直す(書ける人) =====
+function nowLocal(ms) { var d = ms ? new Date(ms) : new Date(); d.setSeconds(0, 0); var p = function (x) { return ('0' + x).slice(-2); }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()); }
+function toLocal(s) { var m = String(s || '').match(/(\d{4})\/(\d{1,2})\/(\d{1,2}) (\d{1,2}):(\d{2})/); return m ? m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2) + 'T' + ('0' + m[4]).slice(-2) + ':' + m[5] : ''; }
+function showEdit(n) {
+  g('toolbar').innerHTML = '<button class="p-btn" id="cancelEdit">‹ やめる</button>';
+  g('cancelEdit').addEventListener('click', function () { if (n) openNotice(n.id); else showList(); });
+  var checks = function (name, list, sel) {
+    return '<div class="n-checks">' + list.map(function (x) { var v = typeof x === 'string' ? x : x.code, l = typeof x === 'string' ? x : x.name;
+      return '<label><input type="checkbox" name="' + name + '" value="' + esc(v) + '"' + (sel.indexOf(v) !== -1 ? ' checked' : '') + '>' + esc(l) + '</label>'; }).join('') + '</div>';
+  };
+  g('view').innerHTML = '<div class="p-card"><h2>' + (n ? 'お知らせを直す' : '新しいお知らせ') + '</h2>' +
+    '<label class="p-label">タイトル</label><input class="p-input" id="fTitle" maxlength="80">' +
+    '<label class="p-label">本文</label><textarea class="p-textarea" id="fBody" rows="8" maxlength="4000"></textarea>' +
+    '<div class="n-split"><div><label class="p-label">掲載開始</label><input class="p-input" type="datetime-local" id="fStart"></div>' +
+    '<div><label class="p-label">掲載終了(空＝ずっと)</label><input class="p-input" type="datetime-local" id="fEnd"></div></div>' +
+    '<label class="p-label">対象の雇用区分(チェックなし＝全員)</label>' + checks('emp', D.emps || [], n ? n.emps : []) +
+    '<label class="p-label">対象の店舗(チェックなし＝全店舗)</label>' + checks('store', D.stores || [], n ? n.stores : []) +
+    '<div class="n-checks" style="margin-top:12px;"><label><input type="checkbox" id="fImp"' + (n && n.important ? ' checked' : '') + '>重要(目立たせる)</label>' +
+    '<label><input type="checkbox" id="fBot"' + (n && n.bot ? ' checked' : '') + (n && n.sent ? ' disabled' : '') + '>Botでも店舗のチャットに送る' + (n && n.sent ? '(送信済み)' : '') + '</label>' +
+    (n ? '<label><input type="checkbox" id="fOff"' + (n.enabled ? '' : ' checked') + '>取り下げる(ポータルに出さない)</label>' : '') + '</div>' +
+    '<button class="p-btn p-solid p-big" id="fSave" style="margin-top:16px;">' + (n ? '保存する' : '掲載する') + '</button><div class="p-err" id="fErr" style="margin-top:8px;"></div></div>';
+  g('fTitle').value = n ? n.title : '';
+  g('fBody').value = n ? n.body : '';
+  g('fStart').value = n ? toLocal(n.start) : nowLocal();
+  g('fEnd').value = n ? toLocal(n.end) : '';
+  g('fSave').addEventListener('click', function () {
+    var vals = function (name) { return Array.prototype.map.call(document.querySelectorAll('input[name="' + name + '"]:checked'), function (x) { return x.value; }); };
+    var fmt = function (v) { return v ? v.replace('T', ' ').replace(/-/g, '/') : ''; };
+    var req = { id: n ? n.id : '', title: g('fTitle').value.trim(), body: g('fBody').value, start: fmt(g('fStart').value), end: fmt(g('fEnd').value),
+      emps: vals('emp'), stores: vals('store'), important: g('fImp').checked, bot: g('fBot').checked, enabled: !(g('fOff') && g('fOff').checked) };
+    if (!req.title) { g('fErr').textContent = 'タイトルを入れてください'; return; }
+    if (!req.start) { g('fErr').textContent = '掲載開始を入れてください'; return; }
+    if (req.bot && !(n && n.sent) && !confirm('掲載開始の時刻になったら、対象の店舗のチャットにも送ります。よいですか？')) return;
+    g('fSave').disabled = true; g('fErr').textContent = '';
+    // 保存は二重に送らないよう、やり直しはしない
+    P.call('notice.save', req).then(function (r) {
+      g('fSave').disabled = false;
+      if (!r.ok) { g('fErr').textContent = r.error === 'AUTH' ? Portal.authMessage(r, 'お知らせを書く') : r.error; return; }
+      load(r.id);
+    }).catch(function () { g('fSave').disabled = false; g('fErr').textContent = '通信に失敗しました。もう一度押してください。'; });
+  });
+}
+
+if (P) {
+  var q = (location.search.match(/[?&]id=([^&]+)/) || [])[1];
+  load(q ? decodeURIComponent(q) : '');
+}
+</script>
+</body>
+</html>

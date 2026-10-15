@@ -4,25 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>スタッフ一覧</title>
+<!-- 守り：このページが通信できる先を Google Apps Script だけに絞る(万一、文字が混入しても外へ送れないように)。URLを他サイトに渡さない -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <!--
   スタッフ一覧(社員以上)：GitHub Pages の staff/index.html。ポータルと同じサイト
   ・スタッフ名簿(StaffMaster)から、氏名・雇用区分・所属・メール・ステータス・グレード・オンボーディング(準備：の列)の状況を表示
   ・データは認証基盤から受け取る(ツール一覧の staff の行の API＝認証基盤のURL)。通行証の staff の権限が必要
   通行証とデータの入口は、ポータルがブラウザの中に置いたものを使う。秘密は置かない
 -->
+<link rel="stylesheet" href="../common/style.css?v=1">
 <style>
-  :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; --ok: #1F7A4D; }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 15px; }
-  #gate { min-height: 70vh; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; }
-  .gspin { width: 40px; height: 40px; margin: 0 auto 16px; border: 5px solid var(--soft); border-top-color: var(--c); border-radius: 50%; animation: spin .9s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .gbtn { display: inline-block; padding: 12px 20px; border-radius: 10px; background: var(--c); color: #fff; text-decoration: none; font-weight: 700; }
-  #app { display: none; }
-  header { background: var(--c); color: #fff; padding: 10px 18px 14px; }
-  .topbar { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
-  .topbar a { color: #fff; text-decoration: none; opacity: .9; }
-  header h1 { margin: 4px 0 0; font-size: 20px; }
+  /* スタッフ一覧だけの見た目(共通の見た目は ../common/style.css) */
+  :root { --c: var(--p-c); --soft: var(--p-soft); --ink: var(--p-ink); --muted: var(--p-muted); --line: var(--p-line); --bg: var(--p-bg); --err: var(--p-err); --ok: var(--p-ok); } /* 前の版の色の名前 → 共通の色 */
   .wrap { max-width: 1100px; margin: 0 auto; padding: 12px 14px 40px; }
   .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
   input[type=search], select { font-size: 15px; padding: 8px 10px; border: 1px solid #B9C0C8; border-radius: 8px; background: #fff; font-family: inherit; }
@@ -42,21 +36,11 @@
   .bar i { display: block; height: 100%; background: var(--ok); }
   .todo { font-size: 12px; color: #B4581F; white-space: normal; max-width: 260px; }
   .done { font-size: 12px; color: var(--ok); }
-  #ver { font-size: 11px; color: #9AA3AD; margin-top: 10px; }
 </style>
 </head>
 <body>
-<div id="gate"><div>
-  <div class="gspin" id="gspin"></div><div id="gmsg" style="font-size:18px;line-height:1.7;white-space:pre-wrap;">準備しています…</div>
-  <div id="gact" style="margin-top:18px;"></div>
-</div></div>
-
-<div id="app">
-  <header>
-    <div class="topbar"><a href="../">‹ ポータル</a><span id="me"></span></div>
-    <h1>スタッフ一覧</h1>
-  </header>
-  <div class="wrap">
+<div id="app" hidden>
+  <div class="p-wrap p-wide">
     <div class="tools">
       <input type="search" id="q" placeholder="名前・メールで探す">
       <select id="fAffil"></select>
@@ -66,21 +50,14 @@
     </div>
     <div class="count" id="count"></div>
     <div class="tbl"><table id="tbl"></table></div>
-    <div id="ver"></div>
+    <div class="p-ver" id="ver"></div>
   </div>
 </div>
 
+<script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-10-14a';
-var PORTAL_URL = '../';
-var T0 = Date.now();
-function g(id) { return document.getElementById(id); }
-function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-function gate(msg, link) { g('gspin').style.display = 'none'; g('gmsg').textContent = msg; if (link) g('gact').innerHTML = '<a class="gbtn" href="' + PORTAL_URL + '">ポータルに戻る</a>'; }
-
-var S = null;
-try { S = JSON.parse(sessionStorage.getItem('portal_session') || 'null'); } catch (e) { S = null; }
-var API = S && S.apis ? S.apis.staff : '';
+var PAGE_VERSION = '2026-10-19a';
+var g = Portal.$, esc = Portal.esc;
 var D = null, SORT = { k: 'sid', asc: true };
 
 function opts(list, label) { return '<option value="">' + label + '(すべて)</option>' + list.map(function (v) { return '<option>' + esc(v) + '</option>'; }).join(''); }
@@ -116,8 +93,7 @@ function render() {
 
 function show(res) {
   D = res;
-  g('gate').style.display = 'none'; g('app').style.display = 'block';
-  g('me').textContent = S.name ? S.name + ' さん' : '';
+  Portal.showApp();
   var affils = [], emps = [];
   D.staff.forEach(function (x) {
     x.affilLabel.split('・').forEach(function (a) { if (a && affils.indexOf(a) === -1) affils.push(a); });
@@ -125,7 +101,7 @@ function show(res) {
   });
   g('fAffil').innerHTML = opts(affils, '所属');
   g('fEmp').innerHTML = opts(emps, '雇用区分');
-  g('ver').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + ((Date.now() - T0) / 1000).toFixed(1) + '秒' + (D.prepCols.length ? '・オンボーディングの項目：' + D.prepCols.join('、') : '');
+  g('ver').textContent = Portal.timing(PAGE_VERSION) + (D.prepCols.length ? '・オンボーディングの項目：' + D.prepCols.join('、') : '');
   render();
 }
 
@@ -137,15 +113,13 @@ g('tbl').addEventListener('click', function (e) {
   render();
 });
 
-if (!S || !S.token || S.exp < Date.now()) gate('ポータルから開き直してください。\n(ログインの期限が切れたか、直接開かれました)', true);
-else if (!API) gate('スタッフ一覧を開く権限がないか、ポータルの設定が足りません。\nポータルから開き直してください。', true);
-else {
-  fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'staff.list', token: S.token }) })
-    .then(function (r) { return r.text(); }).then(function (t) {
-      var res = JSON.parse(t);
-      if (!res.ok) { gate(res.error === 'AUTH' ? (res.reason === 'no_permission' ? 'スタッフ一覧を見る権限がありません。' : 'ログインの期限が切れました。\nポータルから開き直してください。') : '開けませんでした：' + res.error, true); return; }
-      show(res);
-    }).catch(function () { gate('通信に失敗しました。\n開き直してください。', true); });
+// 通行証の確認とヘッダーは共通部品(Portal.start)。データは認証基盤から(app なし)
+var P = Portal.start({ tool: 'staff', title: 'スタッフ一覧' });
+if (P) {
+  P.call('staff.list', {}, { retry: true }).then(function (res) {
+    if (!res.ok) { Portal.gate(Portal.authMessage(res, 'スタッフ一覧'), { back: true }); return; }
+    show(res);
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n開き直してください。', { back: true, detail: e.message }); });
 }
 </script>
 </body>

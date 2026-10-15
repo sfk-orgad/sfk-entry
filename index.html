@@ -37,6 +37,12 @@
   header h1 { margin: 0; font-size: 22px; }
   .me { position: absolute; top: 10px; right: 14px; font-size: 14px; opacity: .9; }
   .wrap { max-width: 640px; margin: 0 auto; padding: 0 12px 40px; }
+  .news { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-top: 14px; }
+  .news h2 { margin: 0 0 6px; font-size: 16px; }
+  .news a { display: block; padding: 8px 0; border-bottom: 1px solid #EEF1F4; color: var(--ink); text-decoration: none; font-size: 16px; }
+  .news a:last-of-type { border-bottom: none; }
+  .news a.imp { color: #B42318; font-weight: 700; }
+  .news .all { font-size: 14px; color: var(--muted); text-align: right; padding-top: 6px; }
   .today { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-top: 14px; }
   .today h2 { font-size: 16px; margin: 0 0 8px; color: var(--muted); font-weight: 700; }
   .store { padding: 8px 0; border-top: 1px solid #EEF1F4; }
@@ -81,6 +87,7 @@
 <div id="portal">
   <header><div class="me" id="me"></div><h1>業務ポータル</h1></header>
   <div class="wrap">
+    <div id="news"></div>
     <div id="today"></div>
     <div id="tools"></div>
     <button class="pcbtn" id="pcOpen" style="display:none">PCで開く(コードを表示)</button>
@@ -98,7 +105,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-14a';
+const PAGE_VERSION = '2026-10-20a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -460,6 +467,18 @@ function renderPortal(res, at) {
     ).join('') + '</div>';
   } else {
     $('today').innerHTML = '';
+  }
+
+  // お知らせ(未読のものを上に。押すとお知らせの画面でその本文が開き、既読になる)
+  const noticeTool = (res.items || []).find(it => it.tool === 'notice');
+  const unread = (res.notices || []).filter(n => !n.read);
+  if (noticeTool && unread.length) {
+    const url = id => noticeTool.url + (noticeTool.url.indexOf('?') === -1 ? '?' : '&') + 'id=' + encodeURIComponent(id);
+    $('news').innerHTML = '<div class="news"><h2>📢 お知らせ(未読 ' + unread.length + '件)</h2>' +
+      unread.slice(0, 3).map(n => '<a href="' + esc(url(n.id)) + '"' + (n.important ? ' class="imp"' : '') + '>' + (n.important ? '⚠ ' : '') + esc(n.title) + '</a>').join('') +
+      (unread.length > 3 ? '<div class="all">ほか ' + (unread.length - 3) + '件は「お知らせ」から</div>' : '') + '</div>';
+  } else {
+    $('news').innerHTML = '';
   }
 
   // 確認用の人がメンテナンス中に開いたときは、そのことを上に表示する

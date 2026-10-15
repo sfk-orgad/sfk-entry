@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>(ツールの名前)</title>
+<!-- 守り：このページが通信できる先を Google Apps Script だけに絞る(万一、文字が混入しても外へ送れないように)。URLを他サイトに渡さない -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  新しいツールのひな形(GitHub Pages の _template/index.html)
+  使い方：このフォルダを丸ごとコピーして、フォルダ名をツールの名前にする(例：notice/)
+    1. TOOL(ツール一覧のツールID)・TITLE・APP(Botの app。認証基盤のツールなら空)・ACTION(最初に読むAPI)を書き換える
+    2. render() に画面を作る処理を書く
+    3. ポータル設定のツール一覧に行を足す(URL＝②＋フォルダ名/、API＝BotかGASのURL)
+  共通部品(../common/portal.js・style.css)の使い方は README.md
+-->
+<style>
+  /* このツールだけの見た目(共通の見た目は ../common/style.css) */
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div class="p-card" id="main">読み込んでいます…</div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-10-19a';
+var TOOL = 'xxxx';            // ツール一覧のツールID
+var TITLE = '(ツールの名前)';
+var APP = 'shift';            // Botの app(例：shift / closing)。認証基盤のツールなら ''
+var ACTION = 'xxxx.get';      // 最初に読むAPI
+
+var P = Portal.start({ tool: TOOL, title: TITLE });
+if (P) {
+  P.call(ACTION, {}, { app: APP || undefined, retry: true }).then(function (res) {
+    if (!res.ok) { Portal.gate(Portal.authMessage(res, TITLE), { back: true }); return; }
+    Portal.showApp();
+    render(res);
+    Portal.$('ver').textContent = Portal.timing(PAGE_VERSION);
+  }).catch(function (e) {
+    Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message });
+  });
+}
+
+function render(res) {
+  Portal.$('main').textContent = JSON.stringify(res).slice(0, 200); // ← ここに画面を作る
+}
+</script>
+</body>
+</html>

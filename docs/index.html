@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文書の棚</title>
+<!-- 守り：このページが通信できる先を Google Apps Script だけに絞る。URLを他サイトに渡さない -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; frame-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  文書の棚(GitHub Pages の docs/index.html)：手順書・就業規則・規程・研修などへのリンク集
+  ・見る：分類ごとの一覧、題名・説明での検索、自分の店舗の分だけに絞る。改定から14日以内に「改定」の印
+  ・登録・修正(docs_edit の権限＝社員)：分類・題名・リンク(https://)・説明・改定日・並び順・対象の店舗・見られる雇用区分・取り下げ。
+    「お知らせでも知らせる」で、お知らせ(【改定】題名＋リンク)も掲載
+  データは認証基盤から(ツール一覧の docs の行の API＝認証基盤のURL)
+-->
+<style>
+  .d-cat { font-size: 15px; font-weight: 700; color: var(--p-muted); margin: 18px 4px 6px; }
+  details.d-sec { margin: 10px 0 4px; }
+  details.d-sec > summary { cursor: pointer; list-style: none; font-size: 16px; font-weight: 700; color: var(--p-ink); padding: 8px 4px; border-bottom: 2px solid var(--p-line); }
+  details.d-sec > summary::-webkit-details-marker { display: none; }
+  details.d-sec > summary::before { content: '▶'; display: inline-block; width: 1.3em; font-size: 12px; color: var(--p-muted); }
+  details.d-sec[open] > summary::before { content: '▼'; }
+  details.d-sec > summary .n { font-weight: 400; color: var(--p-muted); font-size: 13px; margin-left: 4px; }
+  details.d-sec details.d-sec { margin-left: 14px; }
+  details.d-sec details.d-sec > summary { font-size: 15px; border-bottom: 1px solid var(--p-line); }
+  .d-body { padding: 8px 0 0 4px; }
+  .d-item { background: #fff; border: 1px solid var(--p-line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
+  .d-item.off { opacity: .55; }
+  .d-item a.t { font-size: 17px; font-weight: 700; color: var(--p-c); text-decoration: none; }
+  .d-item .s { font-size: 14px; color: var(--p-muted); margin-top: 3px; white-space: pre-wrap; }
+  .d-item .m { font-size: 12px; color: var(--p-muted); margin-top: 4px; }
+  .d-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .d-checks label { display: inline-flex; align-items: center; gap: 4px; margin: 4px 12px 4px 0; font-size: 15px; }
+  .d-split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .d-open { background: none; border: none; padding: 0; font-family: inherit; font-size: 17px; font-weight: 700; color: var(--p-c); cursor: pointer; text-align: left; }
+  .d-frame { width: 100%; height: 75vh; border: 1px solid var(--p-line); border-radius: 10px; background: #fff; }
+  .d-mode label { display: block; margin: 6px 0; font-size: 15px; }
+  .d-mini { font-size: 13px; padding: 4px 10px; border: 1px solid #B9C0C8; border-radius: 8px; background: #fff; cursor: pointer; margin-left: 8px; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div id="toolbar"></div>
+    <div id="view"></div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-10-25a';
+var g = Portal.$, esc = Portal.esc;
+var P = Portal.start({ tool: 'docs', title: '文書の棚' });
+var D = null, Q = '', MINE = true;
+
+function load() {
+  return P.call('doc.list', {}, { retry: true }).then(function (res) {
+    if (!res.ok) { Portal.gate(res.error === 'AUTH' ? Portal.authMessage(res, '文書の棚') : '開けませんでした：' + res.error, { back: true }); return; }
+    D = res; Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION); showList();
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
+}
+// 分類の区切り(／ / ＞ >)で段に分ける
+function catPath(c) { var p = String(c || 'その他').split(/\s*[／\/＞>]\s*/).filter(function (x) { return x; }); return p.length ? p : ['その他']; }
+var OPENED = {}; // 分類のパス → 開いているか
+function storeNames(codes) { return (codes || []).map(function (c) { var s = (D.stores || []).filter(function (x) { return x.code === c; })[0]; return s ? s.name : c; }); }
+
+// ===== 一覧(分類ごと・検索・自分の店舗の分だけ) =====
+function showList() {
+  g('toolbar').innerHTML = '<div class="d-row"><input class="p-input" id="q" placeholder="題名・説明で探す" style="flex:1;min-width:180px;" value="' + esc(Q) + '">' +
+    '<label class="p-muted"><input type="checkbox" id="mine"' + (MINE ? ' checked' : '') + '> 自分の店舗の分だけ</label>' +
+    (D.canEdit ? '<button class="p-btn p-solid" id="newBtn">＋ 登録</button>' : '') + '</div>';
+  g('q').addEventListener('input', function () { Q = g('q').value; renderList(); });
+  g('mine').addEventListener('change', function () { MINE = g('mine').checked; renderList(); });
+  if (D.canEdit) g('newBtn').addEventListener('click', function () { showEdit(null); });
+  renderList();
+}
+function renderList() {
+  var q = Q.trim().toLowerCase();
+  var list = D.docs.filter(function (d) {
+    if (MINE && !d.mine) return false;
+    if (q && (d.title + ' ' + d.desc + ' ' + d.cat).toLowerCase().indexOf(q) === -1) return false;
+    return true;
+  });
+  if (!list.length) { g('view').innerHTML = '<div class="p-card p-muted">' + (D.docs.length ? '当てはまる文書はありません。' : 'まだ文書が登録されていません。') + '</div>'; return; }
+  // 分類は「マニュアル／接客」のように ／ で区切ると入れ子になる。見出しを押すと開閉(最初は1段目だけ開く。検索中は全部開く)
+  var tree = { kids: {}, docs: [], min: 1e9 };
+  list.forEach(function (d) {
+    var node = tree;
+    catPath(d.cat).forEach(function (name) {
+      node = node.kids[name] = node.kids[name] || { name: name, kids: {}, docs: [], min: 1e9 };
+    });
+    node.docs.push(d);
+  });
+  (function setMin(n) { var m = n.docs.reduce(function (a, d) { return Math.min(a, d.order); }, 1e9); Object.keys(n.kids).forEach(function (k) { m = Math.min(m, setMin(n.kids[k])); }); n.min = m; return m; })(tree);
+  var count = function (n) { return n.docs.length + Object.keys(n.kids).reduce(function (a, k) { return a + count(n.kids[k]); }, 0); };
+  var item = function (d) {
+    var meta = [];
+    if (d.revised) meta.push('改定 ' + d.revised);
+    if (D.canEdit) meta.push('対象：' + ((d.emps || []).join('・') || '全員') + '／' + (storeNames(d.stores).join('・') || '全店舗'));
+    var icon = d.mode === 'inapp' ? '🔒' : (/youtu\.?be|vimeo\.com|\.mp4(\?|$)|\/video/i.test(d.url) ? '🎬' : '📄');
+    return '<div class="d-item' + (d.enabled ? '' : ' off') + '">' +
+      (d.mode === 'inapp'
+        ? '<button class="d-open" data-open="' + esc(d.id) + '">' + icon + ' ' + esc(d.title) + '</button> <span class="p-tag p-on">ポータルで開く</span>'
+        : '<a class="t" href="' + esc(d.url) + '" target="_blank" rel="noopener noreferrer">' + icon + ' ' + esc(d.title) + '</a>') +
+      (d.fresh ? ' <span class="p-tag p-warn">改定</span>' : '') + (d.enabled ? '' : ' <span class="p-tag p-off">取り下げ</span>') +
+      (D.canEdit ? '<button class="d-mini" data-edit="' + esc(d.id) + '">直す</button>' : '') +
+      (d.desc ? '<div class="s">' + esc(d.desc) + '</div>' : '') + (meta.length ? '<div class="m">' + esc(meta.join('・')) + '</div>' : '') + '</div>';
+  };
+  var render = function (n, depth, prefix) {
+    var kids = Object.keys(n.kids).map(function (k) { return n.kids[k]; }).sort(function (a, b) { return a.min - b.min || (a.name < b.name ? -1 : 1); });
+    return n.docs.map(item).join('') + kids.map(function (k) {
+      var path = prefix + '／' + k.name;
+      var open = q || (path in OPENED ? OPENED[path] : depth === 0) ? ' open' : '';
+      return '<details class="d-sec"' + open + ' data-path="' + esc(path) + '"><summary>' + esc(k.name) + '<span class="n">(' + count(k) + ')</span></summary><div class="d-body">' + render(k, depth + 1, path) + '</div></details>';
+    }).join('');
+  };
+  g('view').innerHTML = render(tree, 0, '');
+  // 開け閉めを覚える(検索で描き直しても、開いた所はそのまま)
+  Array.prototype.forEach.call(document.querySelectorAll('details.d-sec'), function (el) {
+    el.addEventListener('toggle', function () { if (!q) OPENED[el.getAttribute('data-path')] = el.open; });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-open]'), function (b) {
+    b.addEventListener('click', function () { openInApp(D.docs.filter(function (d) { return d.id === b.getAttribute('data-open'); })[0]); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-edit]'), function (b) {
+    b.addEventListener('click', function () { showEdit(D.docs.filter(function (d) { return d.id === b.getAttribute('data-edit'); })[0]); });
+  });
+}
+
+// ===== ポータルの中で開く(認証基盤が権限を確かめて中身を返す。URLは画面に出ない) =====
+var PDF_URL = '';
+function openInApp(d) {
+  if (PDF_URL) { try { URL.revokeObjectURL(PDF_URL); } catch (e) {} PDF_URL = ''; }
+  g('toolbar').innerHTML = '<div class="d-row"><button class="p-btn" id="back">‹ 一覧へ</button></div>';
+  g('back').addEventListener('click', showList);
+  g('view').innerHTML = '<div class="p-card">「' + esc(d.title) + '」を開いています…</div>';
+  P.call('doc.open', { id: d.id }, { retry: true }).then(function (r) {
+    if (!r.ok) { g('view').innerHTML = '<div class="p-card p-err">' + esc(r.error === 'AUTH' ? 'この文書を見る権限がありません。' : r.error) + '</div>'; return; }
+    var head = '<div class="p-card"><h2>' + esc(r.title) + '</h2><div class="p-note">この文書は、社外に持ち出さないでください(開いた記録が残ります)。</div></div>';
+    if (r.kind === 'html') {
+      // 文書の中の仕掛けが動かないよう、隔離した枠(sandbox)の中に表示する
+      g('view').innerHTML = head + '<iframe class="d-frame" sandbox title="' + esc(r.title) + '"></iframe>';
+      document.querySelector('.d-frame').srcdoc = '<meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:16px;line-height:1.8;padding:12px;max-width:100%;}img{max-width:100%;height:auto;}table{max-width:100%;}</style>' + r.html;
+    } else if (r.kind === 'pdf') {
+      var bin = atob(r.b64), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      PDF_URL = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      g('view').innerHTML = head + '<iframe class="d-frame" src="' + PDF_URL + '" title="' + esc(r.title) + '"></iframe>' +
+        '<div style="text-align:right;margin-top:8px;"><a class="p-btn" href="' + PDF_URL + '" target="_blank" rel="noopener">端末で開く</a></div>';
+    }
+  }).catch(function () { g('view').innerHTML = '<div class="p-card p-err">通信に失敗しました。もう一度開いてください。</div>'; });
+}
+
+// ===== 登録・修正(書ける人) =====
+function showEdit(d) {
+  g('toolbar').innerHTML = '<div class="d-row"><button class="p-btn" id="back">‹ 一覧へ</button></div>';
+  g('back').addEventListener('click', showList);
+  var cats = [];
+  D.docs.forEach(function (x) { if (cats.indexOf(x.cat) === -1) cats.push(x.cat); });
+  var checks = function (name, list, sel) {
+    return '<div class="d-checks">' + list.map(function (x) { var v = typeof x === 'string' ? x : x.code, l = typeof x === 'string' ? x : x.name;
+      return '<label><input type="checkbox" name="' + name + '" value="' + esc(v) + '"' + (sel.indexOf(v) !== -1 ? ' checked' : '') + '>' + esc(l) + '</label>'; }).join('') + '</div>';
+  };
+  g('view').innerHTML = '<div class="p-card"><h2>' + (d ? '文書を直す' : '文書を登録') + '</h2>' +
+    '<label class="p-label">分類(「マニュアル／接客」のように ／ で区切ると入れ子になる)</label><input class="p-input" id="fCat" list="catList" maxlength="30"><datalist id="catList">' + cats.map(function (c) { return '<option value="' + esc(c) + '">'; }).join('') + '</datalist>' +
+    '<label class="p-label">題名</label><input class="p-input" id="fTitle" maxlength="80">' +
+    '<label class="p-label">開き方</label><div class="d-mode">' +
+      '<label><input type="radio" name="mode" value="inapp"' + (!d || d.mode === 'inapp' ? ' checked' : '') + '> 🔒 ポータルの中で開く(就業規則など公開したくないもの。GoogleドキュメントかPDF)</label>' +
+      '<label><input type="radio" name="mode" value="link"' + (d && d.mode === 'link' ? ' checked' : '') + '> 📄 リンク(動画など、公開しても困らないもの)</label></div>' +
+    '<label class="p-label" id="urlLabel">ファイルのURL</label><input class="p-input" id="fUrl" inputmode="url" placeholder="https://">' +
+    '<div class="p-note" id="urlNote"></div>' +
+    '<label class="p-label">説明(任意)</label><textarea class="p-textarea" id="fDesc" maxlength="300" style="min-height:70px;"></textarea>' +
+    '<div class="d-split"><div><label class="p-label">改定日(任意)</label><input class="p-input" type="date" id="fRev"></div>' +
+    '<div><label class="p-label">並び順(小さい順・任意)</label><input class="p-input" id="fOrder" inputmode="numeric"></div></div>' +
+    '<label class="p-label">見られる雇用区分(チェックなし＝全員)</label>' + checks('emp', D.emps || [], d ? d.emps : []) +
+    '<label class="p-label">対象の店舗(チェックなし＝全店舗)</label>' + checks('store', D.stores || [], d ? d.stores : []) +
+    (d ? '<div class="d-checks" style="margin-top:8px;"><label><input type="checkbox" id="fOff"' + (d.enabled ? '' : ' checked') + '>取り下げる(棚に出さない)</label></div>' : '') +
+    '<div class="p-card" style="margin-top:14px;background:#FAFBFC;"><label style="font-weight:700;"><input type="checkbox" id="fNotify"> お知らせでも知らせる(「【改定】題名」とリンクを掲載)</label>' +
+    '<div id="notifyBox" hidden><label class="p-label">お知らせに添える文(任意)</label><textarea class="p-textarea" id="fNText" maxlength="1000" style="min-height:70px;" placeholder="例：第12条(休暇)を改定しました"></textarea>' +
+    '<div class="d-checks"><label><input type="checkbox" id="fNImp">重要</label><label><input type="checkbox" id="fNBot">Botでも店舗のチャットに送る</label></div></div></div>' +
+    '<button class="p-btn p-solid p-big" id="fSave" style="margin-top:14px;">' + (d ? '保存する' : '登録する') + '</button><div class="p-err" id="fErr" style="margin-top:8px;"></div></div>';
+  g('fCat').value = d ? d.cat : ''; g('fTitle').value = d ? d.title : ''; g('fUrl').value = d ? d.url : '';
+  g('fDesc').value = d ? d.desc : ''; g('fRev').value = d && d.revised ? d.revised.replace(/\//g, '-') : ''; g('fOrder').value = d && d.order < 9999 ? d.order : '';
+  g('fNotify').addEventListener('change', function () { g('notifyBox').hidden = !g('fNotify').checked; });
+  var modeNote = function () {
+    var m = (document.querySelector('input[name="mode"]:checked') || {}).value;
+    g('urlLabel').textContent = m === 'inapp' ? 'ドライブのファイルのURL' : 'リンク(https:// から)';
+    g('urlNote').textContent = m === 'inapp' ? '管理者だけが開けるドライブのフォルダにファイルを置き、そのURLを貼る(共有は「リンクを知っている全員」にしない)。スタッフにはURLは見えず、ポータルの中でだけ読めます。'
+      : 'リンクを知っている人なら誰でも開けます。社外に出て困るものは「ポータルの中で開く」にしてください。';
+  };
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="mode"]'), function (x) { x.addEventListener('change', modeNote); });
+  modeNote();
+  g('fSave').addEventListener('click', function () {
+    var vals = function (name) { return Array.prototype.map.call(document.querySelectorAll('input[name="' + name + '"]:checked'), function (x) { return x.value; }); };
+    var req = { id: d ? d.id : '', mode: (document.querySelector('input[name="mode"]:checked') || {}).value || 'link', cat: g('fCat').value.trim(), title: g('fTitle').value.trim(), url: g('fUrl').value.trim(), desc: g('fDesc').value,
+      revised: g('fRev').value ? g('fRev').value.replace(/-/g, '/') : '', order: g('fOrder').value, emps: vals('emp'), stores: vals('store'),
+      enabled: !(g('fOff') && g('fOff').checked), notify: g('fNotify').checked, notifyText: g('fNText').value, notifyImportant: g('fNImp').checked, notifyBot: g('fNBot').checked };
+    if (!req.title) { g('fErr').textContent = '題名を入れてください'; return; }
+    if (!/^https:\/\//.test(req.url)) { g('fErr').textContent = 'リンクは https:// で始まるURLを入れてください'; return; }
+    if (req.notify && !confirm('お知らせ「【改定】' + req.title + '」も掲載します。よいですか？' + (req.notifyBot ? '\n(Botで店舗のチャットにも送ります)' : ''))) return;
+    g('fSave').disabled = true; g('fErr').textContent = '';
+    P.call('doc.save', req).then(function (r) { // 二重に登録しないよう、やり直しはしない
+      g('fSave').disabled = false;
+      if (!r.ok) { g('fErr').textContent = r.error === 'AUTH' ? Portal.authMessage(r, '文書の登録') : r.error; return; }
+      load();
+    }).catch(function () { g('fSave').disabled = false; g('fErr').textContent = '通信に失敗しました。もう一度押してください。'; });
+  });
+}
+
+if (P) load();
+</script>
+</body>
+</html>

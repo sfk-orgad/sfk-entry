@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>文書の棚</title>
 <!-- 守り：このページが通信できる先を Google Apps Script だけに絞る。URLを他サイトに渡さない -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; frame-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <link rel="stylesheet" href="../common/style.css?v=1">
 <!--
@@ -35,6 +35,8 @@
   .d-checks label { display: inline-flex; align-items: center; gap: 4px; margin: 4px 12px 4px 0; font-size: 15px; }
   .d-split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .d-open { background: none; border: none; padding: 0; font-family: inherit; font-size: 17px; font-weight: 700; color: var(--p-c); cursor: pointer; text-align: left; }
+  .d-pdf { background: #E9ECEF; border-radius: 10px; padding: 8px; min-height: 120px; }
+  .d-pdf canvas { display: block; width: 100%; height: auto; background: #fff; margin: 0 auto 8px; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
   .d-frame { width: 100%; height: 75vh; border: 1px solid var(--p-line); border-radius: 10px; background: #fff; }
   .d-mode label { display: block; margin: 6px 0; font-size: 15px; }
   .d-mini { font-size: 13px; padding: 4px 10px; border: 1px solid #B9C0C8; border-radius: 8px; background: #fff; cursor: pointer; margin-left: 8px; }
@@ -51,7 +53,7 @@
 
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-10-25a';
+var PAGE_VERSION = '2026-10-26a';
 var g = Portal.$, esc = Portal.esc;
 var P = Portal.start({ tool: 'docs', title: '文書の棚' });
 var D = null, Q = '', MINE = true;
@@ -131,9 +133,45 @@ function renderList() {
 }
 
 // ===== ポータルの中で開く(認証基盤が権限を確かめて中身を返す。URLは画面に出ない) =====
-var PDF_URL = '';
+// PDFは PDF.js(../common/pdfjs/。このサイトの中に置いたもの)でページの中に絵として描く
+// (Androidのアプリの中のブラウザはPDFを表示できず「操作をするためのアプリがありません」になるため。端末のPDFの機能は使わない)
+var PDFJS_VER = '3.11.174';
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  return new Promise(function (ok, ng) {
+    var sc = document.createElement('script');
+    sc.src = '../common/pdfjs/pdf.min.js?v=' + PDFJS_VER;
+    sc.onload = function () { window.pdfjsLib.GlobalWorkerOptions.workerSrc = '../common/pdfjs/pdf.worker.min.js?v=' + PDFJS_VER; ok(window.pdfjsLib); };
+    sc.onerror = function () { ng(new Error('PDFの表示の部品を読み込めませんでした')); };
+    document.head.appendChild(sc);
+  });
+}
+function showPdf(b64) {
+  var box = g('pdfPages');
+  loadPdfJs().then(function (lib) {
+    var bin = atob(b64), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return lib.getDocument({ data: bytes, isEvalSupported: false }).promise; // isEvalSupported：通信先の制限(eval禁止)の下でも動くように
+  }).then(function (pdf) {
+    box.innerHTML = '<div class="p-note" id="pdfNote">全' + pdf.numPages + 'ページ</div>';
+    var width = Math.max(280, box.clientWidth - 16), dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var chain = Promise.resolve();
+    for (var n = 1; n <= pdf.numPages; n++) {
+      (function (no) {
+        chain = chain.then(function () { return pdf.getPage(no); }).then(function (page) {
+          var vp1 = page.getViewport({ scale: 1 });
+          var vp = page.getViewport({ scale: (width / vp1.width) * dpr });
+          var c = document.createElement('canvas');
+          c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+          box.appendChild(c);
+          return page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+        });
+      })(n);
+    }
+    return chain;
+  }).catch(function (e) { box.innerHTML = '<div class="p-err">PDFを表示できませんでした：' + esc(e && e.message ? e.message : e) + '</div>'; });
+}
 function openInApp(d) {
-  if (PDF_URL) { try { URL.revokeObjectURL(PDF_URL); } catch (e) {} PDF_URL = ''; }
   g('toolbar').innerHTML = '<div class="d-row"><button class="p-btn" id="back">‹ 一覧へ</button></div>';
   g('back').addEventListener('click', showList);
   g('view').innerHTML = '<div class="p-card">「' + esc(d.title) + '」を開いています…</div>';
@@ -145,11 +183,8 @@ function openInApp(d) {
       g('view').innerHTML = head + '<iframe class="d-frame" sandbox title="' + esc(r.title) + '"></iframe>';
       document.querySelector('.d-frame').srcdoc = '<meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:16px;line-height:1.8;padding:12px;max-width:100%;}img{max-width:100%;height:auto;}table{max-width:100%;}</style>' + r.html;
     } else if (r.kind === 'pdf') {
-      var bin = atob(r.b64), bytes = new Uint8Array(bin.length);
-      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      PDF_URL = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-      g('view').innerHTML = head + '<iframe class="d-frame" src="' + PDF_URL + '" title="' + esc(r.title) + '"></iframe>' +
-        '<div style="text-align:right;margin-top:8px;"><a class="p-btn" href="' + PDF_URL + '" target="_blank" rel="noopener">端末で開く</a></div>';
+      g('view').innerHTML = head + '<div class="d-pdf" id="pdfPages">PDFを表示しています…</div>';
+      showPdf(r.b64);
     }
   }).catch(function () { g('view').innerHTML = '<div class="p-card p-err">通信に失敗しました。もう一度開いてください。</div>'; });
 }

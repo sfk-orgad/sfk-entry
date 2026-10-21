@@ -53,7 +53,7 @@
 
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-10-26a';
+var PAGE_VERSION = '2026-10-27a';
 var g = Portal.$, esc = Portal.esc;
 var P = Portal.start({ tool: 'docs', title: '文書の棚' });
 var D = null, Q = '', MINE = true;
@@ -136,14 +136,27 @@ function renderList() {
 // PDFは PDF.js(../common/pdfjs/。このサイトの中に置いたもの)でページの中に絵として描く
 // (Androidのアプリの中のブラウザはPDFを表示できず「操作をするためのアプリがありません」になるため。端末のPDFの機能は使わない)
 var PDFJS_VER = '3.11.174';
-function loadPdfJs() {
-  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+// 部品の場所(このページから見た ../common/pdfjs/。エラーのときに分かるよう、完全なURLにしておく)
+var PDFJS_BASE = new URL('../common/pdfjs/', location.href).href;
+function loadScript(src) {
   return new Promise(function (ok, ng) {
     var sc = document.createElement('script');
-    sc.src = '../common/pdfjs/pdf.min.js?v=' + PDFJS_VER;
-    sc.onload = function () { window.pdfjsLib.GlobalWorkerOptions.workerSrc = '../common/pdfjs/pdf.worker.min.js?v=' + PDFJS_VER; ok(window.pdfjsLib); };
-    sc.onerror = function () { ng(new Error('PDFの表示の部品を読み込めませんでした')); };
+    sc.src = src;
+    sc.onload = function () { ok(); };
+    sc.onerror = function () { sc.parentNode && sc.parentNode.removeChild(sc); ng(new Error(src)); };
     document.head.appendChild(sc);
+  });
+}
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  var src = PDFJS_BASE + 'pdf.min.js?v=' + PDFJS_VER;
+  // 失敗したら、端末が覚えている結果を使わずに、もう一度だけ読み込み直す(部品を置く前に開いた場合など)
+  return loadScript(src).catch(function () { return loadScript(src + '&t=' + Date.now()); }).then(function () {
+    if (!window.pdfjsLib) throw new Error('部品は読み込めたが、使える状態になりませんでした(端末のブラウザが古い可能性)');
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.js?v=' + PDFJS_VER;
+    return window.pdfjsLib;
+  }, function () {
+    throw new Error('PDFの表示の部品を読み込めませんでした\n(' + src + ' を開けるか、ブラウザで確かめてください)');
   });
 }
 function showPdf(b64) {
@@ -181,7 +194,21 @@ function openInApp(d) {
     if (r.kind === 'html') {
       // 文書の中の仕掛けが動かないよう、隔離した枠(sandbox)の中に表示する
       g('view').innerHTML = head + '<iframe class="d-frame" sandbox title="' + esc(r.title) + '"></iframe>';
-      document.querySelector('.d-frame').srcdoc = '<meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:16px;line-height:1.8;padding:12px;max-width:100%;}img{max-width:100%;height:auto;}table{max-width:100%;}</style>' + r.html;
+      // Googleドキュメントの書き出しには、紙の余白(左右72pt)と幅の上限(468pt)が付いていて、スマホでは列が細くなる。
+      // 表示のときに余白と上限を外し、文字の大きさ・行の間・表と画像を画面の幅に合わせる(文書の後に置いて上書きする)
+      var fit = '<style>' +
+        'html,body,body[class]{max-width:none!important;width:auto!important;margin:0!important;padding:14px 14px 40px!important;background:#fff!important;}' +
+        'body{font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif!important;font-size:17px!important;line-height:1.85!important;word-break:break-word;overflow-wrap:anywhere;}' +
+        'p,li,span,td,th,h1,h2,h3,h4,h5,h6{font-family:inherit!important;}' +
+        'p,li,td,th{font-size:17px!important;line-height:1.85!important;}' +
+        'span{font-size:inherit!important;}' +
+        'h1{font-size:22px!important;line-height:1.5!important;} h2{font-size:20px!important;line-height:1.5!important;} h3,h4{font-size:18px!important;line-height:1.5!important;}' +
+        'p{margin:0 0 .6em!important;text-indent:0!important;} ol,ul{padding-left:1.4em!important;margin-left:0!important;} li{margin-left:0!important;padding-left:.2em!important;}' +
+        '[class]{max-width:100%!important;}' +
+        'table{width:100%!important;max-width:100%!important;border-collapse:collapse!important;margin-left:0!important;} td,th{width:auto!important;padding:4px 6px!important;}' +
+        'img{max-width:100%!important;height:auto!important;} span:has(> img){width:auto!important;height:auto!important;}' +
+        '</style>';
+      document.querySelector('.d-frame').srcdoc = '<meta name="viewport" content="width=device-width, initial-scale=1">' + r.html + fit;
     } else if (r.kind === 'pdf') {
       g('view').innerHTML = head + '<div class="d-pdf" id="pdfPages">PDFを表示しています…</div>';
       showPdf(r.b64);
@@ -210,8 +237,8 @@ function showEdit(d) {
     '<label class="p-label">説明(任意)</label><textarea class="p-textarea" id="fDesc" maxlength="300" style="min-height:70px;"></textarea>' +
     '<div class="d-split"><div><label class="p-label">改定日(任意)</label><input class="p-input" type="date" id="fRev"></div>' +
     '<div><label class="p-label">並び順(小さい順・任意)</label><input class="p-input" id="fOrder" inputmode="numeric"></div></div>' +
-    '<label class="p-label">見られる雇用区分(チェックなし＝全員)</label>' + checks('emp', D.emps || [], d ? d.emps : []) +
-    '<label class="p-label">対象の店舗(チェックなし＝全店舗)</label>' + checks('store', D.stores || [], d ? d.stores : []) +
+    '<label class="p-label">見られる雇用区分</label><div class="p-note">何もチェックしない＝全員が見られる。チェックした区分の人だけが見られる(複数チェックできる)</div>' + checks('emp', D.emps || [], d ? d.emps : []) +
+    '<label class="p-label">対象の店舗</label><div class="p-note">何もチェックしない＝全店舗の人が見られる。チェックした店舗の人だけ(所属が「全て」の人には全部見える)</div>' + checks('store', D.stores || [], d ? d.stores : []) +
     (d ? '<div class="d-checks" style="margin-top:8px;"><label><input type="checkbox" id="fOff"' + (d.enabled ? '' : ' checked') + '>取り下げる(棚に出さない)</label></div>' : '') +
     '<div class="p-card" style="margin-top:14px;background:#FAFBFC;"><label style="font-weight:700;"><input type="checkbox" id="fNotify"> お知らせでも知らせる(「【改定】題名」とリンクを掲載)</label>' +
     '<div id="notifyBox" hidden><label class="p-label">お知らせに添える文(任意)</label><textarea class="p-textarea" id="fNText" maxlength="1000" style="min-height:70px;" placeholder="例：第12条(休暇)を改定しました"></textarea>' +

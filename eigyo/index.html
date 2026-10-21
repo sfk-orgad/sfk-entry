@@ -37,6 +37,8 @@
   .e-legend { font-size: 12px; color: var(--p-muted); margin: 8px 2px 0; line-height: 1.7; }
   .e-legend .ov { color: #8A4B00; font-weight: 700; }
   .e-split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .e-checks label { display: inline-flex; align-items: center; gap: 3px; margin: 4px 10px 4px 0; font-size: 16px; }
+  .e-preview { font-size: 13px; color: var(--p-muted); margin-top: 8px; line-height: 1.7; }
   .e-toggle label { display: inline-flex; align-items: center; gap: 6px; font-size: 16px; margin: 6px 14px 6px 0; }
 </style>
 </head>
@@ -55,7 +57,7 @@
 
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-10-28a';
+var PAGE_VERSION = '2026-10-29a';
 var g = Portal.$, esc = Portal.esc;
 var P = Portal.start({ tool: 'eigyo', title: '営業カレンダー' });
 var D = null, SEL = '';
@@ -126,38 +128,86 @@ function renderDetail() {
   });
 }
 
-// ===== 期間をまとめて変える(書ける人) =====
+// ===== まとめて変える(書ける人)：期間＋規則(毎日・毎週〇曜日・第n〇曜日)で日を選ぶ =====
+function ymdOf(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+function vals(name) { return Array.prototype.map.call(document.querySelectorAll('input[name="' + name + '"]:checked'), function (x) { return x.value; }); }
+// 規則に当てはまる日の一覧
+function ruleDates() {
+  var a = g('bFrom').value, b = g('bTo').value, kind = g('bKind').value;
+  if (!a || !b || b < a) return [];
+  var wds = vals('bWd').map(Number), nths = vals('bNth');
+  var out = [], d = new Date(a.replace(/-/g, '/')), end = new Date(b.replace(/-/g, '/'));
+  while (d <= end && out.length < 400) {
+    var ok = kind === 'all';
+    if (kind === 'week') ok = wds.indexOf(d.getDay()) !== -1;
+    if (kind === 'nth') {
+      var nth = Math.floor((d.getDate() - 1) / 7) + 1; // 第何週目のその曜日か
+      var last = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7).getMonth() !== d.getMonth(); // その月の最後のその曜日か
+      ok = wds.indexOf(d.getDay()) !== -1 && (nths.indexOf(String(nth)) !== -1 || (last && nths.indexOf('last') !== -1));
+    }
+    if (ok) out.push(ymdOf(d));
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+function fmtList(dates) {
+  return dates.slice(0, 8).map(function (x) { var d = new Date(x.replace(/-/g, '/')); return (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')'; }).join('、') + (dates.length > 8 ? ' ほか' : '');
+}
 function renderBulk() {
   if (!D.canEdit) { g('bulk').innerHTML = ''; return; }
-  g('bulk').innerHTML = '<details class="p-card" style="margin-top:12px;"><summary style="font-weight:700;cursor:pointer;">期間をまとめて変える</summary>' +
+  var wdChecks = WD.map(function (w, i) { return '<label><input type="checkbox" name="bWd" value="' + i + '">' + w + '</label>'; }).join('');
+  var nthChecks = ['1', '2', '3', '4', '5', 'last'].map(function (n) { return '<label><input type="checkbox" name="bNth" value="' + n + '">' + (n === 'last' ? '最終' : '第' + n) + '</label>'; }).join('');
+  g('bulk').innerHTML = '<details class="p-card" style="margin-top:12px;"><summary style="font-weight:700;cursor:pointer;">まとめて変える(期間・毎週・第n曜日)</summary>' +
     '<div class="e-split"><div><label class="p-label">開始日</label><input class="p-input" type="date" id="bFrom"></div><div><label class="p-label">終了日</label><input class="p-input" type="date" id="bTo"></div></div>' +
+    '<label class="p-label">日の選び方</label><select class="p-select" id="bKind"><option value="all">期間の毎日</option><option value="week">毎週(曜日を選ぶ)</option><option value="nth">第n曜日(第1・第2金曜 など)</option></select>' +
+    '<div id="bNthBox" hidden><label class="p-label">第何</label><div class="e-checks">' + nthChecks + '</div></div>' +
+    '<div id="bWdBox" hidden><label class="p-label">曜日</label><div class="e-checks">' + wdChecks + '</div></div>' +
+    '<div class="e-checks" style="margin-top:6px;"><label><input type="checkbox" id="bSkipHol"> 祝日は除く</label></div>' +
     '<label class="p-label">料金区分</label><select class="p-select" id="bPrice"><option value="(keep)">変えない</option><option value="">自動に戻す</option>' +
       D.options.map(function (o) { return '<option>' + esc(o) + '</option>'; }).join('') + '</select>' +
     '<label class="p-label">休業</label><select class="p-select" id="bClosed"><option value="(keep)">変えない</option><option value="on">休業にする</option><option value="off">休業を外す</option></select>' +
-    '<button class="p-btn p-solid p-big" id="bSave" style="margin-top:12px;">この期間を変える</button><div class="p-err" id="bErr" style="margin-top:6px;"></div>' +
-    '<div class="p-note" style="margin-top:6px;">トピック・イベントは1日ずつ直してください。定休日は店舗の設定で決まり、ここでは外せません。</div></details>';
+    '<label class="p-label">トピック・イベント</label><select class="p-select" id="bTopicMode"><option value="(keep)">変えない</option><option value="set">書く(今の内容を置き換え)</option><option value="clear">消す</option></select>' +
+    '<input class="p-input" id="bTopic" maxlength="200" placeholder="例：ロウリュイベント" hidden style="margin-top:6px;">' +
+    '<div class="e-preview" id="bPreview"></div>' +
+    '<button class="p-btn p-solid p-big" id="bSave" style="margin-top:12px;">この内容で変える</button><div class="p-err" id="bErr" style="margin-top:6px;"></div>' +
+    '<div class="p-note" style="margin-top:6px;">定休日は店舗の設定で決まり、ここでは外せません。期間は1年分まで。</div></details>';
+  var preview = function () {
+    var kind = g('bKind').value;
+    g('bWdBox').hidden = kind === 'all'; g('bNthBox').hidden = kind !== 'nth';
+    g('bTopic').hidden = g('bTopicMode').value !== 'set';
+    var ds = ruleDates();
+    g('bPreview').textContent = ds.length ? '対象 ' + ds.length + '日：' + fmtList(ds) + (g('bSkipHol').checked ? '(祝日の日は除く)' : '') : '(期間と規則を選ぶと、対象の日がここに出ます)';
+  };
+  Array.prototype.forEach.call(g('bulk').querySelectorAll('input, select'), function (el) { el.addEventListener('change', preview); el.addEventListener('input', preview); });
+  preview();
   g('bSave').addEventListener('click', function () {
-    var a = g('bFrom').value, b = g('bTo').value;
+    var a = g('bFrom').value, b = g('bTo').value, kind = g('bKind').value;
     if (!a || !b) { g('bErr').textContent = '開始日と終了日を入れてください'; return; }
     if (b < a) { g('bErr').textContent = '終了日は開始日より後にしてください'; return; }
+    if ((new Date(b.replace(/-/g, '/')) - new Date(a.replace(/-/g, '/'))) / 86400000 > 366) { g('bErr').textContent = '期間は1年分までにしてください'; return; }
+    if (kind !== 'all' && !vals('bWd').length) { g('bErr').textContent = '曜日を選んでください'; return; }
+    if (kind === 'nth' && !vals('bNth').length) { g('bErr').textContent = '第何かを選んでください'; return; }
     var set = {};
     if (g('bPrice').value !== '(keep)') set.price = g('bPrice').value;
     if (g('bClosed').value !== '(keep)') set.closed = g('bClosed').value === 'on';
-    if (!('price' in set) && !('closed' in set)) { g('bErr').textContent = '料金区分か休業のどちらかを選んでください'; return; }
-    var dates = [], d = new Date(a.replace(/-/g, '/')), end = new Date(b.replace(/-/g, '/'));
-    while (d <= end && dates.length < 100) { dates.push(d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2)); d.setDate(d.getDate() + 1); }
+    if (g('bTopicMode').value === 'set') { if (!g('bTopic').value.trim()) { g('bErr').textContent = 'トピック・イベントの内容を入れてください'; return; } set.topic = g('bTopic').value.trim(); }
+    if (g('bTopicMode').value === 'clear') set.topic = '';
+    if (!('price' in set) && !('closed' in set) && !('topic' in set)) { g('bErr').textContent = '料金区分・休業・トピックのどれかを選んでください'; return; }
+    var dates = ruleDates();
+    if (!dates.length) { g('bErr').textContent = '当てはまる日がありません'; return; }
     var what = [];
     if ('price' in set) what.push('料金区分を「' + (set.price || '自動') + '」');
     if ('closed' in set) what.push(set.closed ? '休業に' : '休業を外す');
-    if (!confirm(storeName() + 'の ' + a + ' 〜 ' + b + '(' + dates.length + '日)の' + what.join('、') + 'します。よいですか？')) return;
-    save(dates, set, g('bSave'), g('bErr'));
+    if ('topic' in set) what.push(set.topic ? 'トピックを「' + set.topic + '」' : 'トピックを消す');
+    if (!confirm(storeName() + 'の ' + dates.length + '日(' + fmtList(dates) + ')' + (g('bSkipHol').checked ? '、祝日を除いて' : '') + '\n' + what.join('、') + 'します。よいですか？')) return;
+    save(dates, set, g('bSave'), g('bErr'), g('bSkipHol').checked);
   });
 }
 function storeName() { var s = D.stores.filter(function (x) { return x.code === D.store; })[0]; return s ? s.name : D.store; }
 
-function save(dates, set, btn, err) {
+function save(dates, set, btn, err, skipHolidays) {
   btn.disabled = true; err.textContent = '';
-  P.call('eigyo.save', { store: D.store, dates: dates, set: set }, { app: 'eigyo' }).then(function (r) { // 二重に変えないよう、やり直しはしない
+  P.call('eigyo.save', { store: D.store, dates: dates, set: set, skipHolidays: !!skipHolidays }, { app: 'eigyo' }).then(function (r) { // 二重に変えないよう、やり直しはしない
     btn.disabled = false;
     if (!r.ok) { err.textContent = r.error === 'AUTH' ? Portal.authMessage(r, '営業カレンダーの編集') : r.error; return; }
     var month = dates[0].slice(0, 7);

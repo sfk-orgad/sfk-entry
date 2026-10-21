@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>営業カレンダー</title>
+<!-- 守り：このページが通信できる先を Google Apps Script だけに絞る。URLを他サイトに渡さない -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  営業カレンダー(GitHub Pages の eigyo/index.html)
+  ・見る(全員)：店舗ごとの月のカレンダー。各日に料金区分・休業・祝日・トピック/イベント
+  ・直す(eigyo_edit＝社員)：日を押して料金区分・休業・トピック/イベント。期間をまとめて料金区分・休業を変える
+  データは Bot(ツール一覧の eigyo の行の API＝BotのURL、app=eigyo)。締めチェック管理簿の「カレンダー_店舗」シートに書く
+-->
+<style>
+  .e-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .e-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .e-tab { padding: 8px 14px; border: 1px solid var(--p-line); border-radius: 999px; background: #fff; font-size: 15px; cursor: pointer; font-family: inherit; }
+  .e-tab.on { background: var(--p-c); color: #fff; border-color: var(--p-c); font-weight: 700; }
+  .e-month { display: flex; align-items: center; justify-content: space-between; margin: 6px 0 8px; }
+  .e-month b { font-size: 19px; }
+  .e-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .e-wd { text-align: center; font-size: 12px; color: var(--p-muted); padding: 2px 0; }
+  .e-day { background: #fff; border: 1px solid var(--p-line); border-radius: 8px; min-height: 74px; padding: 3px 4px; cursor: pointer; font-family: inherit; text-align: left; display: flex; flex-direction: column; gap: 1px; color: var(--p-ink); }
+  .e-day.empty { background: transparent; border: none; cursor: default; }
+  .e-day.today { box-shadow: inset 0 0 0 2px var(--p-c); }
+  .e-day.sel { background: #FFF6D6; }
+  .e-day.closed { background: #EEF1F4; }
+  .e-day .n { font-size: 15px; font-weight: 700; }
+  .e-day .n.sun, .e-day .n.hol { color: var(--p-err); } .e-day .n.sat { color: var(--p-sat); }
+  .e-day .pr { font-size: 11px; line-height: 1.3; color: var(--p-muted); }
+  .e-day .pr.ov { color: #8A4B00; font-weight: 700; }
+  .e-day .cl { font-size: 11px; font-weight: 700; color: var(--p-err); }
+  .e-day .tp { font-size: 11px; line-height: 1.3; color: var(--p-ink); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .e-legend { font-size: 12px; color: var(--p-muted); margin: 8px 2px 0; line-height: 1.7; }
+  .e-legend .ov { color: #8A4B00; font-weight: 700; }
+  .e-split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .e-toggle label { display: inline-flex; align-items: center; gap: 6px; font-size: 16px; margin: 6px 14px 6px 0; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div class="e-tabs" id="stores"></div>
+    <div class="e-month"><button class="p-btn" id="prev">‹ 前の月</button><b id="mlabel"></b><button class="p-btn" id="next">次の月 ›</button></div>
+    <div class="e-grid" id="grid"></div>
+    <div class="e-legend" id="legend"></div>
+    <div id="detail"></div>
+    <div id="bulk"></div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-10-28a';
+var g = Portal.$, esc = Portal.esc;
+var P = Portal.start({ tool: 'eigyo', title: '営業カレンダー' });
+var D = null, SEL = '';
+var WD = ['日', '月', '火', '水', '木', '金', '土'];
+
+function load(store, month, keepSel) {
+  return P.call('eigyo.get', { store: store || '', month: month || '' }, { app: 'eigyo', retry: true }).then(function (res) {
+    if (!res.ok) { Portal.gate(res.error === 'AUTH' ? Portal.authMessage(res, '営業カレンダー') : '開けませんでした：' + res.error, { back: true }); return; }
+    D = res; if (!keepSel) SEL = '';
+    Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
+    render();
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
+}
+
+function priceOf(x) { return x.override || x.auto; }
+function short(p) { return String(p || '').replace(/料金$/, ''); } // 「平日料金」→「平日」(カレンダーの中は短く)
+
+function render() {
+  // 店舗のタブ
+  g('stores').innerHTML = D.stores.map(function (s) {
+    return '<button class="e-tab' + (s.code === D.store ? ' on' : '') + '" data-store="' + esc(s.code) + '">' + esc(s.name) + '</button>';
+  }).join('');
+  Array.prototype.forEach.call(document.querySelectorAll('[data-store]'), function (b) { b.addEventListener('click', function () { load(b.getAttribute('data-store'), D.month); }); });
+  // 月
+  var i = D.months.indexOf(D.month);
+  g('mlabel').textContent = D.month.replace('-', '年').replace(/年0?/, '年') + '月';
+  g('prev').disabled = i <= 0; g('next').disabled = i >= D.months.length - 1;
+  // カレンダー
+  var h = WD.map(function (w) { return '<div class="e-wd">' + w + '</div>'; }).join('');
+  var first = D.days.length ? D.days[0].wd : 0;
+  for (var k = 0; k < first; k++) h += '<div class="e-day empty"></div>';
+  D.days.forEach(function (x) {
+    var closed = x.closed || x.regular;
+    h += '<button class="e-day' + (closed ? ' closed' : '') + (x.ymd === D.today ? ' today' : '') + (x.ymd === SEL ? ' sel' : '') + '" data-day="' + x.ymd + '">' +
+      '<span class="n' + (x.holiday ? ' hol' : x.wd === 0 ? ' sun' : x.wd === 6 ? ' sat' : '') + '">' + x.day + '</span>' +
+      (closed ? '<span class="cl">休業</span>' : '<span class="pr' + (x.override ? ' ov' : '') + '">' + esc(short(priceOf(x))) + '</span>') +
+      (x.topic ? '<span class="tp">' + esc(x.topic) + '</span>' : '') + '</button>';
+  });
+  g('grid').innerHTML = h;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-day]'), function (b) { b.addEventListener('click', function () { SEL = b.getAttribute('data-day'); render(); g('detail').scrollIntoView({ behavior: 'smooth', block: 'start' }); }); });
+  g('legend').innerHTML = '料金区分：曜日と祝日から自動。<span class="ov">太字の茶色</span>＝手で変えた料金区分。灰色＝休業(定休日を含む)。日を押すと詳しく見られます' + (D.canEdit ? '・直せます' : '');
+  renderDetail();
+  renderBulk();
+}
+
+// ===== 1日の詳しい内容・直す =====
+function renderDetail() {
+  var x = D.days.filter(function (y) { return y.ymd === SEL; })[0];
+  if (!x) { g('detail').innerHTML = ''; return; }
+  var d = new Date(x.ymd.replace(/-/g, '/'));
+  var title = (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[x.wd] + ')' + (x.holiday ? ' ' + x.holiday : '');
+  if (!D.canEdit) {
+    g('detail').innerHTML = '<div class="p-card" style="margin-top:12px;"><h2>' + esc(title) + '</h2>' +
+      '<div>' + (x.closed || x.regular ? '<b style="color:var(--p-err)">休業</b>' + (x.regular && !x.closed ? '(定休日)' : '') : '料金区分：<b>' + esc(priceOf(x)) + '</b>') + '</div>' +
+      (x.topic ? '<div class="p-note" style="margin-top:6px;white-space:pre-wrap;">' + esc(x.topic) + '</div>' : '') + '</div>';
+    return;
+  }
+  g('detail').innerHTML = '<div class="p-card" style="margin-top:12px;"><h2>' + esc(title) + '</h2>' +
+    '<label class="p-label">料金区分</label><select class="p-select" id="dPrice"><option value="">自動(' + esc(x.auto) + ')</option>' +
+      D.options.map(function (o) { return '<option' + (o === x.override ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>' +
+    '<div class="e-toggle"><label><input type="checkbox" id="dClosed"' + (x.closed ? ' checked' : '') + '> 休業にする</label>' +
+      (x.regular ? '<span class="p-note">(この日は定休日です。定休日は締めチェック管理簿の店舗シートで決まります)</span>' : '') + '</div>' +
+    '<label class="p-label">トピック・イベント</label><textarea class="p-textarea" id="dTopic" maxlength="200" style="min-height:70px;" placeholder="例：ナイトサウナ開始／貸切 18時〜"></textarea>' +
+    '<button class="p-btn p-solid p-big" id="dSave" style="margin-top:12px;">この日を保存</button><div class="p-err" id="dErr" style="margin-top:6px;"></div></div>';
+  g('dTopic').value = x.topic || '';
+  g('dSave').addEventListener('click', function () {
+    save([x.ymd], { price: g('dPrice').value, closed: g('dClosed').checked, topic: g('dTopic').value }, g('dSave'), g('dErr'));
+  });
+}
+
+// ===== 期間をまとめて変える(書ける人) =====
+function renderBulk() {
+  if (!D.canEdit) { g('bulk').innerHTML = ''; return; }
+  g('bulk').innerHTML = '<details class="p-card" style="margin-top:12px;"><summary style="font-weight:700;cursor:pointer;">期間をまとめて変える</summary>' +
+    '<div class="e-split"><div><label class="p-label">開始日</label><input class="p-input" type="date" id="bFrom"></div><div><label class="p-label">終了日</label><input class="p-input" type="date" id="bTo"></div></div>' +
+    '<label class="p-label">料金区分</label><select class="p-select" id="bPrice"><option value="(keep)">変えない</option><option value="">自動に戻す</option>' +
+      D.options.map(function (o) { return '<option>' + esc(o) + '</option>'; }).join('') + '</select>' +
+    '<label class="p-label">休業</label><select class="p-select" id="bClosed"><option value="(keep)">変えない</option><option value="on">休業にする</option><option value="off">休業を外す</option></select>' +
+    '<button class="p-btn p-solid p-big" id="bSave" style="margin-top:12px;">この期間を変える</button><div class="p-err" id="bErr" style="margin-top:6px;"></div>' +
+    '<div class="p-note" style="margin-top:6px;">トピック・イベントは1日ずつ直してください。定休日は店舗の設定で決まり、ここでは外せません。</div></details>';
+  g('bSave').addEventListener('click', function () {
+    var a = g('bFrom').value, b = g('bTo').value;
+    if (!a || !b) { g('bErr').textContent = '開始日と終了日を入れてください'; return; }
+    if (b < a) { g('bErr').textContent = '終了日は開始日より後にしてください'; return; }
+    var set = {};
+    if (g('bPrice').value !== '(keep)') set.price = g('bPrice').value;
+    if (g('bClosed').value !== '(keep)') set.closed = g('bClosed').value === 'on';
+    if (!('price' in set) && !('closed' in set)) { g('bErr').textContent = '料金区分か休業のどちらかを選んでください'; return; }
+    var dates = [], d = new Date(a.replace(/-/g, '/')), end = new Date(b.replace(/-/g, '/'));
+    while (d <= end && dates.length < 100) { dates.push(d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2)); d.setDate(d.getDate() + 1); }
+    var what = [];
+    if ('price' in set) what.push('料金区分を「' + (set.price || '自動') + '」');
+    if ('closed' in set) what.push(set.closed ? '休業に' : '休業を外す');
+    if (!confirm(storeName() + 'の ' + a + ' 〜 ' + b + '(' + dates.length + '日)の' + what.join('、') + 'します。よいですか？')) return;
+    save(dates, set, g('bSave'), g('bErr'));
+  });
+}
+function storeName() { var s = D.stores.filter(function (x) { return x.code === D.store; })[0]; return s ? s.name : D.store; }
+
+function save(dates, set, btn, err) {
+  btn.disabled = true; err.textContent = '';
+  P.call('eigyo.save', { store: D.store, dates: dates, set: set }, { app: 'eigyo' }).then(function (r) { // 二重に変えないよう、やり直しはしない
+    btn.disabled = false;
+    if (!r.ok) { err.textContent = r.error === 'AUTH' ? Portal.authMessage(r, '営業カレンダーの編集') : r.error; return; }
+    var month = dates[0].slice(0, 7);
+    load(D.store, D.months.indexOf(month) !== -1 ? month : D.month, true);
+  }).catch(function () { btn.disabled = false; err.textContent = '通信に失敗しました。もう一度押してください。'; });
+}
+
+g('prev').addEventListener('click', function () { var i = D.months.indexOf(D.month); if (i > 0) load(D.store, D.months[i - 1]); });
+g('next').addEventListener('click', function () { var i = D.months.indexOf(D.month); if (i < D.months.length - 1) load(D.store, D.months[i + 1]); });
+if (P) load('', '');
+</script>
+</body>
+</html>

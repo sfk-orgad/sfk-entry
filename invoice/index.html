@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>キャンセル請求</title>
+<!-- 守り：このページが通信できる先を Google Apps Script だけに絞る。URLを他サイトに渡さない -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  キャンセル請求(GitHub Pages の invoice/index.html)：キャンセル料の請求の登録・確認
+  ・一覧(個人情報は出さない) → 開く(個人情報も出る。開いた記録が残る) → 直す・消す ／ 新しく登録
+  ・画面の中身は ../common/tracker.js(忘れ物・キャンセル請求の共通)
+  データは Bot(ツール一覧の invoice の行の API＝BotのURL、app=tracker)。請求管理簿 に書く
+-->
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div id="view"></div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+<div class="t-toast" id="tToast" hidden></div>
+<script src="../common/portal.js?v=1"></script>
+<script src="../common/tracker.js?v=1"></script>
+<script>
+TrackerPage({ tool: 'invoice', title: 'キャンセル請求', version: '2026-10-31a', searchHint: '名前・No.' });
+</script>
+</body>
+</html>

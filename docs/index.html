@@ -53,24 +53,31 @@
 
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-10-27a';
+var PAGE_VERSION = '2026-10-30a';
 var g = Portal.$, esc = Portal.esc;
 var P = Portal.start({ tool: 'docs', title: '文書の棚' });
-var D = null, Q = '', MINE = true;
+var D = null, Q = '', MINE = true, VIEW = 'list';
+var OPENED_DOCS = {}; // 開いた文書の中身(このページを開いている間だけ。端末には保存しない)
 
+// 一覧：ポータルが先に読んでおいた分(3分以内)があれば待たずに出し、裏で最新を取って差し替える
 function load() {
+  var pre = Portal.prefetched('docs', 3);
+  if (pre && pre.res && pre.res.ok) { D = pre.res; Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION, '先読み'); showList(); }
   return P.call('doc.list', {}, { retry: true }).then(function (res) {
-    if (!res.ok) { Portal.gate(res.error === 'AUTH' ? Portal.authMessage(res, '文書の棚') : '開けませんでした：' + res.error, { back: true }); return; }
-    D = res; Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION); showList();
-  }).catch(function (e) { Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
+    if (!res.ok) { if (!D) Portal.gate(res.error === 'AUTH' ? Portal.authMessage(res, '文書の棚') : '開けませんでした：' + res.error, { back: true }); return; }
+    var changed = !D || JSON.stringify(D) !== JSON.stringify(res);
+    D = res;
+    if (!pre) { Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION); showList(); }
+    else if (changed && VIEW === 'list') renderList(); // 一覧を見ているときだけ差し替える(読んでいる文書・入力中の画面は動かさない)
+  }).catch(function (e) { if (!D) Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
 }
-// 分類の区切り(／ / ＞ >)で段に分ける
 function catPath(c) { var p = String(c || 'その他').split(/\s*[／\/＞>]\s*/).filter(function (x) { return x; }); return p.length ? p : ['その他']; }
 var OPENED = {}; // 分類のパス → 開いているか
 function storeNames(codes) { return (codes || []).map(function (c) { var s = (D.stores || []).filter(function (x) { return x.code === c; })[0]; return s ? s.name : c; }); }
 
 // ===== 一覧(分類ごと・検索・自分の店舗の分だけ) =====
 function showList() {
+  VIEW = 'list';
   g('toolbar').innerHTML = '<div class="d-row"><input class="p-input" id="q" placeholder="題名・説明で探す" style="flex:1;min-width:180px;" value="' + esc(Q) + '">' +
     '<label class="p-muted"><input type="checkbox" id="mine"' + (MINE ? ' checked' : '') + '> 自分の店舗の分だけ</label>' +
     (D.canEdit ? '<button class="p-btn p-solid" id="newBtn">＋ 登録</button>' : '') + '</div>';
@@ -159,9 +166,10 @@ function loadPdfJs() {
     throw new Error('PDFの表示の部品を読み込めませんでした\n(' + src + ' を開けるか、ブラウザで確かめてください)');
   });
 }
-function showPdf(b64) {
+// PDF：最初の2ページだけすぐ描き、残りは画面に近づいたら描く(ページが多くても重くならない・スマホのメモリを使いすぎない)
+function showPdf(b64, libReady) {
   var box = g('pdfPages');
-  loadPdfJs().then(function (lib) {
+  (libReady || loadPdfJs()).then(function (lib) {
     var bin = atob(b64), bytes = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return lib.getDocument({ data: bytes, isEvalSupported: false }).promise; // isEvalSupported：通信先の制限(eval禁止)の下でも動くように
@@ -169,28 +177,51 @@ function showPdf(b64) {
     box.innerHTML = '<div class="p-note" id="pdfNote">全' + pdf.numPages + 'ページ</div>';
     var width = Math.max(280, box.clientWidth - 16), dpr = Math.min(window.devicePixelRatio || 1, 2);
     var chain = Promise.resolve();
-    for (var n = 1; n <= pdf.numPages; n++) {
-      (function (no) {
-        chain = chain.then(function () { return pdf.getPage(no); }).then(function (page) {
-          var vp1 = page.getViewport({ scale: 1 });
-          var vp = page.getViewport({ scale: (width / vp1.width) * dpr });
-          var c = document.createElement('canvas');
-          c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
-          box.appendChild(c);
-          return page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-        });
-      })(n);
-    }
-    return chain;
+    var draw = function (no, c) { // 描く順番は1枚ずつ(同時に描くと重い)
+      chain = chain.then(function () { return pdf.getPage(no); }).then(function (page) {
+        var vp1 = page.getViewport({ scale: 1 });
+        var vp = page.getViewport({ scale: (width / vp1.width) * dpr });
+        c.width = Math.floor(vp.width); c.height = Math.floor(vp.height); c.style.aspectRatio = '';
+        return page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      }).catch(function () {});
+    };
+    // 先にページの枠だけ並べる(1ページ目の縦横比で仮の高さ)。描いたら本当の大きさになる
+    return pdf.getPage(1).then(function (p1) {
+      var v = p1.getViewport({ scale: 1 }), ratio = v.width + ' / ' + v.height, pages = [];
+      for (var n = 1; n <= pdf.numPages; n++) {
+        var c = document.createElement('canvas');
+        c.style.aspectRatio = ratio; c.setAttribute('data-no', n);
+        box.appendChild(c); pages.push(c);
+      }
+      var lazy = 'IntersectionObserver' in window;
+      pages.forEach(function (c, i) { if (i < 2 || !lazy) draw(i + 1, c); });
+      if (!lazy) return;
+      var io = new IntersectionObserver(function (es) {
+        es.forEach(function (e) { if (e.isIntersecting) { io.unobserve(e.target); draw(Number(e.target.getAttribute('data-no')), e.target); } });
+      }, { rootMargin: '800px 0px' });
+      pages.slice(2).forEach(function (c) { io.observe(c); });
+    });
   }).catch(function (e) { box.innerHTML = '<div class="p-err">PDFを表示できませんでした：' + esc(e && e.message ? e.message : e) + '</div>'; });
 }
 function openInApp(d) {
+  VIEW = 'doc';
+  var t0 = Date.now();
+  // PDFなら、中身を待つあいだに表示の部品も読み始める(同時に進めて待ち時間を減らす)
+  var libReady = d.fmt === 'pdf' ? loadPdfJs() : null;
+  if (libReady) libReady.catch(function () {});
   g('toolbar').innerHTML = '<div class="d-row"><button class="p-btn" id="back">‹ 一覧へ</button></div>';
   g('back').addEventListener('click', showList);
   g('view').innerHTML = '<div class="p-card">「' + esc(d.title) + '」を開いています…</div>';
-  P.call('doc.open', { id: d.id }, { retry: true }).then(function (r) {
+  // このページで一度開いた文書は、通信せずにすぐ出す
+  var fromMem = !!OPENED_DOCS[d.id];
+  var got = fromMem ? Promise.resolve(OPENED_DOCS[d.id]) : P.call('doc.open', { id: d.id }, { retry: true });
+  got.then(function (r) {
+    if (VIEW !== 'doc') return; // 待っているあいだに一覧へ戻った
+    if (r.ok) OPENED_DOCS[d.id] = r;
     if (!r.ok) { g('view').innerHTML = '<div class="p-card p-err">' + esc(r.error === 'AUTH' ? 'この文書を見る権限がありません。' : r.error) + '</div>'; return; }
-    var head = '<div class="p-card"><h2>' + esc(r.title) + '</h2><div class="p-note">この文書は、社外に持ち出さないでください(開いた記録が残ります)。</div></div>';
+    var how = fromMem ? 'この画面で開いた分' : ({ cache: '保存済み', checked: '保存済み・更新を確認', built: '新しく作成' }[r.src] || '');
+    var head = '<div class="p-card"><h2>' + esc(r.title) + '</h2><div class="p-note">この文書は、社外に持ち出さないでください(開いた記録が残ります)。</div>' +
+      '<div class="p-ver" style="text-align:left;margin-top:4px;">開くまで ' + ((Date.now() - t0) / 1000).toFixed(1) + '秒' + (how ? '(' + how + ')' : '') + '</div></div>';
     if (r.kind === 'html') {
       // 文書の中の仕掛けが動かないよう、隔離した枠(sandbox)の中に表示する
       g('view').innerHTML = head + '<iframe class="d-frame" sandbox title="' + esc(r.title) + '"></iframe>';
@@ -211,13 +242,14 @@ function openInApp(d) {
       document.querySelector('.d-frame').srcdoc = '<meta name="viewport" content="width=device-width, initial-scale=1">' + r.html + fit;
     } else if (r.kind === 'pdf') {
       g('view').innerHTML = head + '<div class="d-pdf" id="pdfPages">PDFを表示しています…</div>';
-      showPdf(r.b64);
+      showPdf(r.b64, libReady);
     }
   }).catch(function () { g('view').innerHTML = '<div class="p-card p-err">通信に失敗しました。もう一度開いてください。</div>'; });
 }
 
 // ===== 登録・修正(書ける人) =====
 function showEdit(d) {
+  VIEW = 'edit';
   g('toolbar').innerHTML = '<div class="d-row"><button class="p-btn" id="back">‹ 一覧へ</button></div>';
   g('back').addEventListener('click', showList);
   var cats = [];

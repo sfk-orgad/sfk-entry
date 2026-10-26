@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>忘れ物</title>
+<!-- 守り：このページが通信できる先を Google Apps Script だけに絞る。URLを他サイトに渡さない -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  忘れ物(GitHub Pages の lost/index.html)：忘れ物の登録・確認
+  ・一覧(個人情報は出さない) → 開く(個人情報も出る。開いた記録が残る) → 直す・消す ／ 新しく登録
+  ・画面の中身は ../common/tracker.js(忘れ物・キャンセル請求の共通)
+  データは Bot(ツール一覧の lost の行の API＝BotのURL、app=tracker)。忘れ物管理簿 に書く
+-->
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div id="view"></div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+<div class="t-toast" id="tToast" hidden></div>
+<script src="../common/portal.js?v=1"></script>
+<script src="../common/tracker.js?v=1"></script>
+<script>
+TrackerPage({ tool: 'lost', title: '忘れ物', version: '2026-10-31a', searchHint: '品名・持ち主・No.' });
+</script>
+</body>
+</html>

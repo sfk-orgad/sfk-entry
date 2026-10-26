@@ -110,7 +110,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-10-30a';
+const PAGE_VERSION = '2026-10-31a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -563,9 +563,9 @@ function renderPortal(res, at) {
 // ツールのデータの先読み：開ける全店舗の分を1回で受け取り、ブラウザの中に置く(3分間使える)
 // ツールの画面は、これがあれば待たずに表示し、裏で最新を確かめる
 //   締めチェック → prefetch_closing = { at, inits:{店舗: init} } ／ シフト希望 → prefetch_shift = { at, init }
-//   シフト作成(管理者だけ) → prefetch_shiftboard = { at, board } ／ 文書の棚 → prefetch_docs = { at, res }
-const PREFETCH = { closing: 'closing.prefetch', shift: 'shift.prefetch', shiftboard: 'board.get', calendar: 'cal.get', docs: 'doc.list' };
-const PREFETCH_APP = { closing: 'closing', shift: 'shift', shiftboard: 'shift', calendar: 'shift' }; // どのアプリ(API)に送るか
+//   シフト作成(管理者だけ) → prefetch_shiftboard = { at, board } ／ 文書の棚 → prefetch_docs = { at, res } ／ 忘れ物・キャンセル請求 → prefetch_lost・prefetch_invoice = { at, init }
+const PREFETCH = { closing: 'closing.prefetch', shift: 'shift.prefetch', shiftboard: 'board.get', calendar: 'cal.get', docs: 'doc.list', lost: 'lost.list', invoice: 'invoice.list' };
+const PREFETCH_APP = { closing: 'closing', shift: 'shift', shiftboard: 'shift', calendar: 'shift', lost: 'tracker', invoice: 'tracker' }; // どのアプリ(API)に送るか
 const PREFETCH_APIS = [];
 function prefetchTools(items) {
   const sess = readJson(SESSION_KEY);

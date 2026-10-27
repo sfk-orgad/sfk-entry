@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>周遊マップ 編集</title>
+<!-- 守り：通信先は Google Apps Script だけ。画像は地図(公開サイト)・Googleドライブの写真の縮小版・端末で縮めた写真(data:)だけ -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://shifuku-map.pages.dev https://drive.google.com https://*.googleusercontent.com; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  周遊マップ 編集(GitHub Pages の map_edit/index.html。2026-11-03 にGASの画面からポータルへ移した)
+  入るには ①ポータルの権限(ツール一覧の map_edit：社員・アルバイト) と ②暗証番号(今までの合言葉・1人ずつ。管理者がスプシのメニューで発行)
+  データは Bot(SHIFUKU業務支援Bot の Map.gs、app=map。ツール一覧の map_edit の行の API＝BotのURL)。掲載データのスプシに書く。サイトへの反映は今までどおり約5分
+  編集者と暗証番号の管理(追加・再発行・無効)：ツール一覧の map_admin の人だけ。暗証番号は発行したときに1回だけ画面に出る
+-->
+<style>
+
+:root {
+  --bg: #EEF2EA; --surface: #FFFFFF; --ink: #1F2A27; --soft: #55615C; --line: #CBD5C7;
+  --accent: #2A6F9E; --danger: #A8322D; --ok: #2F6B5A; --chip: #E1E8DC;
+  font-family: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", "Meiryo", sans-serif;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-size: 17px; line-height: 1.7; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 24px; margin: 8px 0 4px; }
+h2 { font-size: 19px; margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
+.sub { color: var(--soft); font-size: 15px; margin: 0 0 16px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 50px; padding: 10px 20px; border-radius: 10px; border: 1px solid var(--ink); background: var(--surface); font-weight: 700; cursor: pointer; text-decoration: none; }
+.btn.primary { background: var(--ink); color: #fff; }
+.btn.small { min-height: 42px; padding: 6px 14px; font-size: 15px; }
+.btn.danger { border-color: var(--danger); color: var(--danger); }
+.btn:disabled { opacity: .5; cursor: default; }
+.wide { width: 100%; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+.msg { padding: 12px 14px; border-radius: 10px; margin: 12px 0; font-size: 16px; }
+.msg.error { background: #F6DCD8; color: #6B1D16; }
+.msg.ok { background: #DDEEDD; color: #1F4D2A; }
+label.field { display: block; margin: 0 0 18px; }
+label.field > span { display: block; font-weight: 700; margin-bottom: 4px; }
+.req { color: var(--danger); font-size: 13px; margin-left: 6px; font-weight: 700; }
+.hint { display: block; font-size: 14px; color: var(--soft); font-weight: 400; }
+input[type=text], input[type=tel], input[type=url], input[type=password], select, textarea {
+  width: 100%; min-height: 50px; padding: 10px 12px; border: 1px solid #9AA7A1; border-radius: 10px; background: #fff; }
+textarea { min-height: 120px; resize: vertical; line-height: 1.7; }
+.err { color: var(--danger); font-size: 14px; font-weight: 700; margin-top: 4px; display: block; }
+.has-err input, .has-err select, .has-err textarea { border-color: var(--danger); border-width: 2px; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.search { margin: 12px 0; }
+.shop { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 8px 0; cursor: pointer; }
+.shop .name { font-weight: 700; font-size: 18px; }
+.shop .meta { color: var(--soft); font-size: 14px; }
+.badge { align-self: start; font-size: 13px; font-weight: 700; border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+.badge.on { background: #DDEEDD; color: #1F4D2A; }
+.badge.off { background: var(--chip); color: var(--soft); }
+.back { border: none; background: none; font-weight: 700; padding: 8px 0; cursor: pointer; min-height: 44px; }
+.pick { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--chip); cursor: crosshair; touch-action: manipulation; }
+.pick img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
+.pin { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; border-radius: 50%; background: var(--danger); border: 3px solid #fff; box-shadow: 0 2px 4px rgba(0,0,0,.4); pointer-events: none; }
+.coords { display: flex; gap: 10px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+.coords input { width: 110px; min-height: 44px; }
+.photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.slot { background: var(--surface); border: 1px dashed #9AA7A1; border-radius: 12px; padding: 8px; display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.slot .thumb { aspect-ratio: 4 / 3; border-radius: 8px; background: var(--chip); object-fit: cover; width: 100%; display: block; }
+.slot .empty { aspect-ratio: 4 / 3; border-radius: 8px; background: var(--chip); display: grid; place-items: center; color: var(--soft); font-size: 14px; text-align: center; }
+.slot .label { font-size: 13px; color: var(--soft); text-align: center; }
+.slot .btn { min-height: 40px; padding: 4px 6px; font-size: 14px; }
+@media (max-width: 480px) { .photos { grid-template-columns: 1fr 1fr; } }
+.savebar { position: sticky; bottom: 0; background: var(--bg); padding: 12px 0 calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); margin-top: 24px; }
+.note { font-size: 14px; color: var(--soft); }
+
+</style>
+</head>
+<body>
+<div id="app" hidden>
+<div class="wrap">
+
+  <!-- 暗証番号(ポータルの権限に加えて、もう1つの確認) -->
+  <section id="vLogin" hidden>
+    <h1>暗証番号</h1>
+    <p class="sub">管理者から受け取った暗証番号(合言葉)を入れてください。<br>1回入れると、操作が続くあいだ2時間は入れ直さなくてよくなります。</p>
+    <div class="card">
+      <label class="field"><span>暗証番号</span>
+        <input type="password" id="code" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="例：abcd-2345">
+      </label>
+      <button class="btn primary wide" id="btnLogin" type="button">開く</button>
+      <div id="loginMsg" class="msg error" hidden></div>
+    </div>
+    <button class="btn wide adminBtn" type="button" hidden style="margin-top:14px;">編集者と暗証番号の管理</button>
+  </section>
+
+  <!-- 一覧 -->
+  <section id="vList" hidden>
+    <div class="top">
+      <div><h1>お店の一覧</h1><p class="sub" id="who"></p></div>
+      <button class="btn small" id="btnLogout" type="button">編集を終える</button>
+    </div>
+    <div id="listMsg" class="msg ok" hidden></div>
+    <button class="btn primary wide" id="btnNew" type="button">＋ 新しいお店を追加</button>
+    <button class="btn wide adminBtn" type="button" hidden style="margin-top:10px;">編集者と暗証番号の管理</button>
+    <div class="search"><input type="text" id="q" placeholder="店名で探す"></div>
+    <div id="shops"></div>
+  </section>
+
+  <!-- 編集 -->
+  <section id="vEdit" hidden>
+    <button class="back" id="btnBack" type="button">← 一覧にもどる</button>
+    <h1 id="editTitle"></h1>
+    <p class="sub" id="editSub"></p>
+    <div id="editMsg" class="msg error" hidden></div>
+
+    <h2>基本</h2>
+    <label class="field" data-key="店名"><span>店名<b class="req">必須</b></span><input type="text" data-in="店名"></label>
+    <label class="field" data-key="カテゴリ"><span>カテゴリ<b class="req">必須</b></span><select data-in="カテゴリ"></select></label>
+    <label class="field" data-key="地図ID" id="mapField"><span>地図<b class="req">必須</b></span><select data-in="地図ID"></select></label>
+    <label class="field" data-key="一言"><span>一言<b class="req">必須</b><small class="hint">地図の一覧に出る短い紹介（20字くらい）</small></span><input type="text" data-in="一言"></label>
+
+    <h2>位置<b class="req">必須</b></h2>
+    <div class="field" data-key="X">
+      <span class="hint">地図のお店の場所をタップすると、赤い印が付きます。</span>
+      <div class="pick" id="pick"><img id="pickImg" alt="位置を決める地図"><div class="pin" id="pin" hidden></div></div>
+      <div class="coords">X <input type="text" inputmode="decimal" data-in="X"> Y <input type="text" inputmode="decimal" data-in="Y"></div>
+      <span class="err" data-err="X"></span><span class="err" data-err="Y"></span>
+    </div>
+
+    <h2>写真（最大3枚）</h2>
+    <p class="note" id="photoNote">1枚目が一覧の小さい写真になります。人の顔が写った写真や、お店の許可がない写真は使わないでください。</p>
+    <div class="photos" id="photos"></div>
+    <input type="file" id="file" accept="image/*" hidden>
+
+    <h2>記事</h2>
+    <label class="field" data-key="紹介文"><span>紹介文<small class="hint">空行をはさむと段落が分かれます</small></span><textarea data-in="紹介文" rows="6"></textarea></label>
+    <label class="field" data-key="スタッフのおすすめ"><span>スタッフのおすすめ</span><textarea data-in="スタッフのおすすめ" rows="4"></textarea></label>
+    <label class="field" data-key="スタッフ名"><span>スタッフ名<small class="hint">おすすめの下に「スタッフ ○○」と出ます</small></span><input type="text" data-in="スタッフ名"></label>
+    <label class="field" data-key="メニュー"><span>メニュー<small class="hint">1行に1品。「五平餅 350円」のように最後を空白で区切ると、価格が右に並びます</small></span><textarea data-in="メニュー" rows="5" placeholder="五平餅 350円&#10;抹茶 500円"></textarea></label>
+
+    <h2>基本情報</h2>
+    <label class="field" data-key="営業時間"><span>営業時間</span><input type="text" data-in="営業時間" placeholder="10:00〜17:00"></label>
+    <label class="field" data-key="定休日"><span>定休日</span><input type="text" data-in="定休日" placeholder="水曜"></label>
+    <label class="field" data-key="当店から"><span>当店から</span><input type="text" data-in="当店から" placeholder="車で8分"></label>
+    <label class="field" data-key="電話"><span>電話</span><input type="tel" data-in="電話" placeholder="0565-00-0000"></label>
+    <label class="field" data-key="GoogleマップURL"><span>GoogleマップURL<small class="hint">Googleマップでお店を開き「共有」で出るURL</small></span><input type="url" data-in="GoogleマップURL" inputmode="url" autocapitalize="none"></label>
+
+    <div class="savebar">
+      <button class="btn primary wide" id="btnSave" type="button">保存する</button>
+    </div>
+  </section>
+
+  <!-- 編集者と暗証番号の管理(map_admin) -->
+  <section id="vAdmin" hidden>
+    <button class="back" id="btnAdminBack" type="button">← もどる</button>
+    <h1>編集者と暗証番号</h1>
+    <p class="sub">暗証番号は、発行したときにこの画面に1回だけ出ます。本人に直接伝えてください。<br>編集できるのは、ポータルの権限(周遊マップ 編集)と暗証番号の両方がある人だけです。</p>
+    <div id="adminMsg" class="msg error" hidden></div>
+    <div id="codeBox" class="card" hidden style="border:2px solid var(--ok);margin-bottom:14px;"></div>
+    <div class="card" style="margin-bottom:14px;">
+      <label class="field"><span>新しい編集者の名前<small class="hint">例：まつい(ポータルの名前と同じでなくてよい)</small></span><input type="text" id="newName" maxlength="40"></label>
+      <button class="btn primary wide" id="btnAdd" type="button">追加して暗証番号を発行</button>
+    </div>
+    <div id="editors"></div>
+  </section>
+
+  <div id="loading" class="msg" hidden>読み込み中…</div>
+</div>
+
+<div class="p-ver" id="ver"></div>
+</div>
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-11-03b';
+
+(() => {
+'use strict';
+const $ = (id) => document.getElementById(id);
+const PHOTO_KEYS = ['写真1', '写真2', '写真3'];
+let data = null, current = null, original = null, dirty = false, busy = false;
+const P = Portal.start({ tool: 'map_edit', title: '周遊マップ 編集' });
+if (!P) return;
+
+// APIを呼ぶ(ポータルの通行証つき)。通行証が切れた・権限がない → 入口の画面、暗証番号がまだ・切れた → 暗証番号の画面
+function call(action, extra, retry) {
+  return P.call(action, extra, { retry: !!retry, app: 'map' }).then(r => {
+    if (r && r.error === 'AUTH') { Portal.gate(Portal.authMessage(r, '周遊マップ 編集'), { back: true }); throw new Error('expired'); }
+    if (r && r.needPin) { setAdmin(r.isAdmin); expired(); throw new Error('expired'); }
+    return r;
+  });
+}
+function show(view) { ['vLogin', 'vList', 'vEdit', 'vAdmin'].forEach(v => { $(v).hidden = v !== view; }); window.scrollTo(0, 0); }
+function msg(el, text, kind) { const m = $(el); m.textContent = text || ''; m.hidden = !text; if (kind) m.className = 'msg ' + kind; }
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+let pinShown = false;
+function expired() { Portal.showApp(); show('vLogin'); if (pinShown) msg('loginMsg', '暗証番号の有効時間が切れたか、使えなくなりました。もう一度入れてください。', 'error'); pinShown = true; setTimeout(() => $('code').focus(), 50); }
+function fail(where, e) { if (e && e.message === 'expired') return; msg(where, '通信に失敗しました。電波の良いところでもう一度試してください。', 'error'); }
+
+// ----- ログイン -----
+$('btnLogin').onclick = async () => {
+  if (busy) return; busy = true; $('btnLogin').disabled = true; msg('loginMsg', '');
+  try {
+    const r = await call('map.pin', { code: $('code').value });
+    if (!r.ok) { msg('loginMsg', r.error, 'error'); return; }
+    $('code').value = '';
+    await loadList();
+  } catch (e) { fail('loginMsg', e); }
+  finally { busy = false; $('btnLogin').disabled = false; }
+};
+$('code').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnLogin').click(); });
+$('btnLogout').onclick = async () => { try { await call('map.lock', {}); } catch (e) { /* 失敗しても画面は戻す */ } pinShown = false; msg('loginMsg', ''); show('vLogin'); };
+
+// ----- 一覧 -----
+async function loadList(note) {
+  $('loading').hidden = false;
+  try {
+    const r = await call('map.init', {}, true);
+    if (!r.ok) throw new Error(r.error || '読み込めませんでした');
+    data = r;
+    setAdmin(r.isAdmin);
+    Portal.showApp();
+    $('who').textContent = data.name + ' さんが編集中';
+    renderShops(); show('vList'); msg('listMsg', note || '', 'ok');
+    if (!$('ver').textContent) $('ver').textContent = Portal.timing(PAGE_VERSION);
+  } catch (e) { if (e.message !== 'expired') { Portal.gate('開けませんでした。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); } }
+  finally { $('loading').hidden = true; }
+}
+function renderShops() {
+  const q = $('q').value.trim();
+  const box = $('shops'); box.textContent = '';
+  const list = data.shops.filter(s => !q || s['店名'].indexOf(q) >= 0);
+  if (!list.length) box.append(el('p', 'note', q ? '見つかりませんでした。' : 'まだお店がありません。「新しいお店を追加」から登録してください。'));
+  list.forEach(s => {
+    const b = el('button', 'shop'); b.type = 'button';
+    const on = /^(true|1|✓)$/i.test(s['掲載']);
+    b.append(el('span', 'name', s['店名'] || '（店名なし）'), el('span', 'badge ' + (on ? 'on' : 'off'), on ? '掲載中' : '未掲載'),
+      el('span', 'meta', 'ID ' + s['ID'] + '　' + s['カテゴリ'] + (s['最終確認日'] ? '　確認日 ' + s['最終確認日'] : '')));
+    b.onclick = () => openEdit(s);
+    box.append(b);
+  });
+}
+$('q').addEventListener('input', renderShops);
+$('btnNew').onclick = () => openEdit(null);
+
+// ----- 編集 -----
+function fill(select, items) { select.textContent = ''; select.append(el('option', null, '選んでください')); select.firstChild.value = ''; items.forEach(v => { const o = el('option', null, v); o.value = v; select.append(o); }); }
+function inputs() { return document.querySelectorAll('[data-in]'); }
+
+function openEdit(shop) {
+  original = shop ? JSON.parse(JSON.stringify(shop)) : null;
+  current = shop ? JSON.parse(JSON.stringify(shop)) : { '地図ID': data.mapIds.length === 1 ? data.mapIds[0] : '', 'スタッフ名': data.name };
+  fill(document.querySelector('[data-in="カテゴリ"]'), data.categories);
+  fill(document.querySelector('[data-in="地図ID"]'), data.mapIds);
+  $('mapField').hidden = data.mapIds.length <= 1;
+  inputs().forEach(i => { i.value = current[i.dataset.in] || ''; });
+  $('editTitle').textContent = shop ? shop['店名'] : '新しいお店';
+  $('editSub').textContent = shop
+    ? 'ID ' + shop['ID'] + '　' + (/^(true|1|✓)$/i.test(shop['掲載']) ? '掲載中のお店です。保存すると約5分でサイトに反映されます。' : '未掲載のお店です。')
+    : '保存すると未掲載で登録されます。承認者が掲載をONにするとサイトに出ます。';
+  clearErrors(); msg('editMsg', ''); setMap(); renderPhotos(); dirty = false;
+  show('vEdit');
+}
+document.addEventListener('input', e => { if (e.target.dataset && e.target.dataset.in) { current[e.target.dataset.in] = e.target.value; dirty = true; if (e.target.dataset.in === 'X' || e.target.dataset.in === 'Y') placePin(); } });
+document.addEventListener('change', e => { if (e.target.dataset && e.target.dataset.in === '地図ID') { current['地図ID'] = e.target.value; setMap(); } });
+$('btnBack').onclick = () => { if (dirty && !confirm('保存していない変更があります。破棄して一覧にもどりますか？')) return; show('vList'); };
+window.addEventListener('beforeunload', e => { if (dirty && !$('vEdit').hidden) { e.preventDefault(); e.returnValue = ''; } });
+
+// 地図をタップして位置を決める
+function setMap() {
+  const m = data.maps[current['地図ID']] || data.maps[Object.keys(data.maps)[0]];
+  $('pickImg').src = m ? m.image : '';
+  placePin();
+}
+function placePin() {
+  const x = parseFloat(current['X']), y = parseFloat(current['Y']);
+  const ok = x >= 0 && x <= 100 && y >= 0 && y <= 100;
+  $('pin').hidden = !ok; if (ok) { $('pin').style.left = x + '%'; $('pin').style.top = y + '%'; }
+}
+$('pick').addEventListener('click', e => {
+  const r = $('pickImg').getBoundingClientRect();
+  const x = ((e.clientX - r.left) / r.width * 100).toFixed(1), y = ((e.clientY - r.top) / r.height * 100).toFixed(1);
+  current['X'] = x; current['Y'] = y; dirty = true;
+  document.querySelector('[data-in="X"]').value = x; document.querySelector('[data-in="Y"]').value = y;
+  placePin();
+});
+
+// 写真：端末で縮小してJPEGにする（位置情報などの撮影データもここで消える）
+function driveId(url) { const m = String(url || '').match(/\/d\/([\w-]{20,80})/) || String(url || '').match(/[?&]id=([\w-]{20,80})/); return m ? m[1] : ''; }
+let photoSlot = null;
+function renderPhotos() {
+  const box = $('photos'); box.textContent = '';
+  $('photoNote').hidden = false;
+  PHOTO_KEYS.forEach((k, i) => {
+    const s = el('div', 'slot');
+    const id = driveId(current[k]);
+    if (current['_preview' + i]) { const im = el('img', 'thumb'); im.src = current['_preview' + i]; im.alt = ''; s.append(im); }
+    else if (id) { const im = el('img', 'thumb'); im.alt = ''; im.referrerPolicy = 'no-referrer'; im.src = 'https://drive.google.com/thumbnail?id=' + id + '&sz=w400'; s.append(im); }
+    else s.append(el('div', 'empty', '写真なし'));
+    s.append(el('div', 'label', current['_status' + i] || (i === 0 ? '1枚目（一覧に表示）' : (i + 1) + '枚目')));
+    if (data.photoEnabled) {
+      const pick = el('button', 'btn small', id ? '入れ替える' : '写真を選ぶ'); pick.type = 'button';
+      pick.disabled = !!current['_busy' + i];
+      pick.onclick = () => { photoSlot = i; $('file').value = ''; $('file').click(); };
+      s.append(pick);
+    }
+    if (id) {
+      const del = el('button', 'btn small danger', '外す'); del.type = 'button';
+      del.onclick = () => { current[k] = ''; delete current['_preview' + i]; dirty = true; renderPhotos(); };
+      s.append(del);
+    }
+    box.append(s);
+  });
+  if (!data.photoEnabled) $('photoNote').textContent = '写真のアップロードは準備中です（管理者が保存先を設定すると使えます）。';
+}
+function resize(file, maxSide) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file); const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('read')); };
+    img.src = url;
+  });
+}
+$('file').addEventListener('change', async () => {
+  const f = $('file').files[0]; const i = photoSlot; if (!f || i == null) return;
+  const k = PHOTO_KEYS[i];
+  current['_busy' + i] = true; current['_status' + i] = 'アップロード中…'; renderPhotos();
+  try {
+    const dataUrl = await resize(f, 1600);
+    current['_preview' + i] = dataUrl; renderPhotos();
+    const r = await call('map.photo', { dataUrl: dataUrl });
+    if (!r.ok) { current['_status' + i] = r.error; delete current['_preview' + i]; }
+    else { current[k] = r.url; current['_status' + i] = 'アップロードしました（保存で確定）'; dirty = true; }
+  } catch (e) {
+    delete current['_preview' + i];
+    current['_status' + i] = e && e.message === 'read' ? 'この写真は読み込めませんでした' : 'アップロードに失敗しました';
+  } finally { current['_busy' + i] = false; renderPhotos(); }
+});
+
+// 保存
+function clearErrors() { document.querySelectorAll('.has-err').forEach(n => n.classList.remove('has-err')); document.querySelectorAll('.err').forEach(n => n.remove && n.dataset.err ? (n.textContent = '') : n.remove()); }
+function showErrors(errors) {
+  let first = null;
+  Object.keys(errors).forEach(k => {
+    const box = document.querySelector('[data-key="' + k + '"]') || document.querySelector('[data-err="' + k + '"]');
+    if (!box) return;
+    let target = document.querySelector('[data-err="' + k + '"]');
+    if (!target) { target = el('span', 'err'); box.append(target); }
+    target.textContent = errors[k];
+    const holder = box.closest('.field') || box; holder.classList.add('has-err');
+    if (!first) first = holder;
+  });
+  if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+$('btnSave').onclick = async () => {
+  if (busy) return;
+  if (PHOTO_KEYS.some((k, i) => current['_busy' + i])) { msg('editMsg', '写真のアップロードが終わるまで待ってください。', 'error'); return; }
+  busy = true; $('btnSave').disabled = true; $('btnSave').textContent = '保存中…'; clearErrors(); msg('editMsg', '');
+  const input = {}; data.fields.forEach(f => { input[f.key] = current[f.key] || ''; });
+  if (original) input.ID = original['ID'];
+  try {
+    const r = await call('map.save', { input: input, original: original });
+    if (!r.ok) {
+      if (r.errors) { showErrors(r.errors); msg('editMsg', '入力内容を確認してください。', 'error'); }
+      else msg('editMsg', r.error, 'error');
+      return;
+    }
+    dirty = false;
+    await loadList(r.unchanged ? '変更はありませんでした。'
+      : r.created ? '「' + r.shop['店名'] + '」を追加しました（ID ' + r.id + '）。承認者が掲載をONにするとサイトに出ます。'
+      : '「' + r.shop['店名'] + '」を保存しました。サイトへの反映は約5分後です。');
+  } catch (e) { fail('editMsg', e); }
+  finally { busy = false; $('btnSave').disabled = false; $('btnSave').textContent = '保存する'; }
+};
+
+// ----- 編集者と暗証番号の管理(map_admin) -----
+let backTo = 'vList';
+function setAdmin(on) { document.querySelectorAll('.adminBtn').forEach(b => { b.hidden = !on; }); }
+document.querySelectorAll('.adminBtn').forEach(b => { b.onclick = () => { backTo = $('vLogin').hidden ? 'vList' : 'vLogin'; $('codeBox').hidden = true; msg('adminMsg', ''); show('vAdmin'); adminCall('map.editors', {}); }; });
+$('btnAdminBack').onclick = () => { $('codeBox').hidden = true; show(backTo); };
+async function adminCall(action, extra) {
+  if (busy) return; busy = true; msg('adminMsg', '');
+  try {
+    const r = await call(action, extra, action === 'map.editors');
+    if (!r.ok) { msg('adminMsg', r.error, 'error'); return; }
+    if (r.code) {
+      const b = $('codeBox'); b.textContent = '';
+      b.append(el('div', 'note', extra.name + ' さんの暗証番号'), el('div', null, r.code), el('div', 'note', 'この画面を閉じると二度と表示できません。本人に直接伝えてください。'));
+      b.children[1].style.cssText = 'font-size:30px;font-weight:700;letter-spacing:2px;margin:4px 0;';
+      b.hidden = false; b.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    renderEditors(r.editors || []);
+  } catch (e) { fail('adminMsg', e); }
+  finally { busy = false; }
+}
+function renderEditors(list) {
+  const box = $('editors'); box.textContent = '';
+  if (!list.length) { box.append(el('p', 'note', 'まだ編集者がいません。上で追加してください。')); return; }
+  list.forEach(x => {
+    const c = el('div', 'shop'); c.style.cursor = 'default';
+    c.append(el('span', 'name', x.name), el('span', 'badge ' + (x.active ? 'on' : 'off'), x.active ? '有効' : '無効'),
+      el('span', 'meta', '発行 ' + (x.issued || '-') + '　最後に入った日時 ' + (x.last || 'まだ')));
+    const row = el('div'); row.style.cssText = 'grid-column:1/-1;display:flex;gap:8px;margin-top:6px;';
+    const re = el('button', 'btn small', '暗証番号を再発行'); re.type = 'button';
+    re.onclick = () => { if (confirm(x.name + ' さんの暗証番号を再発行します。今の暗証番号は使えなくなります。よろしいですか？')) adminCall('map.editorReissue', { name: x.name }); };
+    const ac = el('button', 'btn small' + (x.active ? ' danger' : ''), x.active ? '無効にする' : '有効にする'); ac.type = 'button';
+    ac.onclick = () => adminCall('map.editorActive', { name: x.name, active: !x.active });
+    row.append(re, ac); c.append(row); box.append(c);
+  });
+}
+$('btnAdd').onclick = () => {
+  const name = $('newName').value.trim();
+  if (!name) { msg('adminMsg', '名前を入れてください', 'error'); return; }
+  adminCall('map.editorAdd', { name: name }).then(() => { $('newName').value = ''; });
+};
+
+// ----- 起動 -----(暗証番号がまだなら、Botから needPin が返って暗証番号の画面になる)
+loadList();
+})();
+</script>
+</body>
+</html>

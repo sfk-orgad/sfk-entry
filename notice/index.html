@@ -13,6 +13,8 @@
   ・見る：対象のお知らせの一覧と本文。開いたら既読になる(認証基盤に記録)
   ・書く(notice_edit の権限＝社員)：新しく書く・直す・取り下げる、既読の状況(読んだ人・まだの人)を見る
   データは認証基盤から(ツール一覧の notice の行の API＝認証基盤のURL)。?id=お知らせID で、そのお知らせを開いた状態で始まる
+  軽くするため(2026-11-04)：一覧に本文は入れず、開いたときに取る。ポータルの先読みがあれば待たずに出す
+  保存は1回ごとに番号を付け、連打・送り直しでも1件しか書かない。保存できたら「保存しました」の画面に切り替える
 -->
 <style>
   .n-item { display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--p-line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; cursor: pointer; font-family: inherit; font-size: 16px; color: var(--p-ink); }
@@ -38,20 +40,39 @@
 
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-10-20a';
+var PAGE_VERSION = '2026-11-04a';
 var g = Portal.$, esc = Portal.esc;
 var P = Portal.start({ tool: 'notice', title: 'お知らせ' });
 var D = null;           // notice.list の返事
 var OPEN = '';          // 開いているお知らせのID
+var VIEW = 'list';      // list / open / edit / reads / done(裏で一覧を取り直したとき、見ている画面を勝手に変えないため)
+var BODY = {};          // 開いたお知らせの本文(このページを開いている間だけ)
+var ALL = false;        // 「もっと見る」を押したか
 
+// 一覧：ポータルが先に読んでおいた分(3分以内)があれば待たずに出し、裏で最新を取って差し替える
 function load(openId) {
-  return P.call('notice.list', {}, { retry: true }).then(function (res) {
-    if (!res.ok) { Portal.gate(Portal.authMessage(res, 'お知らせ'), { back: true }); return; }
-    D = res;
-    Portal.showApp();
-    g('ver').textContent = Portal.timing(PAGE_VERSION);
+  var pre = !D && !ALL ? Portal.prefetched('notice', 3) : null;
+  if (pre && pre.init && pre.init.ok) {
+    D = pre.init; Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION, '先読み');
     if (openId && D.notices.some(function (n) { return n.id === openId; })) openNotice(openId); else showList();
-  }).catch(function (e) { Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
+    openId = '';
+  }
+  return P.call('notice.list', { all: ALL }, { retry: true }).then(function (res) {
+    if (!res.ok) { if (res.error === 'AUTH' || !D) Portal.gate(Portal.authMessage(res, 'お知らせ'), { back: true }); return; }
+    var first = !D;
+    D = res;
+    if (first) { Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION); }
+    if (openId && D.notices.some(function (n) { return n.id === openId; })) openNotice(openId);
+    else if (VIEW === 'list') showList();
+  }).catch(function (e) { if (!D) Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
+}
+// 本文を取る(一度取ったものは通信しない)
+function getBody(n) {
+  if (BODY[n.id] != null) return Promise.resolve(BODY[n.id]);
+  return P.call('notice.get', { id: n.id }, { retry: true }).then(function (r) {
+    if (!r.ok) throw new Error(r.error === 'AUTH' ? Portal.authMessage(r, 'お知らせ') : r.error);
+    BODY[n.id] = r.body; return r.body;
+  });
 }
 
 function targetText(n) {
@@ -61,7 +82,7 @@ function targetText(n) {
 
 // ===== 一覧 =====
 function showList() {
-  OPEN = '';
+  OPEN = ''; VIEW = 'list';
   g('toolbar').innerHTML = D.canEdit ? '<button class="p-btn p-solid" id="newBtn">＋ 新しいお知らせを書く</button>' : '';
   if (D.canEdit) g('newBtn').addEventListener('click', function () { showEdit(null); });
   var list = D.notices.filter(function (n) { return D.canEdit || n.mine; });
@@ -74,15 +95,17 @@ function showList() {
       '<div class="m">' + esc(n.start) + (D.canEdit ? '・対象：' + esc(targetText(n)) : '') + '</div></button>';
   };
   g('view').innerHTML = (live.length ? live.map(item).join('') : '<div class="p-card p-muted">掲載中のお知らせはありません。</div>') +
-    (other.length ? '<h2 style="font-size:15px;color:var(--p-muted);margin:18px 4px 8px;">' + (D.canEdit ? '掲載前・終了・取り下げ' : '終わったお知らせ') + '</h2>' + other.map(item).join('') : '');
+    (other.length ? '<h2 style="font-size:15px;color:var(--p-muted);margin:18px 4px 8px;">' + (D.canEdit ? '掲載前・終了・取り下げ' : '終わったお知らせ') + '</h2>' + other.map(item).join('') : '') +
+    (D.hidden ? '<button class="p-btn" id="moreBtn" style="width:100%;margin-top:8px;">もっと見る(終わって半年以上の ' + D.hidden + '件)</button>' : '');
   Array.prototype.forEach.call(document.querySelectorAll('.n-item'), function (b) { b.addEventListener('click', function () { openNotice(b.getAttribute('data-id')); }); });
+  if (g('moreBtn')) g('moreBtn').addEventListener('click', function () { ALL = true; g('moreBtn').disabled = true; g('moreBtn').textContent = '読み込んでいます…'; load(''); });
 }
 
 // ===== 本文(開いたら既読) =====
 function openNotice(id) {
   var n = D.notices.filter(function (x) { return x.id === id; })[0];
   if (!n) { showList(); return; }
-  OPEN = id;
+  OPEN = id; VIEW = 'open';
   g('toolbar').innerHTML = '<button class="p-btn" id="backList">‹ 一覧へ</button>' + (D.canEdit ? '<button class="p-btn" id="editBtn">直す</button><button class="p-btn" id="readsBtn">既読の状況</button>' : '');
   g('backList').addEventListener('click', showList);
   if (D.canEdit) {
@@ -91,7 +114,9 @@ function openNotice(id) {
   }
   g('view').innerHTML = '<div class="p-card"><h2>' + (n.important ? '⚠ ' : '') + esc(n.title) + '</h2>' +
     '<div class="p-note">' + esc(n.start) + (n.end ? ' 〜 ' + esc(n.end) : '') + (n.author ? '・' + esc(n.author) : '') + '</div>' +
-    '<div class="n-body" style="margin-top:10px;">' + esc(n.body) + '</div></div>';
+    '<div class="n-body" id="nBody" style="margin-top:10px;">' + (BODY[n.id] != null ? esc(BODY[n.id]) : '<span class="p-muted">読み込んでいます…</span>') + '</div></div>';
+  if (BODY[n.id] == null) getBody(n).then(function (b) { if (OPEN === id && g('nBody')) g('nBody').textContent = b; })
+    .catch(function (e) { if (OPEN === id && g('nBody')) g('nBody').innerHTML = '<span class="p-err">' + esc(e.message || '本文を読めませんでした') + '</span>'; });
   if (!n.read && n.mine && n.live) {
     P.call('notice.read', { id: id }, { retry: true }).then(function (r) { if (r.ok) n.read = true; }).catch(function () {});
   }
@@ -99,6 +124,7 @@ function openNotice(id) {
 
 // ===== 既読の状況(書ける人) =====
 function showReads(n) {
+  VIEW = 'reads';
   g('view').innerHTML = '<div class="p-card">読み込んでいます…</div>';
   P.call('notice.reads', { id: n.id }, { retry: true }).then(function (r) {
     if (!r.ok) { g('view').innerHTML = '<div class="p-card p-err">' + esc(Portal.authMessage(r, '既読の状況')) + '</div>'; return; }
@@ -113,6 +139,14 @@ function showReads(n) {
 function nowLocal(ms) { var d = ms ? new Date(ms) : new Date(); d.setSeconds(0, 0); var p = function (x) { return ('0' + x).slice(-2); }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()); }
 function toLocal(s) { var m = String(s || '').match(/(\d{4})\/(\d{1,2})\/(\d{1,2}) (\d{1,2}):(\d{2})/); return m ? m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2) + 'T' + ('0' + m[4]).slice(-2) + ':' + m[5] : ''; }
 function showEdit(n) {
+  if (n && BODY[n.id] == null) {
+    VIEW = 'edit';
+    g('view').innerHTML = '<div class="p-card">読み込んでいます…</div>';
+    getBody(n).then(function () { showEdit(n); }).catch(function (e) { g('view').innerHTML = '<div class="p-card p-err">' + esc(e.message) + '</div>'; });
+    return;
+  }
+  VIEW = 'edit';
+  var reqId = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); // この保存の番号(押し直しても同じ番号＝1件しか書かない)
   g('toolbar').innerHTML = '<button class="p-btn" id="cancelEdit">‹ やめる</button>';
   g('cancelEdit').addEventListener('click', function () { if (n) openNotice(n.id); else showList(); });
   var checks = function (name, list, sel) {
@@ -131,24 +165,48 @@ function showEdit(n) {
     (n ? '<label><input type="checkbox" id="fOff"' + (n.enabled ? '' : ' checked') + '>取り下げる(ポータルに出さない)</label>' : '') + '</div>' +
     '<button class="p-btn p-solid p-big" id="fSave" style="margin-top:16px;">' + (n ? '保存する' : '掲載する') + '</button><div class="p-err" id="fErr" style="margin-top:8px;"></div></div>';
   g('fTitle').value = n ? n.title : '';
-  g('fBody').value = n ? n.body : '';
+  g('fBody').value = n ? BODY[n.id] : '';
   g('fStart').value = n ? toLocal(n.start) : nowLocal();
   g('fEnd').value = n ? toLocal(n.end) : '';
   g('fSave').addEventListener('click', function () {
     var vals = function (name) { return Array.prototype.map.call(document.querySelectorAll('input[name="' + name + '"]:checked'), function (x) { return x.value; }); };
     var fmt = function (v) { return v ? v.replace('T', ' ').replace(/-/g, '/') : ''; };
-    var req = { id: n ? n.id : '', title: g('fTitle').value.trim(), body: g('fBody').value, start: fmt(g('fStart').value), end: fmt(g('fEnd').value),
+    var req = { reqId: reqId, id: n ? n.id : '', title: g('fTitle').value.trim(), body: g('fBody').value, start: fmt(g('fStart').value), end: fmt(g('fEnd').value),
       emps: vals('emp'), stores: vals('store'), important: g('fImp').checked, bot: g('fBot').checked, enabled: !(g('fOff') && g('fOff').checked) };
     if (!req.title) { g('fErr').textContent = 'タイトルを入れてください'; return; }
     if (!req.start) { g('fErr').textContent = '掲載開始を入れてください'; return; }
     if (req.bot && !(n && n.sent) && !confirm('掲載開始の時刻になったら、対象の店舗のチャットにも送ります。よいですか？')) return;
-    g('fSave').disabled = true; g('fErr').textContent = '';
-    // 保存は二重に送らないよう、やり直しはしない
+    var label = g('fSave').textContent;
+    g('fSave').disabled = true; g('fSave').textContent = '保存しています…'; g('fErr').textContent = '';
+    // 押し直しても同じ番号なので、サーバーは1件しか書かない(やり直しの自動送信はしない)
     P.call('notice.save', req).then(function (r) {
-      g('fSave').disabled = false;
-      if (!r.ok) { g('fErr').textContent = r.error === 'AUTH' ? Portal.authMessage(r, 'お知らせを書く') : r.error; return; }
-      load(r.id);
-    }).catch(function () { g('fSave').disabled = false; g('fErr').textContent = '通信に失敗しました。もう一度押してください。'; });
+      if (!r.ok) { g('fSave').disabled = false; g('fSave').textContent = label; g('fErr').textContent = r.error === 'AUTH' ? Portal.authMessage(r, 'お知らせを書く') : r.error; return; }
+      BODY[r.id] = req.body.trim();
+      showDone(r, req, !n);
+    }).catch(function () {
+      g('fSave').disabled = false; g('fSave').textContent = label;
+      g('fErr').textContent = '通信に失敗しました。もう一度押してください(押し直しても二重には登録されません)。';
+    });
+  });
+}
+
+// ===== 保存しました =====
+function showDone(r, req, isNew) {
+  VIEW = 'done';
+  g('toolbar').innerHTML = '';
+  g('view').innerHTML = '<div class="p-card" style="text-align:center;padding:28px 16px;">' +
+    '<div style="font-size:44px;line-height:1;">✅</div>' +
+    '<h2 style="margin:12px 0 6px;">' + (isNew ? '掲載しました' : '保存しました') + '</h2>' +
+    '<div class="p-note">「' + esc(req.title) + '」<br>' + (req.start ? '掲載開始：' + esc(req.start) : '') + '</div>' +
+    '<div style="display:grid;gap:10px;margin-top:18px;">' +
+    '<button class="p-btn p-solid p-big" id="doneOpen">このお知らせを見る</button>' +
+    '<button class="p-btn p-big" id="doneList">一覧へ</button></div></div>';
+  window.scrollTo(0, 0);
+  var refreshed = load('');   // 裏で一覧を取り直す(この画面は変えない)
+  g('doneList').addEventListener('click', function () { showList(); }); // 取り直しが届いたら一覧を差し替える(load の中で)
+  g('doneOpen').addEventListener('click', function () {
+    g('doneOpen').disabled = true;
+    refreshed.then(function () { openNotice(r.id); });
   });
 }
 

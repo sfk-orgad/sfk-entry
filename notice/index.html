@@ -15,6 +15,7 @@
   データは認証基盤から(ツール一覧の notice の行の API＝認証基盤のURL)。?id=お知らせID で、そのお知らせを開いた状態で始まる
   軽くするため(2026-11-04)：一覧に本文は入れず、開いたときに取る。ポータルの先読みがあれば待たずに出す
   保存は1回ごとに番号を付け、連打・送り直しでも1件しか書かない。保存できたら「保存しました」の画面に切り替える
+  削除(書ける人・2026-11-05)：開いたお知らせの「削除」。既読も消え、消した内容は「お知らせの削除記録」シートに残る
 -->
 <style>
   .n-item { display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--p-line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; cursor: pointer; font-family: inherit; font-size: 16px; color: var(--p-ink); }
@@ -40,7 +41,7 @@
 
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-04a';
+var PAGE_VERSION = '2026-11-05a';
 var g = Portal.$, esc = Portal.esc;
 var P = Portal.start({ tool: 'notice', title: 'お知らせ' });
 var D = null;           // notice.list の返事
@@ -106,11 +107,12 @@ function openNotice(id) {
   var n = D.notices.filter(function (x) { return x.id === id; })[0];
   if (!n) { showList(); return; }
   OPEN = id; VIEW = 'open';
-  g('toolbar').innerHTML = '<button class="p-btn" id="backList">‹ 一覧へ</button>' + (D.canEdit ? '<button class="p-btn" id="editBtn">直す</button><button class="p-btn" id="readsBtn">既読の状況</button>' : '');
+  g('toolbar').innerHTML = '<button class="p-btn" id="backList">‹ 一覧へ</button>' + (D.canEdit ? '<button class="p-btn" id="editBtn">直す</button><button class="p-btn" id="readsBtn">既読の状況</button><button class="p-btn" id="delBtn" style="color:var(--p-err);border-color:#E7B4AE;">削除</button>' : '');
   g('backList').addEventListener('click', showList);
   if (D.canEdit) {
     g('editBtn').addEventListener('click', function () { showEdit(n); });
     g('readsBtn').addEventListener('click', function () { showReads(n); });
+    g('delBtn').addEventListener('click', function () { delNotice(n); });
   }
   g('view').innerHTML = '<div class="p-card"><h2>' + (n.important ? '⚠ ' : '') + esc(n.title) + '</h2>' +
     '<div class="p-note">' + esc(n.start) + (n.end ? ' 〜 ' + esc(n.end) : '') + (n.author ? '・' + esc(n.author) : '') + '</div>' +
@@ -188,6 +190,24 @@ function showEdit(n) {
       g('fErr').textContent = '通信に失敗しました。もう一度押してください(押し直しても二重には登録されません)。';
     });
   });
+}
+
+// ===== 削除(書ける人) =====
+function delNotice(n) {
+  if (!confirm('「' + n.title + '」を削除します。\nポータルから消え、既読の記録も消えます。元に戻せません(消した内容は記録に残ります)。\nよろしいですか？')) return;
+  var b = g('delBtn'); b.disabled = true; b.textContent = '削除しています…';
+  P.call('notice.delete', { id: n.id }).then(function (r) {
+    if (!r.ok) { b.disabled = false; b.textContent = '削除'; alert(r.error === 'AUTH' ? Portal.authMessage(r, 'お知らせを消す') : r.error); return; }
+    D.notices = D.notices.filter(function (x) { return x.id !== n.id; });
+    delete BODY[n.id];
+    VIEW = 'done';
+    g('toolbar').innerHTML = '';
+    g('view').innerHTML = '<div class="p-card" style="text-align:center;padding:28px 16px;"><div style="font-size:44px;line-height:1;">🗑</div>' +
+      '<h2 style="margin:12px 0 6px;">削除しました</h2><div class="p-note">「' + esc(n.title) + '」</div>' +
+      '<button class="p-btn p-big" id="doneList" style="width:100%;margin-top:18px;">一覧へ</button></div>';
+    g('doneList').addEventListener('click', showList);
+    load('');
+  }).catch(function () { b.disabled = false; b.textContent = '削除'; alert('通信に失敗しました。もう一度押してください(消えていれば何も起きません)。'); });
 }
 
 // ===== 保存しました =====

@@ -107,7 +107,42 @@
     if (!api) { Portal.gate((opt.title || 'このツール') + 'を開く権限がないか、ポータルの設定が足りません。\nポータルから開き直してください。', { back: true }); return null; }
     if (opt.header !== false) Portal.header(opt.title, S.name);
     if (opt.title) document.title = opt.title;
-    return { S: S, api: api, call: function (action, extra, o) { return call(api, S.token, action, extra, o); } };
+    Portal.TOOL = opt.tool;
+    // 表示までの時間を記録(重い画面を見つけるため)。ページが隠れたときにまとめて送る
+    window.addEventListener('pagehide', function () { Portal.perfFlush(true); });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') Portal.perfFlush(true); });
+    return { S: S, api: api, call: function (action, extra, o) {
+      var t0 = Date.now();
+      return call(api, S.token, action, extra, o).then(function (r) {
+        Portal.perfAdd(opt.tool, action, Date.now() - t0, r && r.ok !== false ? 'OK' : String(r && r.error || 'NG'));
+        return r;
+      }, function (e) {
+        Portal.perfAdd(opt.tool, action, Date.now() - t0, '通信失敗');
+        throw e;
+      });
+    } };
+  };
+
+  // ===== 動作の記録(どの画面のどの操作が何秒かかったか)。認証基盤の「動作の記録」シートに、10分おきにまとめて入る =====
+  //   中身はツール・操作・秒・結果だけ(入力した内容は送らない)。送り先は認証基盤(ポータルが portal_session.apis._auth に入れる)
+  var PERF_KEY = 'perf_buf';
+  Portal.perfAdd = function (tool, action, ms, result) {
+    try {
+      var buf = JSON.parse(sessionStorage.getItem(PERF_KEY) || '[]');
+      buf.push([Date.now(), tool, action, ms, result]);
+      sessionStorage.setItem(PERF_KEY, JSON.stringify(buf.slice(-60)));
+      if (buf.length >= 10) Portal.perfFlush(false);
+    } catch (e) {}
+  };
+  Portal.perfFlush = function (leaving) {
+    try {
+      var S = Portal.session();
+      var buf = JSON.parse(sessionStorage.getItem(PERF_KEY) || '[]');
+      if (!buf.length || !S || !S.token || !S.apis || !S.apis._auth) return;
+      sessionStorage.removeItem(PERF_KEY);
+      fetch(S.apis._auth, { method: 'POST', keepalive: !!leaving, headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'perf.log', token: S.token, items: buf }) }).catch(function () {});
+    } catch (e) {}
   };
 
   // ヘッダー(‹ ポータル・画面の名前・名前)。<header id="pHeader"> があればそこに、なければ #app の先頭に作る

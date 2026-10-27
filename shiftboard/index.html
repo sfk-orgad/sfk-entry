@@ -151,7 +151,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-10-17a';
+var PAGE_VERSION = '2026-11-05a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -176,6 +176,26 @@ function api(action, extra) {
   }
   return once().catch(function () { return new Promise(function (ok) { setTimeout(ok, 800); }).then(once); });
 }
+// ===== 動作の記録(どの操作が何秒かかったか。common/portal.js と同じ仕組みで、認証基盤へまとめて送る。2026-11-05) =====
+api = (function (orig, tool) {
+  function add(a, ms, res) { try { var b = JSON.parse(sessionStorage.getItem('perf_buf') || '[]'); b.push([Date.now(), tool, a, ms, res]); sessionStorage.setItem('perf_buf', JSON.stringify(b.slice(-60))); if (b.length >= 10) flush(false); } catch (e) {} }
+  function flush(leaving) {
+    try {
+      var S = JSON.parse(sessionStorage.getItem('portal_session') || 'null'), b = JSON.parse(sessionStorage.getItem('perf_buf') || '[]');
+      if (!b.length || !S || !S.token || !S.apis || !S.apis._auth) return;
+      sessionStorage.removeItem('perf_buf');
+      fetch(S.apis._auth, { method: 'POST', keepalive: !!leaving, headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'perf.log', token: S.token, items: b }) }).catch(function () {});
+    } catch (e) {}
+  }
+  window.addEventListener('pagehide', function () { flush(true); });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flush(true); });
+  return function (action) {
+    var t0 = Date.now();
+    return orig.apply(this, arguments).then(function (r) { add(action, Date.now() - t0, r && r.ok !== false ? 'OK' : String(r && r.error || 'NG')); return r; },
+      function (e) { add(action, Date.now() - t0, '通信失敗'); throw e; });
+  };
+})(api, 'shiftboard');
+
 
 // ===== 状態 =====
 var B = null;          // board.get の返事

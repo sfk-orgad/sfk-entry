@@ -9,6 +9,7 @@
   開き方：まだスタッフ名簿にない人がポータルを開くと出る「利用を申請する」から
   ・ポータルが本人確認に使ったLINE WORKSの情報を引き継ぐ(書き換える値はない)。UserIdは自動で付く
   ・氏名・雇用区分・所属を送ると、スタッフ名簿の「申請」シートに入る。管理者が「承認」に○を付けると StaffMaster に追加される
+  ・×(却下)なら「受け付けられませんでした」と出し、30日は申請し直せない(2026-11-01)
 -->
 <style>
   :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; }
@@ -74,6 +75,7 @@ if (!X || !X.token || Date.now() - X.at > 60 * 60 * 1000) {
   api('apply.info').then(function (res) {
     if (!res.ok) { say(res.error === 'invalid_token' ? 'ログインを確認できませんでした。\nポータルから開き直してください。' : '開けませんでした：' + res.error); return; }
     if (res.already) { try { sessionStorage.removeItem('apply_ctx'); } catch (e) {} say('すでにスタッフとして登録されています。\nポータルを開き直してください。'); return; }
+    if (res.rejected) { try { sessionStorage.removeItem('apply_ctx'); } catch (e) {} say(res.message || 'この申請は受け付けられませんでした。'); return; } // 却下(30日は申請し直せない)
     var p = res.pending || {};
     say(res.pending ? '申請を受け付けています。管理者の承認をお待ちください。\n内容を直すときは、下で送り直してください。' : 'スタッフとしてポータルを使うための申請です。\n管理者が承認すると、使えるようになります。');
     g('who').textContent = 'LINE WORKSの名前：' + (res.lwName || '');

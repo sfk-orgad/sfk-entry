@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>評価ダッシュボード</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  評価ダッシュボード(GitHub Pages の eval/index.html。2026-11)
+  見る・直す：ツール一覧の eval(社員)。昇格の承認・等級を変える：eval_admin(店長以上)
+  データは SHIFUKU業務支援Bot(Eval.gs、app=eval。ツール一覧の eval の行の API＝BotのURL)。評価制度のスプシに書く(数式の列には書かない)
+  顧客評価はアンケートが毎朝入れる(この画面では直さない)
+-->
+<style>
+.e-tabs,.e-chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+.e-tab,.e-chip{padding:8px 14px;border:1px solid var(--p-line);border-radius:999px;background:#fff;font-size:15px;cursor:pointer;font-family:inherit;color:var(--p-ink)}
+.e-tab.on,.e-chip.on{background:var(--p-c);color:#fff;border-color:var(--p-c);font-weight:700}
+.e-item{display:block;width:100%;text-align:left;background:#fff;border:1px solid var(--p-line);border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;font-family:inherit;color:var(--p-ink)}
+.e-l1{display:flex;align-items:center;gap:8px;font-size:17px}.e-l1 b{flex:1}
+.e-l2{font-size:14px;color:var(--p-muted);margin-top:3px}
+.e-big{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center;margin:8px 0}
+.e-big div{background:#F4F6F5;border-radius:10px;padding:8px 4px}.e-big b{display:block;font-size:24px}.e-big span{font-size:12px;color:var(--p-muted)}
+.e-seg{display:flex;gap:6px;flex-wrap:wrap}
+.e-seg button{min-width:44px;padding:9px 0;flex:1;border:1px solid var(--p-line);border-radius:9px;background:#fff;font-size:17px;font-weight:700;cursor:pointer;font-family:inherit}
+.e-seg button.on{background:var(--p-c);color:#fff;border-color:var(--p-c)}
+.e-row{padding:10px 0;border-top:1px solid #EEF0F2}.e-row:first-child{border-top:none}
+.e-row .e-name{font-size:15px;margin-bottom:6px}
+.e-tag{font-size:12px;border-radius:999px;padding:1px 8px;margin-left:6px;background:#EEF0F2;color:var(--p-muted)}
+.e-good{color:var(--p-ok);font-weight:700}.e-warn{color:var(--p-err);font-weight:700}
+.e-hist{font-size:14px;border-top:1px solid #EEF0F2;padding:8px 0}
+.e-toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#1F2328;color:#fff;padding:12px 18px;border-radius:12px;font-size:16px;z-index:50;max-width:90%}
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div id="view"></div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+<div class="e-toast" id="toast" hidden></div>
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-11-09a';
+var P = Portal.start({ tool: 'eval', title: '評価ダッシュボード' });
+var g = Portal.$, esc = Portal.esc;
+var D = null, STORE = '', FILTER = 'all', CUR = null, VIEW = 'list';
+
+function call(a, x, o) { return P.call(a, x, Object.assign({ app: 'eval' }, o || {})); }
+function toast(t) { var x = g('toast'); x.textContent = t; x.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { x.hidden = true; }, 3500); }
+function fail(r) { if (r && r.error === 'AUTH') { Portal.gate(Portal.authMessage(r, '評価ダッシュボード'), { back: true }); return true; } return false; }
+function md(s) { s = String(s || ''); var m = s.match(/^\d{4}-(\d{2})-(\d{2})$/); return m ? Number(m[1]) + '/' + Number(m[2]) : s; }
+function cls(t) { t = String(t || ''); return t === '完了' || t.indexOf('昇格候補') === 0 ? 'e-good' : (t ? 'e-warn' : ''); }
+
+// ===== 一覧 =====
+function load() {
+  return call('eval.list', {}, { retry: true }).then(function (r) {
+    if (!r.ok) { if (!fail(r)) Portal.gate('開けませんでした：' + r.error, { back: true }); return; }
+    D = r; if (!STORE) STORE = (D.stores[0] || '');
+    Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
+    if (VIEW === 'list') showList();
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
+}
+function showList() {
+  VIEW = 'list'; CUR = null;
+  var rows = D.rows.filter(function (r) { return !STORE || r.store === STORE; });
+  var n = { all: rows.length, todo: rows.filter(function (r) { return r.check !== '完了'; }).length, up: rows.filter(function (r) { return String(r.judge).indexOf('昇格候補') === 0; }).length };
+  var list = rows.filter(function (r) { return FILTER === 'all' || (FILTER === 'todo' ? r.check !== '完了' : String(r.judge).indexOf('昇格候補') === 0); });
+  g('view').innerHTML =
+    '<div class="e-tabs">' + D.stores.map(function (s) { return '<button class="e-tab' + (s === STORE ? ' on' : '') + '" data-s="' + esc(s) + '">' + esc(s) + '</button>'; }).join('') + '</div>' +
+    '<div class="e-chips">' + [['all', '全員', n.all], ['todo', '入力が未完了', n.todo], ['up', '昇格候補', n.up]].map(function (c) {
+      return '<button class="e-chip' + (FILTER === c[0] ? ' on' : '') + '" data-f="' + c[0] + '">' + c[1] + ' ' + c[2] + '</button>'; }).join('') + '</div>' +
+    (list.length ? list.map(function (r) {
+      return '<button class="e-item" data-row="' + r.row + '"><div class="e-l1"><b>' + esc(r.name) + '</b><span class="p-tag">' + esc(r.grade) + '</span>' +
+        '<span style="font-size:20px;font-weight:700;">' + (r.total === '' ? '―' : esc(r.total)) + '<small style="font-size:12px;color:var(--p-muted);">点</small></span></div>' +
+        '<div class="e-l2">姿勢 ' + (r.attitude === '' ? '―' : esc(r.attitude)) + '／顧客 ' + (r.customer === '' ? '―' : esc(r.customer)) +
+        (r.date ? '・評価日 ' + md(r.date) : '') + (r.wage !== '' ? '・時給 ' + esc(r.wage) + '円' : '') + '</div>' +
+        '<div class="e-l2"><span class="' + cls(r.check) + '">' + esc(r.check || '') + '</span>' + (r.judge ? '　昇格：<span class="' + cls(r.judge) + '">' + esc(r.judge) + '</span>' : '') + '</div></button>';
+    }).join('') : '<div class="p-card p-muted">該当する人はいません</div>') +
+    '<button class="p-btn" id="addBtn" style="width:100%;margin-top:6px;">＋ 評価する人を足す</button>';
+  Array.prototype.forEach.call(document.querySelectorAll('[data-s]'), function (b) { b.onclick = function () { STORE = b.getAttribute('data-s'); showList(); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-f]'), function (b) { b.onclick = function () { FILTER = b.getAttribute('data-f'); showList(); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-row]'), function (b) { b.onclick = function () { open(Number(b.getAttribute('data-row'))); }; });
+  g('addBtn').onclick = showAdd;
+}
+
+// ===== 1人 =====
+function open(row) {
+  VIEW = 'person'; g('view').innerHTML = '<div class="p-card p-muted">開いています…</div>'; window.scrollTo(0, 0);
+  call('eval.get', { row: row }, { retry: true }).then(function (r) {
+    if (!r.ok) { if (!fail(r)) g('view').innerHTML = '<div class="p-card p-err">' + esc(r.error) + '</div><button class="p-btn" id="back">‹ 一覧へ</button>'; if (g('back')) g('back').onclick = showList; return; }
+    CUR = r; showPerson();
+  });
+}
+function showPerson() {
+  var r = CUR, f = r.fields;
+  var up = String(f['昇格一次判定'] || '').indexOf('昇格候補') === 0;
+  var h = '<button class="p-btn" id="back">‹ 一覧へ</button>' +
+    '<div class="p-card" style="margin-top:10px;"><h2 style="margin:0;">' + esc(f['氏名']) + ' <span class="p-tag">' + esc(f['現G']) + '</span></h2>' +
+    '<div class="p-note">' + esc(f['店舗']) + '・評価ID ' + esc(f['スタッフID']) + (f['評価者'] ? '・評価者 ' + esc(f['評価者']) : '') + '</div>' +
+    '<div class="e-big"><div><b>' + (f['姿勢60点'] === '' ? '―' : esc(f['姿勢60点'])) + '</b><span>姿勢 /60</span></div><div><b>' + (f['顧客40点'] === '' ? '―' : esc(f['顧客40点'])) + '</b><span>顧客 /40</span></div>' +
+    '<div><b>' + (f['総合100点'] === '' ? '―' : esc(f['総合100点'])) + '</b><span>総合 /100</span></div></div>' +
+    '<div>入力確認：<span class="' + cls(f['入力確認']) + '">' + esc(f['入力確認'] || '') + '</span></div>' +
+    '<div>昇格一次判定：<span class="' + cls(f['昇格一次判定']) + '">' + esc(f['昇格一次判定'] || '') + '</span>' + (f['次G'] && f['次G'] !== '—' ? '（次 ' + esc(f['次G']) + '・必要 ' + esc(f['必要点']) + '点）' : '') + '</div>' +
+    '<div>スキル判定：' + esc(f['スキル判定'] || '') + '</div>' +
+    (up && r.isAdmin ? '<button class="p-btn p-solid p-big" id="approve" style="margin-top:12px;">' + esc(f['現G']) + ' → ' + esc(f['次G']) + ' の昇格を承認する</button>' : '') +
+    (up && !r.isAdmin ? '<div class="p-note" style="margin-top:8px;">昇格の承認は店長以上が行います</div>' : '') + '</div>';
+  // 評価の入力
+  h += '<div class="p-card"><h2>評価の入力</h2>';
+  h += field('評価日', '<input type="date" class="p-input" data-k="評価日" value="' + esc(f['評価日']) + '">');
+  r.attitude.forEach(function (k) {
+    h += '<div class="e-row"><div class="e-name">' + esc(k) + '</div><div class="e-seg" data-seg="' + esc(k) + '">' + [1, 2, 3, 4, 5].map(function (n) {
+      return '<button type="button" data-v="' + n + '"' + (String(f[k]) === String(n) ? ' class="on"' : '') + '>' + n + '</button>'; }).join('') + '</div></div>';
+  });
+  ['安全確認責任者', '重大事項有無', '開店作業の対象', '閉店作業の対象'].forEach(function (k) { if (r.choices[k]) h += field(k, sel(k, r.choices[k], f[k])); });
+  h += field('評価コメント', '<textarea class="p-textarea" data-k="評価コメント">' + esc(f['評価コメント']) + '</textarea>');
+  h += field('次回の改善点', '<textarea class="p-textarea" data-k="次回の改善点">' + esc(f['次回の改善点']) + '</textarea>');
+  h += field('現時給（任意）', '<input class="p-input" inputmode="numeric" data-k="現時給（任意）" value="' + esc(f['現時給（任意）']) + '">');
+  if (r.isAdmin && r.choices['現G']) h += field('現在の等級（店長以上）', sel('現G', r.choices['現G'], f['現G']) + '<input class="p-input" id="reason" placeholder="下げるときの理由(必須)" style="margin-top:6px;">');
+  h += '<div class="p-note">顧客評価はアンケートから毎朝入ります。評価者は保存した人の名前が入ります。</div>' +
+    '<div id="msg1"></div><button class="p-btn p-solid p-big" id="save1" style="margin-top:10px;">評価を保存する</button></div>';
+  // スキル
+  if (r.skill) {
+    h += '<div class="p-card"><h2>スキル（0〜3）</h2><div class="p-note">0＝未経験・1＝教育者と一緒ならできる・2＝一人でできる・3＝教えられる。空欄＝未評価</div>';
+    r.skill.items.forEach(function (it) {
+      h += '<div class="e-row"><div class="e-name">' + esc(it.name) + (it.group === '店舗' ? '<span class="e-tag">店舗</span>' : '') + '</div><div class="e-seg" data-skill="' + it.c + '">' +
+        ['', 0, 1, 2, 3].map(function (n) { return '<button type="button" data-v="' + n + '"' + (String(it.lv) === String(n) ? ' class="on"' : '') + '>' + (n === '' ? '空' : n) + '</button>'; }).join('') + '</div></div>';
+    });
+    if (r.skill.comment !== null) h += field('スキルコメント', '<textarea class="p-textarea" id="skillCmt">' + esc(r.skill.comment) + '</textarea>');
+    h += '<div id="msg2"></div><button class="p-btn p-solid p-big" id="save2" style="margin-top:10px;">スキルを保存する</button></div>';
+  } else h += '<div class="p-card p-err">スキル登録にこの人の行がありません（評価ID ' + esc(f['スタッフID']) + '）</div>';
+  // 訓練・教育記録
+  h += '<div class="p-card"><h2>訓練・教育記録</h2>' + (r.trains.length ? r.trains.map(function (t) {
+    return '<div class="e-hist">' + md(t['実施日']) + '　<b>' + esc(t['対象スキル']) + '</b>（' + esc(t['確認方法']) + '）→ Lv' + esc(t['確認後Lv']) + '<br><span class="p-muted">' + esc(t['確認内容・実技の結果'] || '') + (t['確認者'] ? '／確認者 ' + esc(t['確認者']) : '') + '</span></div>';
+  }).join('') : '<div class="p-muted">まだありません</div>') +
+    '<details style="margin-top:10px;"><summary style="cursor:pointer;font-weight:700;">＋ 記録を足す</summary>' +
+    field('実施日', '<input type="date" class="p-input" id="tDate">') +
+    field('対象スキル', sel('tSkill', r.skillNames, '', true)) +
+    field('確認方法', sel('tMethod', r.trainMethods, '', true)) +
+    field('確認内容・実技の結果', '<textarea class="p-textarea" id="tResult"></textarea>') +
+    field('確認後Lv', sel('tLv', ['0', '1', '2', '3'], '', true)) +
+    field('次回の課題', '<input class="p-input" id="tNext">') +
+    '<div class="p-note">講義・見学の受講だけでは、Lv2・3にしません。スキルのLvは、上の「スキル」で直します。</div>' +
+    '<div id="msg3"></div><button class="p-btn p-solid" id="save3" style="width:100%;margin-top:8px;">記録を足す</button></details></div>';
+  // 推移
+  h += '<div class="p-card"><h2>推移</h2>' + (r.history.length ? r.history.map(function (x) {
+    return '<div class="e-hist">' + md(x['評価日']) + '　' + esc(x['現G']) + '　総合 <b>' + esc(x['総合100点']) + '</b>（姿勢 ' + esc(x['姿勢60点']) + '・顧客 ' + esc(x['顧客40点']) + '）' + (x['承認'] ? '<br><span class="e-good">' + esc(x['承認']) + '</span>' : '') + '</div>';
+  }).join('') : '<div class="p-muted">評価が「完了」になると、ここに残ります</div>') + '</div>';
+  g('view').innerHTML = h; window.scrollTo(0, 0);
+  g('back').onclick = function () { showList(); load(); };
+  Array.prototype.forEach.call(document.querySelectorAll('.e-seg button'), function (b) {
+    b.onclick = function () { Array.prototype.forEach.call(b.parentNode.children, function (x) { x.classList.toggle('on', x === b); }); };
+  });
+  g('save1').onclick = save1; if (g('save2')) g('save2').onclick = save2; g('save3').onclick = save3; if (g('approve')) g('approve').onclick = approve;
+}
+function field(label, input) { return '<label class="p-label">' + esc(label) + '</label>' + input; }
+function sel(k, opts, v, isId) { return '<select class="p-select" ' + (isId ? 'id="' + k + '"' : 'data-k="' + esc(k) + '"') + '><option value="">(選ぶ)</option>' + opts.map(function (o) { return '<option' + (String(o) === String(v) ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>'; }
+function segVal(el) { var on = el.querySelector('button.on'); return on ? on.getAttribute('data-v') : null; }
+function busy(id, on, label) { var b = g(id); b.disabled = on; if (label) b.textContent = label; }
+function after(r, msgId, okText, btn, label) {
+  busy(btn, false, label);
+  if (r.ok) { toast(r.unchanged ? '変わったところはありません' : okText); open(CUR.row); load(); return; }
+  if (!fail(r)) g(msgId).innerHTML = '<div class="p-err" style="margin-top:8px;">' + esc(r.error) + '</div>';
+}
+function save1() {
+  var v = {};
+  Array.prototype.forEach.call(document.querySelectorAll('[data-k]'), function (el) { v[el.getAttribute('data-k')] = el.value; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-seg]'), function (el) { var x = segVal(el); if (x !== null) v[el.getAttribute('data-seg')] = x; });
+  busy('save1', true, '保存しています…'); g('msg1').innerHTML = '';
+  call('eval.save', { row: CUR.row, version: CUR.version, values: v, reason: g('reason') ? g('reason').value : '' })
+    .then(function (r) { after(r, 'msg1', '評価を保存しました', 'save1', '評価を保存する'); }).catch(function () { busy('save1', false, '評価を保存する'); g('msg1').innerHTML = '<div class="p-err">通信に失敗しました。もう一度押してください</div>'; });
+}
+function save2() {
+  var lv = {};
+  Array.prototype.forEach.call(document.querySelectorAll('[data-skill]'), function (el) { var x = segVal(el); if (x !== null) lv[el.getAttribute('data-skill')] = x; });
+  busy('save2', true, '保存しています…'); g('msg2').innerHTML = '';
+  call('eval.skill', { row: CUR.row, version: CUR.skill.version, levels: lv, comment: g('skillCmt') ? g('skillCmt').value : undefined })
+    .then(function (r) { after(r, 'msg2', 'スキルを保存しました', 'save2', 'スキルを保存する'); }).catch(function () { busy('save2', false, 'スキルを保存する'); g('msg2').innerHTML = '<div class="p-err">通信に失敗しました。もう一度押してください</div>'; });
+}
+function save3() {
+  var rec = { '実施日': g('tDate').value, '対象スキル': g('tSkill').value, '確認方法': g('tMethod').value, '確認内容・実技の結果': g('tResult').value, '確認後Lv': g('tLv').value, '次回の課題': g('tNext').value };
+  busy('save3', true, '足しています…'); g('msg3').innerHTML = '';
+  call('eval.train', { row: CUR.row, record: rec }).then(function (r) { after(r, 'msg3', '記録を足しました', 'save3', '記録を足す'); })
+    .catch(function () { busy('save3', false, '記録を足す'); g('msg3').innerHTML = '<div class="p-err">通信に失敗しました。足せたか一覧で確かめてから、もう一度押してください</div>'; });
+}
+function approve() {
+  var f = CUR.fields;
+  if (!confirm(f['氏名'] + 'さんを ' + f['現G'] + ' → ' + f['次G'] + ' に昇格します。\nこの時点の評価が記録に残り、StaffMaster のグレードも変わります。よろしいですか？')) return;
+  busy('approve', true, '承認しています…');
+  call('eval.approve', { row: CUR.row, version: CUR.version }).then(function (r) {
+    if (r.ok) { toast(r.from + ' → ' + r.to + ' に昇格しました'); open(CUR.row); load(); return; }
+    busy('approve', false); if (!fail(r)) alert(r.error);
+  });
+}
+
+// ===== 人を足す =====
+function showAdd() {
+  VIEW = 'add'; g('view').innerHTML = '<div class="p-card p-muted">StaffMaster を読んでいます…</div>';
+  call('eval.staff', {}, { retry: true }).then(function (r) {
+    if (!r.ok) { if (!fail(r)) g('view').innerHTML = '<div class="p-card p-err">' + esc(r.error) + '</div>'; return; }
+    g('view').innerHTML = '<button class="p-btn" id="back">‹ 一覧へ</button><div class="p-card" style="margin-top:10px;"><h2>評価する人を足す</h2>' +
+      '<div class="p-note">StaffMaster の在籍の人のうち、まだ評価入力にいない「人×所属店舗」です。複数の店舗で働く人は、店舗ごとに足します。</div>' +
+      (r.staff.length ? r.staff.map(function (x, i) {
+        return '<div class="e-row" style="display:flex;align-items:center;gap:8px;"><div style="flex:1;"><b>' + esc(x.name) + '</b>　' + esc(x.storeName || x.code) + '<br><span class="p-muted">' + esc(x.emp) + '・' + esc(x.grade) + '・評価ID ' + esc(x.evId) + '</span></div>' +
+          '<button class="p-btn" data-add="' + i + '"' + (x.storeName ? '' : ' disabled title="評価制度の店舗の選択肢にない店舗"') + '>足す</button></div>';
+      }).join('') : '<div class="p-muted">足せる人はいません（全員入っています）</div>') + '</div>';
+    g('back').onclick = showList;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-add]'), function (b) {
+      b.onclick = function () {
+        var x = r.staff[Number(b.getAttribute('data-add'))];
+        b.disabled = true; b.textContent = '足しています…';
+        call('eval.add', { evId: x.evId }).then(function (a) {
+          if (!a.ok) { b.disabled = false; b.textContent = '足す'; if (!fail(a)) alert(a.error); return; }
+          toast(x.name + 'さんを足しました'); load().then(function () { open(a.row); });
+        });
+      };
+    });
+  });
+}
+
+if (P) load();
+</script>
+</body>
+</html>

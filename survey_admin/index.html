@@ -74,6 +74,16 @@
       <div class="msg" id="cacheMsg"></div>
     </div>
 
+    <div class="card" id="testCard">
+      <h2>試験</h2>
+      <div id="testInfo" class="sub"></div>
+      <div class="row" style="margin-top:10px;">
+        <button class="ghost" id="testToggle" type="button"></button>
+        <button class="danger" id="testPurge" type="button" style="padding:11px 18px;font-size:15px;">試験の回答を消す</button>
+      </div>
+      <div class="msg" id="testMsg"></div>
+    </div>
+
     <div class="card">
       <h2>① シフト表を登録</h2>
       <div class="sub" style="margin-bottom:12px;">月末に翌月分を登録してください。同じ店舗・同じ月を登録し直すと、前のデータと置き換わります。</div>
@@ -283,7 +293,7 @@ function parseVisitCsv(text) {
 <script>
 (function () {
   var KEY = '', STATUS = null, PARSED = null;
-  var PAGE_VERSION = '2026-11-06a';
+  var PAGE_VERSION = '2026-11-08a';
   var P = Portal.start({ tool: 'survey_admin', title: 'アンケートの管理' });
   if (!P) return;
   // 前の版の google.script.run の関数名 → Bot の API。最初の引数(合言葉)は使わない
@@ -300,6 +310,8 @@ function parseVisitCsv(text) {
     adminCheckLink: function () { return ['survey.checkLink', {}, 'result']; },
     adminArchiveVisits: function () { return ['survey.archiveVisits', {}, 'result']; },
     adminClearCache: function () { return ['survey.clearCache', {}, null]; },
+    adminSetTesting: function (k, on) { return ['survey.setTesting', { on: on }, 'result']; },
+    adminPurgeTest: function () { return ['survey.purgeTest', {}, 'result']; },
   };
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -329,6 +341,12 @@ function parseVisitCsv(text) {
 
   function render(s) {
     STATUS = s;
+    // 試験
+    $('testInfo').innerHTML = (s.testing
+      ? '<b style="color:var(--err);">試験中です。</b>届いた回答には「試験」の印が付き、お客様の画面に「試験中」と出ます。毎朝の自動反映もしません。'
+      : '本番です（試験中ではありません）。') + '<br>試験の印が付いた回答：<b>' + (s.testCount || 0) + '件</b>';
+    $('testToggle').textContent = s.testing ? '試験を終える（本番にする）' : '試験を始める';
+    $('testPurge').disabled = !s.testCount;
     if (s.env === 'テスト' && !$('envBanner')) {
       var bn = document.createElement('div'); bn.id = 'envBanner';
       bn.textContent = 'テスト環境（' + (s.version || '') + '）';
@@ -598,6 +616,22 @@ function parseVisitCsv(text) {
       return refresh();
     }).catch(function (e) { msg('archiveMsg', e.message || String(e), 'err'); })
       .then(function () { $('archiveBtn').disabled = false; });
+  });
+
+  // ---------- 試験 ----------
+  $('testToggle').addEventListener('click', function () {
+    var on = !STATUS.testing;
+    if (!confirm(on ? '試験を始めます。これから届く回答には「試験」の印が付き、毎朝の評価シートへの反映も止まります。よろしいですか？'
+                    : '試験を終えて本番にします。これから届く回答は本番の回答として数えます。\n（試験の回答は「試験の回答を消す」で消してください）')) return;
+    $('testToggle').disabled = true;
+    run('adminSetTesting', KEY, on).then(function () { msg('testMsg', on ? '試験中にしました' : '本番にしました', 'ok'); return refresh(); })
+      .catch(function (e) { msg('testMsg', e.message || String(e), 'err'); }).then(function () { $('testToggle').disabled = false; });
+  });
+  $('testPurge').addEventListener('click', function () {
+    if (!confirm('「試験」の印が付いた回答 ' + (STATUS.testCount || 0) + '件と、その推測をまとめて消します。元に戻せません。よろしいですか？')) return;
+    $('testPurge').disabled = true;
+    run('adminPurgeTest', KEY).then(function (r) { msg('testMsg', '回答 ' + r.responses + '件・推測 ' + r.guesses + '件を消しました', 'ok'); return refresh(); })
+      .catch(function (e) { msg('testMsg', e.message || String(e), 'err'); $('testPurge').disabled = false; });
   });
 
   $('calcBtn').addEventListener('click', function () { calc(false); });

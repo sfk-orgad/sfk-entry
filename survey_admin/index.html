@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>アンケートの管理</title>
+<!-- 守り：通信先は Google Apps Script だけ。スクリプトは自分のサイトと cdnjs(シフト表のExcelを読む SheetJS)だけ -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!--
+  お客様アンケートの管理(GitHub Pages の survey_admin/index.html。2026-11 に GAS の画面(Admin.html v1.9)から移した)
+  入るには ポータルの権限(ツール一覧の survey_admin＝社員)。合言葉は廃止
+  データは SHIFUKU業務支援Bot(Survey.gs、app=survey。ツール一覧の survey_admin の行の API＝BotのURL)
+  スタッフは StaffMaster から自動(呼び名がお客様に見せる名前)。評価シートとの照合はスタッフID
+-->
+<style>
+  :root { --c: #1E3A5F; --soft: #E8EEF5; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --err: #B42318; --ok: #1F7A3D; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #F5F6F8; color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 16px; line-height: 1.6; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 0 0 12px; }
+  .sub { color: var(--muted); font-size: 14px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-top: 16px; }
+  input[type=password], select { font-size: 16px; padding: 11px 12px; border: 1px solid #B9C0C8; border-radius: 8px; }
+  button { font-size: 15px; font-weight: 700; padding: 11px 18px; border-radius: 8px; border: none; background: var(--c); color: #fff; cursor: pointer; }
+  button.ghost { background: #fff; color: var(--c); border: 1px solid var(--c); }
+  button.danger { background: #fff; color: var(--err); border: 1px solid #E5B4AE; padding: 6px 12px; font-size: 13px; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { padding: 9px 8px; border-bottom: 1px solid #EDF0F3; text-align: left; }
+  th { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .url { font-size: 13px; word-break: break-all; color: var(--muted); }
+  .msg { margin-top: 12px; font-size: 15px; white-space: pre-wrap; }
+  .msg.err { color: var(--err); font-weight: 700; }
+  .msg.ok { color: var(--ok); font-weight: 700; }
+  .preview { background: var(--soft); border-radius: 10px; padding: 14px 16px; margin-top: 14px; display: none; }
+  .preview > b { font-size: 18px; }
+  .warn { background: #FFF6E5; border: 1px solid #F1D39A; border-radius: 10px; padding: 12px 14px; font-size: 14px; margin-top: 10px; }
+  .stat { display: inline-block; min-width: 120px; margin: 4px 16px 4px 0; }
+  .stat .n { font-size: 24px; font-weight: 700; color: var(--c); }
+  .stat .l { font-size: 13px; color: var(--muted); }
+  #dash { display: none; }
+  .gitem { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+  .gitem .feat { font-size: 17px; font-weight: 700; }
+  .gitem .meta { font-size: 13px; color: var(--muted); }
+  .gitem .guess { margin: 6px 0 8px; font-size: 14px; }
+  .conf { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 99px; margin-right: 6px; }
+  .conf.c-high { background: #E3F4E8; color: var(--ok); }
+  .conf.c-mid { background: #FFF6E5; color: #9A6200; }
+  .conf.c-none { background: #EEF0F2; color: var(--muted); }
+  .picks { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pick { font-size: 14px; padding: 7px 12px; border-radius: 99px; border: 1px solid #B9C0C8; background: #fff; color: var(--ink); font-weight: 400; }
+  .pick.on { background: var(--c); border-color: var(--c); color: #fff; font-weight: 700; }
+  .pick.none.on { background: #6B7280; border-color: #6B7280; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+<div class="wrap">
+  <div class="sub">シフト表・来店データの登録、名前がわからないスタッフの確定、顧客評価の計算と反映</div>
+
+  <div id="dash">
+    <div class="card">
+      <h2>概要</h2>
+      <div id="stats"></div>
+      <div class="row" style="margin-top:10px;">
+        <a id="sheetLink" target="_blank" rel="noopener"><button class="ghost" type="button">スプレッドシートを開く</button></a>
+        <button class="ghost" id="cacheBtn" type="button">質問の変更をすぐ反映</button>
+      </div>
+      <div class="msg" id="cacheMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2>① シフト表を登録</h2>
+      <div class="sub" style="margin-bottom:12px;">月末に翌月分を登録してください。同じ店舗・同じ月を登録し直すと、前のデータと置き換わります。</div>
+      <div class="row">
+        <select id="upStore"></select>
+        <input type="file" id="upFile" accept=".xlsx,.xls,.csv">
+      </div>
+      <div class="preview" id="upPreview"></div>
+      <div class="msg" id="upMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2>② 登録済みのシフト</h2>
+      <div id="monthTable"></div>
+    </div>
+
+    <div class="card">
+      <h2>③ スタッフ(StaffMaster から自動)</h2>
+      <div id="staffInfo"></div>
+      <div class="row" style="margin-top:12px;">
+        <button class="ghost" id="autoLinkBtn" type="button">StaffMaster から今すぐ同期</button>
+      </div>
+      <div class="sub" style="margin-top:6px;">スタッフID・お客様に見せる名前(呼び名)・所属・在籍は StaffMaster から10分おきに自動で入ります。手で直すのは、アンケートDBの「スタッフマスタ」の 名指し対象・ひとこと・特徴キーワード だけです。</div>
+      <div class="msg" id="linkMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2>④ 来店データ（リピート計算用）</h2>
+      <div class="sub" style="margin-bottom:12px;">会計システムから出力したCSV（会員番号・営業日・入店時刻の列）を登録します。ファイルに含まれる期間のデータは置き換わります。</div>
+      <div class="row">
+        <select id="vStore"></select>
+        <input type="file" id="vFile" accept=".csv">
+      </div>
+      <div class="preview" id="vPreview"></div>
+      <div class="msg" id="vMsg"></div>
+      <div id="visitTable" style="margin-top:12px;"></div>
+      <div class="sub" style="margin-top:14px;">古い来店データは毎月1日の早朝に自動で別ファイル（アーカイブ）へ移します。残す期間は設定シートの「来店データ_シートに残す月数」で変えられます。</div>
+      <div class="row" style="margin-top:8px;"><button class="ghost" id="archiveBtn" type="button">今すぐアーカイブする</button></div>
+      <div class="msg" id="archiveMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2>⑤ 名前がわからないスタッフの推測</h2>
+      <div class="sub" style="margin-bottom:12px;">お客様が書いた特徴を、スタッフマスタの「特徴キーワード」と照合して推測します。確定した分だけがスコアの名指しに入ります。</div>
+      <div class="row">
+        <button class="ghost" id="guessBtn" type="button">新しい回答から推測する</button>
+        <button id="approveHighBtn" type="button" style="display:none;">確度「高」をまとめて承認</button>
+      </div>
+      <div class="msg" id="guessMsg"></div>
+      <div id="guessList" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>⑥ 顧客評価スコア（40点）</h2>
+      <div class="sub" style="margin-bottom:12px;">毎朝6時ごろに自動で計算して評価シートに反映します（設定「毎朝の自動反映」で止められます）。ボタンを押すとその場で計算します。集計期間は計算した日から過去3か月、各店舗で率が最も高い人が満点です。<br>評価シートの評価日（E列）が入っている人は点数を固定し、自動でもボタンでも更新しません。</div>
+      <div id="evalWarn"></div>
+      <div class="row" style="margin-bottom:12px;">
+        <button class="ghost" id="linkBtn" type="button">評価シートとの連携をチェック</button>
+      </div>
+      <div id="linkResult"></div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin:4px 0 12px;cursor:pointer;">
+        <input type="checkbox" id="testMode" style="width:18px;height:18px;"> 確認用モード（最低母数を無視して計算する。回答が少ない段階で動きを確かめる時だけ使う）
+      </label>
+      <div class="row">
+        <button class="ghost" id="calcBtn" type="button">試算する（反映しない）</button>
+        <button id="calcWriteBtn" type="button">計算して評価シートに反映</button>
+      </div>
+      <div class="msg" id="calcMsg"></div>
+      <div id="scoreTable" style="margin-top:12px; overflow-x:auto;"></div>
+    </div>
+
+    <div class="card">
+      <h2>お客様用フォームのURL</h2>
+      <div id="urls"></div>
+    </div>
+  </div>
+  <div class="p-ver" id="ver"></div>
+</div>
+</div>
+<script src="../common/portal.js?v=1"></script>
+<script>
+// ==== シフト表の解析（Admin.html にそのまま埋め込む） ====
+var SHIFT_STOP_NAMES = ['出勤人数', '勤務時間(h)', '人件費(円)'];
+function shiftNormName(s) { return String(s == null ? '' : s).replace(/[\s\u3000]+/g, '').trim(); }
+function shiftCellToYmd(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date && !isNaN(v)) {
+    var d = new Date(v.getTime() + 12 * 3600 * 1000); // タイムゾーン誤差で日付がずれないよう正午に寄せる
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  if (typeof v === 'number' && v > 30000 && v < 80000) { // Excelのシリアル値
+    var u = new Date(Math.round((v - 25569) * 86400000));
+    return u.toISOString().slice(0, 10);
+  }
+  var m = String(v).match(/(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+  return m ? m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2) : null;
+}
+function shiftTimeToMin(t) {
+  var m = String(t).match(/(\d{1,2})\s*[:：]\s*(\d{2})/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+// rows: 2次元配列（1行目=日付見出し、A列=氏名、セル="14:00 ~ 23:00"）
+function parseShiftRows(rows) {
+  var header = rows[0] || [];
+  var dateCols = [];
+  for (var c = 1; c < header.length; c++) {
+    var ymd = shiftCellToYmd(header[c]);
+    if (ymd) dateCols.push({ c: c, ymd: ymd });
+  }
+  var records = [], names = {}, skipped = [];
+  for (var r = 1; r < rows.length; r++) {
+    var row = rows[r] || [];
+    var name = shiftNormName(row[0]);
+    if (!name || SHIFT_STOP_NAMES.indexOf(name) >= 0) continue;
+    names[name] = true;
+    dateCols.forEach(function (dc) {
+      var cell = row[dc.c];
+      if (cell == null || cell === '') return;
+      var parts = String(cell).split(/[~〜～]/);
+      var s = parts.length === 2 ? shiftTimeToMin(parts[0]) : null;
+      var e = parts.length === 2 ? shiftTimeToMin(parts[1]) : null;
+      if (s == null || e == null) { skipped.push(name + ' ' + dc.ymd + '「' + cell + '」'); return; }
+      if (e <= s) e += 24 * 60; // 日付をまたぐ表記（22:00 ~ 02:00）
+      records.push({ name: name, date: dc.ymd, s: s, e: e });
+    });
+  }
+  // 最も件数の多い月を対象月とする
+  var cnt = {};
+  records.forEach(function (x) { var k = x.date.slice(0, 7); cnt[k] = (cnt[k] || 0) + 1; });
+  var month = Object.keys(cnt).sort(function (a, b) { return cnt[b] - cnt[a]; })[0] || null;
+  var worked = {};
+  records.forEach(function (x) { if (x.date.slice(0, 7) === month) worked[x.name] = true; });
+  return {
+    month: month,
+    records: records.filter(function (x) { return x.date.slice(0, 7) === month; }),
+    otherMonthCount: records.filter(function (x) { return x.date.slice(0, 7) !== month; }).length,
+    staffTotal: Object.keys(names).length,
+    staffWorked: Object.keys(worked).length,
+    dateCount: dateCols.length,
+    skipped: skipped,
+  };
+}
+// ==== 来店データCSVの解析（Admin.html にそのまま埋め込む） ====
+function decodeCsvBytes(buf) {
+  // 会計システムのCSVはShift_JISのことが多いので、UTF-8で文字化けしたらShift_JISで読み直す
+  var u8 = new Uint8Array(buf);
+  var t = new TextDecoder('utf-8').decode(u8);
+  if (t.indexOf('\uFFFD') >= 0) {
+    try { t = new TextDecoder('shift_jis').decode(u8); } catch (e) { /* 非対応ブラウザはUTF-8のまま */ }
+  }
+  return t.replace(/^\uFEFF/, '');
+}
+function parseCsvRows(text) {
+  var rows = [], row = [], cur = '', q = false;
+  for (var i = 0; i < text.length; i++) {
+    var ch = text[i];
+    if (q) {
+      if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+      else cur += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cur); cur = ''; }
+    else if (ch === '\r') { /* skip */ }
+    else if (ch === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+    else cur += ch;
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter(function (r) { return !(r.length === 1 && r[0] === ''); });
+}
+function visitYmd(s) {
+  var m = String(s || '').match(/(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+  return m ? m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2) : null;
+}
+function ymdDiffDays(a, b) {
+  var pa = a.split('-').map(Number), pb = b.split('-').map(Number);
+  return Math.round((Date.UTC(pa[0], pa[1] - 1, pa[2]) - Date.UTC(pb[0], pb[1] - 1, pb[2])) / 86400000);
+}
+function parseVisitCsv(text) {
+  var rows = parseCsvRows(text);
+  if (!rows.length) return { error: 'CSVが空です' };
+  var h = rows[0].map(function (x) { return String(x).trim(); });
+  var find = function (name) { for (var i = 0; i < h.length; i++) if (h[i].indexOf(name) >= 0) return i; return -1; };
+  var cMem = find('会員番号'), cDay = find('営業日'), cIn = find('入店時刻');
+  if (cMem < 0 || cIn < 0) return { error: '「会員番号」「入店時刻」の列が見つかりません（見出し：' + h.join(', ') + '）' };
+  var records = [], skipped = 0, members = {};
+  for (var r = 1; r < rows.length; r++) {
+    var row = rows[r];
+    var mem = String(row[cMem] || '').trim();
+    var ts = String(row[cIn] || '').trim();
+    if (!mem || !ts) { skipped++; continue; }
+    var tm = ts.match(/(\d{1,2}):(\d{2})/);
+    if (!tm) { skipped++; continue; }
+    var entryDate = visitYmd(ts);
+    var day = cDay >= 0 ? visitYmd(row[cDay]) : null;
+    day = day || entryDate;
+    if (!day) { skipped++; continue; }
+    // 営業日の0時からの分（深夜0:30の入店は営業日基準で24:30＝1470分）
+    var min = Number(tm[1]) * 60 + Number(tm[2]) + (entryDate ? ymdDiffDays(entryDate, day) * 1440 : 0);
+    if (min < 0 || min >= 48 * 60) { skipped++; continue; }
+    records.push({ member: mem, date: day, min: min });
+    members[mem] = true;
+  }
+  var dates = records.map(function (x) { return x.date; }).sort();
+  return { records: records, skipped: skipped, members: Object.keys(members).length,
+    from: dates[0] || null, to: dates[dates.length - 1] || null };
+}
+</script>
+<script>
+(function () {
+  var KEY = '', STATUS = null, PARSED = null;
+  var PAGE_VERSION = '2026-11-06a';
+  var P = Portal.start({ tool: 'survey_admin', title: 'アンケートの管理' });
+  if (!P) return;
+  // 前の版の google.script.run の関数名 → Bot の API。最初の引数(合言葉)は使わない
+  var MAP = {
+    adminGetStatus: function () { return ['survey.status', {}, 'status']; },
+    adminGetPendingGuesses: function () { return ['survey.pending', {}, 'result']; },
+    adminDeleteShiftMonth: function (k, store, month) { return ['survey.deleteShiftMonth', { store: store, month: month }, null]; },
+    adminUploadShift: function (k, store, month, fileName, records) { return ['survey.uploadShift', { store: store, month: month, fileName: fileName, records: records }, 'result']; },
+    adminUploadVisits: function (k, store, fileName, records) { return ['survey.uploadVisits', { store: store, fileName: fileName, records: records }, 'result']; },
+    adminAutoLinkEval: function () { return ['survey.syncStaff', {}, 'result']; },
+    adminCalcScores: function (k, write, testMode) { return ['survey.calc', { write: write, testMode: testMode }, 'result']; },
+    adminGuessFeatures: function () { return ['survey.guess', {}, 'result']; },
+    adminResolveGuesses: function (k, decisions) { return ['survey.resolve', { decisions: decisions }, 'result']; },
+    adminCheckLink: function () { return ['survey.checkLink', {}, 'result']; },
+    adminArchiveVisits: function () { return ['survey.archiveVisits', {}, 'result']; },
+    adminClearCache: function () { return ['survey.clearCache', {}, null]; },
+  };
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function msg(id, text, cls) { var el = $(id); el.textContent = text || ''; el.className = 'msg' + (cls ? ' ' + cls : ''); }
+  function run(fn) {
+    var m = MAP[fn].apply(null, [].slice.call(arguments, 1));
+    var readOnly = /^survey\.(status|pending|checkLink)$/.test(m[0]);
+    return P.call(m[0], m[1], { app: 'survey', retry: readOnly }).then(function (r) {
+      if (!r.ok) {
+        if (r.error === 'AUTH') { Portal.gate(Portal.authMessage(r, 'アンケートの管理'), { back: true }); }
+        throw new Error(r.error === 'AUTH' ? '権限がありません' : r.error);
+      }
+      return m[2] ? r[m[2]] : true;
+    });
+  }
+  function monthLabel(m) { return m ? m.replace('-', '年').replace(/年0?/, '年') + '月' : ''; }
+
+  // 開いたらすぐ読む(合言葉は廃止。ポータルの権限で入る)
+  run('adminGetStatus').then(function (s) {
+    Portal.showApp();
+    $('dash').style.display = 'block';
+    render(s);
+    $('ver').textContent = Portal.timing(PAGE_VERSION);
+    run('adminGetPendingGuesses').then(function (r) { renderGuesses(r.pending); }).catch(function () {});
+  }).catch(function (e) { Portal.gate('開けませんでした：' + (e.message || e), { back: true }); });
+  function refresh() { return run('adminGetStatus', KEY).then(render); }
+
+  function render(s) {
+    STATUS = s;
+    if (s.env === 'テスト' && !$('envBanner')) {
+      var bn = document.createElement('div'); bn.id = 'envBanner';
+      bn.textContent = 'テスト環境（' + (s.version || '') + '）';
+      bn.style.cssText = 'background:#B42318;color:#fff;font-weight:700;text-align:center;padding:6px;border-radius:8px;margin-top:12px;';
+      $('dash').insertBefore(bn, $('dash').firstChild);
+    }
+    $('sheetLink').href = s.spreadsheetUrl;
+    $('stats').innerHTML = s.stores.map(function (st) {
+      return '<span class="stat"><div class="n">' + st.responses + '</div><div class="l">' + esc(st.name) + ' 回答数</div></span>';
+    }).join('') + '<span class="stat"><div class="n">' + s.staffTotal + '</div><div class="l">登録スタッフ</div></span>';
+
+    var sel = $('upStore'), cur = sel.value;
+    sel.innerHTML = s.stores.map(function (st) { return '<option value="' + esc(st.code) + '">' + esc(st.name) + '</option>'; }).join('');
+    if (cur) sel.value = cur;
+
+    $('monthTable').innerHTML = s.months.length ? '<table><thead><tr><th>店舗</th><th>対象月</th><th>勤務人数</th><th>シフト件数</th><th></th></tr></thead><tbody>' +
+      s.months.map(function (m) {
+        var name = (s.stores.find(function (x) { return x.code === m.store; }) || {}).name || m.store;
+        return '<tr><td>' + esc(name) + '</td><td>' + monthLabel(m.month) + '</td><td>' + m.staffCount + '名</td><td>' + m.records + '件</td>' +
+          '<td style="text-align:right;"><button class="danger" data-del="' + esc(m.store) + '|' + esc(m.month) + '">削除</button></td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="sub">まだ登録されていません</div>';
+    document.querySelectorAll('[data-del]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var p = b.dataset.del.split('|');
+        if (!confirm(monthLabel(p[1]) + 'のシフトを削除しますか？\n（削除すると、その月の来店に対してスタッフが選べなくなります）')) return;
+        b.disabled = true;
+        run('adminDeleteShiftMonth', KEY, p[0], p[1]).then(refresh).catch(function (e) { alert(e.message || e); b.disabled = false; });
+      });
+    });
+
+    $('staffInfo').innerHTML = s.staffNoEval.length
+      ? '<div class="warn">StaffMaster にいない(スタッフIDがない)名前が <b>' + s.staffNoEval.length + '名</b> あります。シフト表の氏名と StaffMaster の氏名が違うか、StaffMaster に登録がない人です。この人たちはお客様の画面に出ず、評価シートにも書きません。<br><span class="sub">' + s.staffNoEval.map(esc).join('、') + '</span></div>'
+      : '<div class="sub">全員が StaffMaster とつながっています。</div>';
+    if ((s.staffFullName || []).length) $('staffInfo').innerHTML += '<div class="warn">呼び名がフルネームと同じスタッフが ' + s.staffFullName.length + '名 います。StaffMaster の「呼び名」を名字などに変えてください。<br><span class="sub">' + s.staffFullName.map(esc).join('、') + '</span></div>';
+    $('staffInfo').innerHTML += '<div class="sub" style="margin-top:10px;">在籍中 ' + s.staffTotal + '名' + (s.staffRetired ? '（退職・休職 ' + s.staffRetired + '名は除く）' : '') + '。在籍・退職は StaffMaster のステータスから自動で入ります。呼び名が空の人はお客様の画面に出ません。</div>';
+
+    var vsel = $('vStore'), vcur = vsel.value;
+    vsel.innerHTML = sel.innerHTML;
+    if (vcur) vsel.value = vcur;
+    $('visitTable').innerHTML = (s.visits || []).length ? '<table><thead><tr><th>店舗</th><th>登録済みの期間</th><th>件数</th></tr></thead><tbody>' +
+      s.visits.map(function (v) {
+        var name = (s.stores.find(function (x) { return x.code === v.store; }) || {}).name || v.store;
+        return '<tr><td>' + esc(name) + '</td><td>' + v.from + ' 〜 ' + v.to + '</td><td>' + v.records + '件</td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="sub">まだ登録されていません</div>';
+    $('evalWarn').innerHTML = s.evalSheetSet ? '' : '<div class="warn" style="margin:0 0 12px;">設定シートの「評価シートのID」が未入力です。試算はできますが、評価シートには反映されません。</div>';
+
+    $('urls').innerHTML = s.stores.map(function (st) {
+      return '<div style="margin-bottom:12px;"><b>' + esc(st.name) + '</b><div class="url">' + esc(st.url) + '</div></div>';
+    }).join('');
+  }
+
+  // ---------- シフト表の読み込み（ブラウザ内で解析） ----------
+  $('upFile').addEventListener('change', function () {
+    var f = $('upFile').files[0];
+    PARSED = null; $('upPreview').style.display = 'none'; msg('upMsg', '');
+    if (!f) return;
+    msg('upMsg', '読み込み中…');
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        var wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+        var rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+        var r = parseShiftRows(rows);
+        if (!r.month || !r.records.length) { msg('upMsg', 'シフトが読み取れませんでした。1行目に日付、A列に氏名、セルに「10:00 ~ 18:00」の形式か確認してください。', 'err'); return; }
+        PARSED = { month: r.month, records: r.records, fileName: f.name };
+        showPreview(r);
+        msg('upMsg', '');
+      } catch (err) { msg('upMsg', '読み込みに失敗しました：' + err.message, 'err'); }
+    };
+    reader.readAsArrayBuffer(f);
+  });
+
+  function showPreview(r) {
+    var store = $('upStore').value;
+    var exists = STATUS.months.some(function (m) { return m.store === store && m.month === r.month; });
+    var storeName = $('upStore').selectedOptions[0].textContent;
+    var html = '<b>' + esc(storeName) + '　' + monthLabel(r.month) + '</b><br>' +
+      '勤務のあるスタッフ ' + r.staffWorked + '名（表の全' + r.staffTotal + '名）／ シフト ' + r.records.length + '件 ／ ' + r.dateCount + '日分';
+    if (r.otherMonthCount) html += '<div class="warn">' + monthLabel(r.month) + '以外の日付が ' + r.otherMonthCount + '件ありました。これらは登録されません。</div>';
+    if (r.skipped.length) html += '<div class="warn">読み取れなかったセルが ' + r.skipped.length + '件あります：<br>' + r.skipped.slice(0, 5).map(esc).join('<br>') + (r.skipped.length > 5 ? '<br>…' : '') + '</div>';
+    if (exists) html += '<div class="warn">この月はすでに登録されています。登録すると<b>置き換わります</b>。</div>';
+    html += '<div class="row" style="margin-top:12px;"><button id="upBtn" type="button">この内容で登録する</button></div>';
+    $('upPreview').innerHTML = html;
+    $('upPreview').style.display = 'block';
+    $('upBtn').addEventListener('click', upload);
+  }
+  $('upStore').addEventListener('change', function () { if (PARSED) $('upFile').dispatchEvent(new Event('change')); });
+
+  function upload() {
+    if (!PARSED) return;
+    $('upBtn').disabled = true;
+    msg('upMsg', '登録中…');
+    run('adminUploadShift', KEY, $('upStore').value, PARSED.month, PARSED.fileName, PARSED.records).then(function (res) {
+      var t = monthLabel(res.month) + 'のシフトを ' + res.records + '件 登録しました。';
+      if (res.newStaff.length) t += '\n新しいスタッフ ' + res.newStaff.length + '名をスタッフマスタに追加しました：' + res.newStaff.join('、') + '\n→ お客様に見せる名前・評価シートの氏名・ひとこと・特徴キーワードを入力してください';
+      if ((res.retiredInShift || []).length) t += '\n\n⚠ 退職・休職になっているのにシフトに入っている人：' + res.retiredInShift.join('、') + '\n→ 復帰した場合は、スタッフマスタの「在籍状況」を「在籍」に戻してください（それまでフォームには出ません）';
+      msg('upMsg', t, 'ok');
+      $('upPreview').style.display = 'none';
+      $('upFile').value = '';
+      PARSED = null;
+      return refresh();
+    }).catch(function (e) { msg('upMsg', e.message || String(e), 'err'); $('upBtn').disabled = false; });
+  }
+
+  // ---------- 来店データ ----------
+  var VPARSED = null;
+  $('vFile').addEventListener('change', function () {
+    var f = $('vFile').files[0];
+    VPARSED = null; $('vPreview').style.display = 'none'; msg('vMsg', '');
+    if (!f) return;
+    msg('vMsg', '読み込み中…');
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      var r = parseVisitCsv(decodeCsvBytes(e.target.result));
+      if (r.error) { msg('vMsg', r.error, 'err'); return; }
+      if (!r.records.length) { msg('vMsg', '来店データが読み取れませんでした', 'err'); return; }
+      VPARSED = { records: r.records, fileName: f.name };
+      var html = '<b>' + r.from + ' 〜 ' + r.to + '</b><br>来店 ' + r.records.length + '件 ／ 会員 ' + r.members + '名';
+      if (r.skipped) html += '<div class="warn">会員番号や入店時刻が空欄の行 ' + r.skipped + '件は登録しません。</div>';
+      html += '<div class="row" style="margin-top:12px;"><button id="vBtn" type="button">この内容で登録する</button></div>';
+      $('vPreview').innerHTML = html; $('vPreview').style.display = 'block'; msg('vMsg', '');
+      $('vBtn').addEventListener('click', function () {
+        $('vBtn').disabled = true; msg('vMsg', '登録中…（件数が多いと数十秒かかります）');
+        run('adminUploadVisits', KEY, $('vStore').value, VPARSED.fileName, VPARSED.records).then(function (res) {
+          msg('vMsg', res.from + '〜' + res.to + ' の来店 ' + res.records + '件（会員' + res.members + '名）を登録しました。' +
+            (res.dropped ? '\n' + res.cutoff + 'より前の ' + res.dropped + '件は、アーカイブ済みの期間のため登録していません。' : ''), 'ok');
+          $('vPreview').style.display = 'none'; $('vFile').value = ''; VPARSED = null;
+          return refresh();
+        }).catch(function (err) { msg('vMsg', err.message || String(err), 'err'); $('vBtn').disabled = false; });
+      });
+    };
+    reader.readAsArrayBuffer(f);
+  });
+
+  // ---------- 評価シートの氏名の自動連携 ----------
+  $('autoLinkBtn').addEventListener('click', function () {
+    $('autoLinkBtn').disabled = true; msg('linkMsg', '確認中…');
+    run('adminAutoLinkEval', KEY).then(function (r) {
+      var t = r.error ? r.error : 'StaffMaster ' + r.staffMaster + '名と同期しました(新しく追加 ' + r.added + '名・更新 ' + r.updated + '名・StaffMaster にいない名前のIDを外した ' + r.cleared + '名)';
+      msg('linkMsg', t, r.error ? 'err' : 'ok');
+      $('autoLinkBtn').disabled = false;
+      return refresh();
+    }).catch(function (e) { msg('linkMsg', e.message || String(e), 'err'); $('autoLinkBtn').disabled = false; });
+  });
+
+  // ---------- スコア計算 ----------
+  function calc(write) {
+    if (write && !confirm('評価シートのN列（顧客評価・40点）を上書きします。よろしいですか？\n※StaffMaster と未連携の人・評価日が入っている人の欄は変更しません' +
+      ($('testMode').checked ? '\n\n【確認用モードです】少ない件数で計算した点数が書き込まれます。確認後は、確認用モードを外して反映し直してください' : ''))) return;
+    $('calcBtn').disabled = $('calcWriteBtn').disabled = true;
+    msg('calcMsg', '計算中…');
+    run('adminCalcScores', KEY, write, $('testMode').checked).then(function (r) {
+      var t = (r.testMode ? '【確認用モード：最低母数を無視】\n' : '') + '集計期間：' + r.from + ' 〜 ' + r.to + (r.write ? '\n評価シートに ' + r.written + '名分を反映しました。' : '\n（試算のみ。評価シートは変更していません）');
+      if (r.warnings.length) t += '\n' + r.warnings.join('\n');
+      msg('calcMsg', t, r.write ? 'ok' : '');
+      renderScores(r);
+    }).catch(function (e) { msg('calcMsg', e.message || String(e), 'err'); })
+      .then(function () { $('calcBtn').disabled = $('calcWriteBtn').disabled = false; });
+  }
+  function fmt(v) { return v === null || v === undefined ? '―' : v; }
+  function renderScores(r) {
+    var list = r.results.slice().sort(function (a, b) {
+      if (a.store !== b.store) return a.store < b.store ? -1 : 1;
+      return (b.total === null ? -1 : b.total) - (a.total === null ? -1 : a.total);
+    });
+    $('scoreTable').innerHTML = '<table style="min-width:680px;"><thead><tr><th style="white-space:nowrap;">氏名</th><th>店舗</th><th>名指し</th><th>名指し点</th><th>引き寄せ率</th><th>リピート点</th><th>合計</th><th>備考</th></tr></thead><tbody>' +
+      list.map(function (x) {
+        return '<tr' + (x.linked ? '' : ' style="color:var(--muted);"') + '><td style="white-space:nowrap;"><b>' + esc(x.name) + '</b></td><td>' + esc(x.store) + '</td>' +
+          '<td>' + x.named + '/' + x.den + '件（' + x.rate + '%）</td><td>' + fmt(x.namedScore) + '</td>' +
+          '<td>' + (x.repeatUsed && x.enc ? x.rrate : '―') + '</td><td>' + (x.repeatUsed ? fmt(x.repeatScore) : '―') + '</td>' +
+          '<td style="font-size:17px;"><b>' + fmt(x.total) + '</b></td><td class="sub">' + esc(x.notes.join(' / ')) + '</td></tr>';
+      }).join('') + '</tbody></table>' +
+      (r.unlinked.length ? '<div class="warn">評価シートと未連携：' + r.unlinked.map(esc).join('、') + '</div>' : '');
+  }
+  // ---------- 名前がわからないスタッフの推測 ----------
+  var GUESS = [];
+  $('guessBtn').addEventListener('click', function () {
+    $('guessBtn').disabled = true; msg('guessMsg', '照合中…');
+    run('adminGuessFeatures', KEY).then(function (r) {
+      msg('guessMsg', (r.added ? '新しく ' + r.added + '件 を推測しました。' : '新しい回答はありませんでした。') + '（確定済み ' + r.confirmed + '件）', 'ok');
+      renderGuesses(r.pending);
+    }).catch(function (e) { msg('guessMsg', e.message || String(e), 'err'); })
+      .then(function () { $('guessBtn').disabled = false; });
+  });
+  function confClass(c) { return c === '高' ? 'c-high' : (c === '中' || c === '低') ? 'c-mid' : 'c-none'; }
+  function renderGuesses(list) {
+    GUESS = list;
+    var high = list.filter(function (g) { return g.confidence === '高' && g.best; }).length;
+    $('approveHighBtn').style.display = high ? 'inline-block' : 'none';
+    $('approveHighBtn').textContent = '確度「高」の ' + high + '件 をまとめて承認';
+    if (!list.length) { $('guessList').innerHTML = '<div class="sub">確認待ちはありません</div>'; return; }
+    $('guessList').innerHTML = '<div class="sub">確認待ち ' + list.length + '件。正しいスタッフを選んで「確定」してください。</div>' +
+      list.map(function (g, i) {
+        var guess = g.best
+          ? '<span class="conf ' + confClass(g.confidence) + '">確度 ' + esc(g.confidence) + '</span>推測：<b>' + esc(g.best) + '</b>' + (g.matched ? '（一致：' + esc(g.matched) + '）' : '')
+          : '<span class="conf c-none">' + (g.confidence === '同点' ? '候補が複数' : '推測できず') + '</span>' + (g.matched ? '一致：' + esc(g.matched) : '特徴キーワードに当てはまる人がいません');
+        return '<div class="gitem" data-i="' + i + '"><div class="feat">「' + esc(g.feature) + '」</div>' +
+          '<div class="meta">' + esc(g.date) + ' ' + esc(g.time) + ' 入店' + (g.comment ? '　／　良かったところ：' + esc(g.comment) : '') + '</div>' +
+          '<div class="guess">' + guess + '</div>' +
+          '<div class="picks">' + g.candidates.map(function (c) {
+            return '<button type="button" class="pick' + (c.name === g.best ? ' on' : '') + '" data-name="' + esc(c.name) + '">' + esc(c.label) + '</button>';
+          }).join('') + '<button type="button" class="pick none" data-name="">該当なし</button></div>' +
+          '<div class="row" style="margin-top:8px;"><button type="button" class="ghost okBtn" style="padding:7px 14px;">確定</button></div></div>';
+      }).join('');
+    document.querySelectorAll('.gitem').forEach(function (el) {
+      var g = GUESS[Number(el.dataset.i)];
+      var sel = g.best || null;
+      el.querySelectorAll('.pick').forEach(function (b) {
+        b.addEventListener('click', function () {
+          sel = b.dataset.name;
+          el.querySelectorAll('.pick').forEach(function (x) { x.classList.toggle('on', x === b); });
+        });
+      });
+      el.querySelector('.okBtn').addEventListener('click', function () {
+        if (sel === null) { alert('スタッフか「該当なし」を選んでください'); return; }
+        resolve([{ id: g.id, staff: sel }]);
+      });
+    });
+  }
+  function resolve(decisions) {
+    msg('guessMsg', '保存中…');
+    run('adminResolveGuesses', KEY, decisions).then(function (r) {
+      msg('guessMsg', decisions.length + '件 を確定しました。（確定済み ' + r.confirmed + '件）', 'ok');
+      renderGuesses(r.pending);
+    }).catch(function (e) { msg('guessMsg', e.message || String(e), 'err'); });
+  }
+  $('approveHighBtn').addEventListener('click', function () {
+    var ds = GUESS.filter(function (g) { return g.confidence === '高' && g.best; }).map(function (g) { return { id: g.id, staff: g.best }; });
+    if (!ds.length || !confirm(ds.length + '件 を推測どおりに確定します。よろしいですか？')) return;
+    resolve(ds);
+  });
+
+  // ---------- 連携チェック ----------
+  $('linkBtn').addEventListener('click', function () {
+    $('linkBtn').disabled = true;
+    $('linkResult').innerHTML = '<div class="sub">確認中…</div>';
+    run('adminCheckLink', KEY).then(function (c) {
+      var html = '';
+      if (!c.evalOk) html += '<div class="warn" style="margin:0 0 12px;">' + esc(c.evalError) + '</div>';
+      else {
+        var ok = c.people.filter(function (p) { return p.status === 'OK'; }).length;
+        html += '<div class="sub" style="margin-bottom:6px;">評価シート「' + esc(c.settings.sheetName) + '」の ' + c.settings.startRow + '行目から、' +
+          esc(c.settings.nameCol) + '列（氏名）・' + esc(c.settings.storeCol) + '列（店舗）を読み、' + esc(c.settings.writeCol) + '列に書き込みます。<br>' +
+          '見つかった人：<b>' + c.people.length + '名</b>（連携OK ' + ok + '名）</div>';
+        html += '<div style="overflow-x:auto;"><table style="min-width:560px;"><thead><tr><th>行</th><th>評価シートの氏名</th><th>店舗欄</th><th>連携しているシフト表の氏名</th><th>状態</th></tr></thead><tbody>' +
+          c.people.map(function (p) {
+            var bad = p.status.indexOf('OK') !== 0;
+            return '<tr><td>' + p.row + '</td><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.store) + '</td><td>' + esc(p.linked.join('、') || '―') + '</td>' +
+              '<td style="color:' + (bad ? 'var(--err)' : 'var(--ok)') + ';font-weight:700;">' + esc(p.status) + '</td></tr>';
+          }).join('') + '</tbody></table></div>';
+        if (c.orphans.length) html += '<div class="warn">スタッフマスタで「評価シートの氏名」が入っているのに、評価シートに見つからない人：<br>' +
+          c.orphans.map(function (o) { return esc(o.evalName) + '（' + esc(o.shiftNames.join('、')) + '）'; }).join('、') + '<br><span class="sub">表記の違い（旧字・スペースなど）か、評価シートにまだ行がない可能性があります。</span></div>';
+        html += '<div class="sub" style="margin-top:8px;">スタッフマスタで評価シートと未連携：' + c.unlinked.length + '名。' +
+          '最低母数：名指し ' + c.settings.minNamed + '件 ／ リピート ' + c.settings.minRepeat + '件（これ未満の人は、連携OKでもN列が空欄になります）</div>';
+      }
+      $('linkResult').innerHTML = html;
+    }).catch(function (e) { $('linkResult').innerHTML = '<div class="msg err">' + esc(e.message || e) + '</div>'; })
+      .then(function () { $('linkBtn').disabled = false; });
+  });
+
+  // ---------- 来店データのアーカイブ ----------
+  $('archiveBtn').addEventListener('click', function () {
+    if (!confirm('古い来店データを別ファイル（アーカイブ）へ移します。よろしいですか？\n（リピート計算に必要な回数は残るので、スコアは変わりません）')) return;
+    $('archiveBtn').disabled = true; msg('archiveMsg', '移動中…');
+    run('adminArchiveVisits', KEY).then(function (r) {
+      msg('archiveMsg', r.message, 'ok');
+      return refresh();
+    }).catch(function (e) { msg('archiveMsg', e.message || String(e), 'err'); })
+      .then(function () { $('archiveBtn').disabled = false; });
+  });
+
+  $('calcBtn').addEventListener('click', function () { calc(false); });
+  $('calcWriteBtn').addEventListener('click', function () { calc(true); });
+
+  $('cacheBtn').addEventListener('click', function () {
+    run('adminClearCache', KEY).then(function () { msg('cacheMsg', '反映しました。フォームを開き直すと新しい質問が表示されます。', 'ok'); })
+      .catch(function (e) { msg('cacheMsg', e.message || String(e), 'err'); });
+  });
+})();
+</script>
+</body>
+</html>

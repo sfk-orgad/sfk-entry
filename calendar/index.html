@@ -3,57 +3,111 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>シフトカレンダー</title>
+<title>シフト作成(タイムライン)</title>
 <!--
-  シフトカレンダー(スタッフ用)：GitHub Pages の calendar/index.html。ポータルと同じサイト
-  ・自分の確定シフトを、2店舗まとめて1つの月カレンダーで見る(店舗ごとに色分け)
-  ・日を押すと、その日に誰がどの店舗に入っているかが見える(グレードは出さない)
-  ・管理者がシフト作成で「公開」した店舗・月だけが出る
-  通行証とデータの入口(BotのGASのURL)は、ポータルがブラウザの中に置いたものを使う。秘密は置かない
+  シフト作成ツール(管理者用・PC向け)：段階1 タイムライン(GitHub Pages の shiftboard/index.html。ポータルと同じサイト)
+  開き方：ポータルのカードから。通行証とデータの入口(BotのGASのURL)は、ポータルがブラウザの中に置いたものを使う。秘密は置かない
+  ・店舗×日ごとに、縦にスタッフ・横に時刻(シフト設定の「タイムラインの刻み(分)」)で、希望の時間帯を黄色で塗る
+  ・下に人数とグレード集計(最低人数を下回る時間は赤)。上に日ごとの帯(希望人数・不足のある日に印)
+  ・「スプシに書き出す」で、シフト希望ファイルに「タイムライン_店舗_年月」シートを作る
 -->
 <style>
-  :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; --sat: #1D5BB8; }
+  :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; --req: #FFE94D; --sat: #1D5BB8; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 16px; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 14px; }
   #gate { min-height: 70vh; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; }
   .gspin { width: 40px; height: 40px; margin: 0 auto 16px; border: 5px solid var(--soft); border-top-color: var(--c); border-radius: 50%; animation: spin .9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .gbtn { display: inline-block; padding: 12px 20px; border-radius: 10px; background: var(--c); color: #fff; text-decoration: none; font-weight: 700; }
   #app { display: none; }
-  header { background: var(--c); color: #fff; padding: 10px 16px 14px; }
-  .topbar { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+  header { background: var(--c); color: #fff; padding: 10px 20px 12px; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
   .topbar a { color: #fff; text-decoration: none; opacity: .9; }
-  header h1 { margin: 6px 0 0; font-size: 21px; }
-  .wrap { max-width: 720px; margin: 0 auto; padding: 12px 10px 40px; }
-  .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; }
-  .next { font-size: 15px; }
-  .next b { font-size: 17px; }
-  .monthbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-  .monthbar select { font-size: 16px; padding: 8px 10px; border: 1px solid #B9C0C8; border-radius: 10px; background: #fff; font-family: inherit; }
-  .legend { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 10px; }
-  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; margin-right: 3px; }
-  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
-  .wk { text-align: center; font-size: 12px; color: var(--muted); padding: 4px 0; }
-  .wk.sun { color: var(--err); } .wk.sat { color: var(--sat); }
-  .day { background: #fff; border: 1px solid var(--line); border-radius: 8px; min-height: 64px; padding: 3px; cursor: pointer; overflow: hidden; }
-  .day.empty { background: transparent; border: none; cursor: default; }
-  .day.on { border: 2px solid var(--c); }
-  .day .n { font-size: 13px; font-weight: 700; }
-  .day.sun .n, .day.hol .n { color: var(--err); } .day.sat .n { color: var(--sat); }
-  .day.today { background: #FFFBE6; }
-  .chip { display: block; font-size: 10px; line-height: 1.25; color: #fff; border-radius: 4px; padding: 1px 3px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .detail h2 { margin: 0 0 8px; font-size: 17px; }
-  .st { margin-top: 8px; }
-  .st .sn { font-weight: 700; font-size: 14px; margin-bottom: 2px; }
-  .who { font-size: 14px; padding: 3px 0; border-bottom: 1px solid #EEF1F4; display: flex; justify-content: space-between; }
-  .who.me { font-weight: 700; }
-  .muted { color: var(--muted); font-size: 13px; }
-  .gcal { font-size: 12px; margin-left: 6px; color: #1A73E8; text-decoration: none; border: 1px solid #C6DAFC; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
-  .sync h3 { margin: 0 0 6px; font-size: 15px; }
-  .sync .btn { display: inline-block; font-size: 14px; padding: 8px 12px; border: 1px solid #B9C0C8; border-radius: 10px; background: #fff; cursor: pointer; font-family: inherit; color: var(--ink); text-decoration: none; margin: 4px 6px 0 0; }
-  .sync .btn.solid { background: var(--c); color: #fff; border-color: var(--c); }
-  .url { font-size: 12px; word-break: break-all; background: #F5F6F8; border-radius: 8px; padding: 8px; margin-top: 8px; user-select: all; }
-  #ver { font-size: 11px; color: #9AA3AD; text-align: center; margin-top: 12px; }
+  header h1 { margin: 4px 0 0; font-size: 20px; }
+  .wrap { padding: 12px 20px 40px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+  select, .btn { font-size: 14px; padding: 7px 10px; border: 1px solid #B9C0C8; border-radius: 8px; background: #fff; font-family: inherit; color: var(--ink); }
+  .btn { cursor: pointer; }
+  .btn.solid { background: var(--c); color: #fff; border-color: var(--c); font-weight: 700; }
+  .tab { padding: 7px 14px; border: 1px solid #B9C0C8; border-radius: 999px; background: #fff; cursor: pointer; font-family: inherit; font-size: 14px; }
+  .tab.on { background: var(--c); color: #fff; border-color: var(--c); font-weight: 700; }
+  /* 画面の切り替え(日ごと・月の一覧とチェック・AI相談・募集文) */
+  .vtabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; border-bottom: 2px solid var(--soft); padding-bottom: 8px; }
+  .vtab { padding: 8px 16px; border: 1px solid #B9C0C8; border-radius: 10px 10px 0 0; background: #fff; cursor: pointer; font-family: inherit; font-size: 15px; }
+  .vtab.on { background: var(--c); color: #fff; border-color: var(--c); font-weight: 700; }
+  .vtab .badge { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: var(--err); color: #fff; font-size: 12px; }
+  .mt { border-collapse: collapse; font-size: 13px; }
+  .mt th, .mt td { border: 1px solid var(--line); padding: 3px 4px; text-align: center; white-space: nowrap; }
+  .mt th { background: var(--soft); position: sticky; top: 0; }
+  .mt td.nm { text-align: left; font-weight: 700; position: sticky; left: 0; background: #fff; }
+  .mt td.off { color: #B0B6BD; }
+  .mt td.bad { background: #FDECEA; }
+  .mt td.sum { background: #F7F9FA; font-weight: 700; }
+  .mt .sat { color: var(--sat); } .mt .sun { color: var(--err); }
+  .warnlist { margin: 10px 0; padding: 0; list-style: none; }
+  .warnlist li { padding: 6px 10px; border-left: 4px solid var(--err); background: #FFF6F5; margin-bottom: 6px; font-size: 14px; }
+  .warnlist li.ok { border-color: #1F7A3D; background: #EFF8F1; }
+  textarea.big { width: 100%; min-height: 220px; font-size: 13px; font-family: ui-monospace, Menlo, monospace; border: 1px solid #B9C0C8; border-radius: 8px; padding: 8px; }
+  .muted { color: var(--muted); font-size: 12px; }
+  /* 日の帯 */
+  .strip { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 10px; }
+  .dcell { flex: 0 0 auto; width: 44px; border: 1px solid var(--line); border-radius: 8px; background: #fff; text-align: center; padding: 4px 0; cursor: pointer; font-size: 12px; }
+  .dcell .n { font-size: 15px; font-weight: 700; }
+  .dcell.sun { color: var(--err); } .dcell.sat { color: var(--sat); }
+  .dcell.on { border: 2px solid var(--c); background: var(--soft); }
+  .dcell.short { box-shadow: inset 0 -4px 0 #F28B82; }
+  .dayhead { display: flex; align-items: center; gap: 10px; margin: 6px 0 8px; }
+  .dayhead h2 { margin: 0; font-size: 18px; }
+  /* タイムライン */
+  .grid-wrap { overflow-x: auto; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  table.tl { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+  .tl th, .tl td { border-bottom: 1px solid #EEF1F4; white-space: nowrap; }
+  .tl .fix { position: sticky; background: #fff; z-index: 2; padding: 4px 8px; }
+  .tl .c0 { left: 0; min-width: 96px; font-weight: 700; }
+  .tl .c1 { left: 96px; min-width: 52px; color: var(--muted); }
+  .tl .c2 { left: 148px; min-width: 150px; color: var(--muted); border-right: 2px solid var(--line); }
+  .tl th.hr { text-align: left; padding: 3px 0 3px 2px; border-left: 1px solid var(--line); color: var(--muted); font-weight: 400; }
+  .tl td.s { width: 14px; min-width: 14px; height: 24px; padding: 0; }
+  .tl td.s.hb { border-left: 1px solid var(--line); }
+  .tl td.s.on { background: #FFF6B3; }
+  .tl td.s.cf { background: #2F6FBF; }
+  .tl td.s.cf.out { background: #E07A1F; }
+  .tl td.s.sel { background: #9CC2F0 !important; }
+  .tl tbody tr.staff td.s { cursor: pointer; }
+  .grid-wrap { user-select: none; -webkit-user-select: none; }
+  .bar2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 8px; }
+  #saveState { font-size: 13px; padding: 4px 10px; border-radius: 999px; background: #E9EFEC; }
+  #saveState.dirty { background: #FFF1D6; color: #8A5A00; }
+  #saveState.err { background: #FDECEA; color: var(--err); }
+  .warn { font-size: 11px; color: #B4581F; }
+  #editor { display: none; position: fixed; z-index: 70; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.15); padding: 12px 14px; }
+  #editor .row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+  .panel { background: #fff; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; overflow-x: auto; }
+  .panel h3 { margin: 0; padding: 10px 14px; font-size: 15px; border-bottom: 1px solid var(--line); }
+  table.pn { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .pn td, .pn th { padding: 6px 10px; border-bottom: 1px solid #EEF1F4; vertical-align: top; text-align: left; }
+  .pn th { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .pn .nm { font-weight: 700; white-space: nowrap; }
+  .pn .rq { color: var(--muted); min-width: 220px; }
+  .ln { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0; }
+  .ln select { font-size: 13px; padding: 4px 6px; }
+  .ln.req { color: var(--muted); }
+  .ln.bad select { border-color: var(--err); background: #FDECEA; }
+  .ln .tag2 { font-size: 11px; border-radius: 999px; padding: 1px 8px; }
+  .t-out { background: #FCE9D9; color: #B4581F; }
+  .t-no { background: #EEF1F4; color: var(--muted); }
+  .t-bad { background: #FDECEA; color: var(--err); }
+  .mini2 { font-size: 12px; padding: 3px 8px; border: 1px solid #B9C0C8; border-radius: 6px; background: #fff; cursor: pointer; }
+  .legend span { display: inline-block; width: 14px; height: 12px; vertical-align: middle; margin: 0 4px 0 10px; border-radius: 2px; }
+  .tl tr.sum td { background: #F5F6F8; font-weight: 700; }
+  .tl tr.sum td.s { text-align: center; font-size: 10px; color: var(--muted); }
+  .tl tr.sum td.s.low { background: #F8B4B4; color: var(--err); }
+  .tl tr.none td { color: var(--muted); }
+  .other { font-size: 11px; color: var(--sat); }
+  .side { margin-top: 12px; display: flex; gap: 16px; flex-wrap: wrap; }
+  .box { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; min-width: 260px; }
+  .box h3 { margin: 0 0 6px; font-size: 14px; }
+  #msg { margin-left: 8px; }
 </style>
 </head>
 <body>
@@ -61,65 +115,93 @@
   <div class="gspin" id="gspin"></div><div id="gmsg" style="font-size:18px;line-height:1.7;white-space:pre-wrap;">準備しています…</div>
   <div id="gact" style="margin-top:18px;"></div>
   <div id="gdetail" style="font-size:12px;color:#5F6670;margin-top:14px;word-break:break-all;text-align:left;"></div>
+  <div id="gver" style="font-size:11px;color:#9AA3AD;margin-top:16px;"></div>
 </div></div>
 
 <div id="app">
   <header>
     <div class="topbar"><a href="../">‹ ポータル</a><span id="me"></span></div>
-    <h1>シフトカレンダー</h1>
+    <h1>シフト作成(タイムライン)</h1>
   </header>
   <div class="wrap">
-    <div class="card next" id="next"></div>
-    <div class="monthbar"><select id="month"></select><div class="legend" id="legend"></div></div>
-    <div class="cal" id="cal"></div>
-    <div class="card detail" id="detail" style="margin-top:12px;"></div>
-    <div class="muted" id="note"></div>
-    <div class="card sync" id="sync" style="margin-top:12px;">
-      <h3>Googleカレンダーなどに自動で入るようにする</h3>
-      <div class="muted">自分専用のURLを登録すると、公開された自分のシフトが自動で入り、変更も反映されます(反映はカレンダー側の都合で数時間〜1日ほどかかります)。<br>1件ずつ入れたいときは、日を押して「Googleカレンダーに追加」を押してください。</div>
-      <button class="btn solid" id="icsShow">自分専用のURLを表示</button>
-      <div id="icsBox" style="display:none;">
-        <div class="url" id="icsUrl"></div>
-        <div id="icsPc">
-          <a class="btn solid" id="icsGoogle" target="_blank" rel="noopener">Googleカレンダーに登録</a>
-          <div class="muted" style="margin-top:6px;">うまくいかないとき：Googleカレンダーの左の「他のカレンダー」の＋ →「URLで追加」に、上のURLを貼る。</div>
-        </div>
-        <div id="icsIos">
-          <a class="btn solid" id="icsApple">iPhoneのカレンダーに登録</a>
-          <div class="muted" style="margin-top:6px;">iPhoneの標準のカレンダーに入ります。うまくいかないとき：「設定 → カレンダー → アカウント → アカウントを追加 → その他 → 照会するカレンダーを追加」に、上のURLを貼る。</div>
-        </div>
-        <div id="icsGoogleHow">
-          <div class="muted" style="margin-top:8px;">Googleカレンダーへの登録は、PCで行ってください(スマホのGoogleカレンダーはURLでの登録ができません)。PCのGoogleカレンダーの「他のカレンダー」の＋ →「URLで追加」に上のURLを貼ると、スマホのアプリにも出ます。</div>
-        </div>
-        <button class="btn" id="icsCopy">URLをコピー</button>
-        <button class="btn" id="icsReset">URLを作り直す</button>
-        <div class="muted" style="margin-top:6px;">このURLを知っている人は、あなたの公開されたシフトを見られます。人に教えないでください。知られたときは「URLを作り直す」(前のURLは使えなくなります)。</div>
-        <div class="muted" id="icsMsg"></div>
-      </div>
+    <div class="tools">
+      <select id="month"></select>
+      <span id="tabs"></span>
+      <label class="muted" id="otherWrap"><input type="checkbox" id="showOther"> 他店舗も表示</label>
+      <label class="muted"><input type="checkbox" id="showAll"> 希望のない人も表示</label>
+      <button class="btn" id="export">タイムラインを書き出す</button>
+      <button class="btn" id="kinmu">勤務表を書き出す(スマレジの形)</button>
+      <button class="btn solid" id="pub"></button>
+      <span id="pubState" class="muted"></span>
+      <span id="dlState" class="muted"></span> <button class="btn" id="dlBtn">締め切りを変える</button>
+      <span id="msg" class="muted"></span>
     </div>
-    <div id="ver"></div>
+ <div class="vtabs" id="vtabs">
+      <button class="vtab on" data-v="vDay">日ごと(タイムライン)</button>
+      <button class="vtab" data-v="vMonth">月の一覧とチェック<span class="badge" id="chkBadge" hidden></span></button>
+      <button class="vtab" data-v="vAi">AI相談</button>
+      <button class="vtab" data-v="vRec">募集文</button>
+    </div>
+    <div id="roNote" style="display:none;background:#FFF8E6;border:1px solid #F2D58A;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:14px;">過去の月(アーカイブ済み)です。<b>見るだけ</b>で、編集・公開はできません。勤務表・タイムラインの書き出しはできます。</div>
+    <div id="vMonth" hidden></div>
+    <div id="vAi" hidden></div>
+    <div id="vRec" hidden></div>
+    <div id="vDay">
+    <div class="strip" id="strip"></div>
+    <div class="bar2">
+      <button class="btn" id="fillAll">全員を希望どおりに確定</button>
+      <button class="btn" id="clearDay">この日の確定を消す</button>
+      <span id="saveState">保存済み</span>
+      <button class="btn" id="saveDay" style="display:none">もう一度保存</button>
+      <span class="muted">変更は2秒後に自動で保存されます</span>
+      <span class="muted legend"><span style="background:#FFF6B3;border:1px solid #E5D97A"></span>希望<span style="background:#2F6FBF"></span>確定<span style="background:#E07A1F"></span>確定(希望の外)</span>
+    </div>
+    <div class="dayhead">
+      <button class="btn" id="prev">‹ 前の日</button>
+      <h2 id="dayTitle"></h2>
+      <button class="btn" id="next">次の日 ›</button>
+      <span class="muted" id="slotInfo"></span>
+    </div>
+    <div class="panel"><h3>この日の調整(希望を採用するものにチェック → 時間・店舗を選び直す)</h3><div id="panelBody"></div></div>
+    <div class="grid-wrap"><table class="tl" id="grid"></table></div>
+    <div class="side">
+      <div class="box"><h3>この店舗の未提出(この月)</h3><div id="unsub" class="muted"></div></div>
+      <div class="box"><h3>見方</h3><div class="muted">薄い黄色＝希望、青＝確定、オレンジ＝希望の外に置いた確定。<br>行の上をドラッグ＝その時間を確定／希望をクリック＝希望どおりに確定／確定をクリック＝時刻の変更・削除。<br>変更は2秒後に自動で保存(「この日を保存」ですぐ保存)。<br>下の行：必要人数・確定人数(必要人数に届かない時間は赤)・希望人数(参考)・グレード集計(確定で数える)。上の帯：確定人数/希望人数。下線が赤い日は確定に不足がある日。</div></div>
+    </div>
+    </div>
+    <div class="muted" id="ver" style="margin-top:10px;"></div>
   </div>
 </div>
 
+<div id="editor">
+  <div style="font-weight:700;" id="edTitle"></div>
+  <div class="row"><select id="edStart"></select>〜<select id="edEnd"></select></div>
+  <div class="row"><button class="btn solid" id="edOk">変更</button><button class="btn" id="edDel">削除</button><button class="btn" id="edClose">閉じる</button></div>
+  <div class="muted" id="edMsg" style="margin-top:6px;"></div>
+</div>
 <script>
-var PAGE_VERSION = '2026-11-05a';
+var PAGE_VERSION = '2026-11-16b';
 var PORTAL_URL = '../';
 var T0 = Date.now();
-var COLORS = ['#1F7A6B', '#7A4FB5', '#C2571A', '#2F6FBF', '#A23B72', '#4D7A1F']; // 店舗ごとの色(店舗シートの順)
-var W = '日月火水木金土';
 function g(id) { return document.getElementById(id); }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-function gate(msg, link) { g('gspin').style.display = 'none'; g('gmsg').textContent = msg; if (link) g('gact').innerHTML = '<a class="gbtn" href="' + PORTAL_URL + '">ポータルに戻る</a>'; }
-function hmShort(t) { return String(t).replace(/^0/, ''); }
+function gate(msg, link) {
+  g('gspin').style.display = 'none'; g('gmsg').textContent = msg;
+  if (link) g('gact').innerHTML = '<a class="gbtn" href="' + PORTAL_URL + '">ポータルに戻る</a>';
+}
+g('gver').textContent = 'ver ' + PAGE_VERSION;
 
 var S = null;
 try { S = JSON.parse(sessionStorage.getItem('portal_session') || 'null'); } catch (e) { S = null; }
-var API = S && S.apis ? S.apis.calendar : '';
+var API = S && S.apis ? S.apis.shiftboard : '';
+
 function api(action, extra) {
   var body = JSON.stringify(Object.assign({ app: 'shift', action: action, token: S.token }, extra || {}));
   function once() {
+    var status = 0;
     return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
-      .then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); });
+      .then(function (r) { status = r.status; return r.text(); })
+      .then(function (t) { try { return JSON.parse(t); } catch (e) { var er = new Error('正しい返事ではありませんでした(' + status + ')'); throw er; } });
   }
   return once().catch(function () { return new Promise(function (ok) { setTimeout(ok, 800); }).then(once); });
 }
@@ -141,157 +223,748 @@ api = (function (orig, tool) {
     return orig.apply(this, arguments).then(function (r) { add(action, Date.now() - t0, r && r.ok !== false ? 'OK' : String(r && r.error || 'NG')); return r; },
       function (e) { add(action, Date.now() - t0, '通信失敗'); throw e; });
   };
-})(api, 'calendar');
+})(api, 'shiftboard');
 
 
-var C = null, DAY = 0, HOW = '取得';
-function colorOf(code) { var i = C.stores.map(function (s) { return s.code; }).indexOf(code); return COLORS[(i < 0 ? 0 : i) % COLORS.length]; }
-function storeName(code) { var s = C.stores.filter(function (x) { return x.code === code; })[0]; return s ? s.name : code; }
+// ===== 状態 =====
+var B = null;          // board.get の返事
+var STORE = '';        // 表示中の店舗
+var DAY = 1;           // 表示中の日
+var W = '日月火水木金土';
+// 確定シフト(画面で組んでいる中身)：CONF['店舗:日'] = [[uid, 開始, 終了], …] ／ VER = 読み込んだときの版 ／ DIRTY = 未保存の日
+var CONF = {}, VER = {}, DIRTY = {}, SAVING = false, saveTimer = null;
+function hm(t) { return ('0' + Math.floor(t / 60)).slice(-2) + ':' + ('0' + (t % 60)).slice(-2); }
+function mins(s) { var p = String(s).split(':'); return Number(p[0]) * 60 + Number(p[1]); }
+function storeOf(code) { return B.stores.filter(function (s) { return s.code === code; })[0]; }
+function myStores() { return (B.myStores && B.myStores.length) ? B.myStores : B.stores.map(function (s) { return s.code; }); }
+function visibleStores() { return g('showOther').checked ? B.stores : B.stores.filter(function (s) { return myStores().indexOf(s.code) !== -1; }); }
+function isVisible(code) { return visibleStores().some(function (s) { return s.code === code; }); }
+function cols() { var st = storeOf(STORE), out = []; for (var t = st.start; t < st.end; t += B.slot) out.push(t); return out; }
+function reqOf(day, store) { return B.req.filter(function (r) { return r[0] === day && (!store || r[1] === store); }); }
+function covered(rs, t) { return rs.some(function (r) { return mins(r[2]) <= t && t < mins(r[3]); }); }
+function key(store, day) { return store + ':' + day; }
+function confOf(store, day) { return CONF[key(store, day)] || []; }
+function confCovers(list, uid, t) { return list.some(function (c) { return c[0] === uid && mins(c[1]) <= t && t < mins(c[2]); }); }
 
-function show(cal) {
-  C = cal;
-  g('gate').style.display = 'none'; g('app').style.display = 'block';
-  g('me').textContent = C.name ? C.name + ' さん' : '';
-  if (!show.done) { show.done = true; g('ver').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + ((Date.now() - T0) / 1000).toFixed(1) + '秒(' + HOW + ')'; }
-  if (!C.months.length) {
-    g('next').innerHTML = 'まだ公開されたシフトはありません。<br><span class="muted">管理者がシフトを公開すると、ここに出ます。</span>';
-    g('cal').innerHTML = ''; g('detail').style.display = 'none'; g('month').style.display = 'none';
-    return;
-  }
-  var nowYm = new Date().getFullYear() + '-' + ('0' + (new Date().getMonth() + 1)).slice(-2);
-  g('month').innerHTML = C.months.slice().reverse().map(function (m) { return '<option value="' + m + '"' + (m === C.month ? ' selected' : '') + '>' + m.replace('-', '年').replace(/年0?/, '年') + '月' + (m < nowYm ? '(過去)' : '') + '</option>'; }).join('');
-  g('legend').innerHTML = C.stores.map(function (s) { return '<span><i style="background:' + colorOf(s.code) + '"></i>' + esc(s.name) + (s.open ? '' : '(未公開)') + '</span>'; }).join('');
-  var now = new Date(), todayKey = now.getFullYear() + '-' + ('0' + (now.getMonth() + 1)).slice(-2);
-  if (!DAY) DAY = (C.month === todayKey) ? now.getDate() : 1;
-  renderNext(); renderCal(); renderDetail();
-  var closed = C.stores.filter(function (s) { return !s.open; }).map(function (s) { return s.name; });
-  g('note').textContent = closed.length ? closed.join('・') + 'は、この月はまだ公開されていません。' : '';
+function initConf() {
+  CONF = {}; VER = {}; DIRTY = {};
+  // Botが古い版(確定シフトを返さない)ときや、更新前に先読みしたデータでも止まらないように
+  B.conf = B.conf || []; B.ver = B.ver || {}; B.needs = B.needs || {}; B.criteria = B.criteria || [];
+  B.conf.forEach(function (c) { (CONF[key(c[1], c[0])] = CONF[key(c[1], c[0])] || []).push([c[4], c[2], c[3]]); });
+  Object.keys(B.ver || {}).forEach(function (st) { Object.keys(B.ver[st]).forEach(function (d) { VER[key(st, d)] = B.ver[st][d]; }); });
 }
 
-// 今日以降の、次の自分のシフト
-function renderNext() {
-  var now = new Date();
-  var ym = C.month.split('-').map(Number);
-  var upcoming = C.mine.filter(function (x) {
-    var d = new Date(ym[0], ym[1] - 1, x[0]);
-    return d >= new Date(now.getFullYear(), now.getMonth(), now.getDate());
+// その日の集計：希望人数・確定人数・必要人数・グレード集計(確定で数える)
+function sums(day) {
+  var cs = cols(), rs = reqOf(day, STORE), cf = confOf(STORE, day);
+  var reqU = [], cfU = [];
+  rs.forEach(function (r) { if (reqU.indexOf(r[4]) === -1) reqU.push(r[4]); });
+  cf.forEach(function (c) { if (cfU.indexOf(c[0]) === -1) cfU.push(c[0]); });
+  var reqCount = cs.map(function (t) { return reqU.filter(function (u) { return covered(rs.filter(function (r) { return r[4] === u; }), t); }).length; });
+  var count = cs.map(function (t) { return cfU.filter(function (u) { return confCovers(cf, u, t); }).length; });
+  var crit = (B.criteria || []).map(function (c) {
+    return { c: c, n: cs.map(function (t) { return cfU.filter(function (u) { var p = B.staff[u] || {}; return c.grades.indexOf(String(p.grade)) !== -1 && confCovers(cf, u, t); }).length; }) };
   });
-  if (!upcoming.length) { g('next').innerHTML = C.label + 'の、これからの自分のシフトはありません。'; return; }
-  var f = upcoming[0], w = new Date(ym[0], ym[1] - 1, f[0]).getDay();
-  var same = upcoming.filter(function (x) { return x[0] === f[0]; });
-  g('next').innerHTML = '次のシフト：<b>' + ym[1] + '/' + f[0] + '(' + W.charAt(w) + ')</b> ' +
-    same.map(function (x) { return '<span style="color:' + colorOf(x[1]) + ';font-weight:700;">' + esc(storeName(x[1])) + '</span> ' + hmShort(x[2]) + '〜' + hmShort(x[3]); }).join('、') +
-    '<div class="muted">' + C.label + 'の自分のシフト：' + uniqDays(C.mine) + '日</div>';
+  var nd = ((B.needs || {})[STORE] || {})[day] || null;
+  var need = cs.map(function (t) { return nd ? nd.ranges.filter(function (x) { return x[0] <= t && t < x[1]; }).reduce(function (a, x) { return Math.max(a, x[2]); }, 0) : 0; });
+  var short = crit.some(function (x) { return x.c.min && x.n.some(function (n) { return n < x.c.min; }); }) || count.some(function (n, i) { return n < need[i]; });
+  return { cols: cs, reqU: reqU, cfU: cfU, reqCount: reqCount, count: count, crit: crit, need: need, pattern: nd ? nd.pattern : '', short: short };
 }
-function uniqDays(list) { var u = {}; list.forEach(function (x) { u[x[0]] = 1; }); return Object.keys(u).length; }
-
-function renderCal() {
-  var ym = C.month.split('-').map(Number), now = new Date();
-  var first = new Date(ym[0], ym[1] - 1, 1).getDay();
-  var h = W.split('').map(function (w, i) { return '<div class="wk' + (i === 0 ? ' sun' : (i === 6 ? ' sat' : '')) + '">' + w + '</div>'; }).join('');
-  for (var i = 0; i < first; i++) h += '<div class="day empty"></div>';
-  C.days.forEach(function (x) {
-    var mine = C.mine.filter(function (m) { return m[0] === x.d; });
-    var isToday = now.getFullYear() === ym[0] && now.getMonth() + 1 === ym[1] && now.getDate() === x.d;
-    h += '<div class="day' + (x.w === 0 ? ' sun' : (x.w === 6 ? ' sat' : '')) + (x.hol ? ' hol' : '') + (isToday ? ' today' : '') + (x.d === DAY ? ' on' : '') + '" data-d="' + x.d + '">' +
-      '<div class="n">' + x.d + '</div>' +
-      mine.map(function (m) { return '<span class="chip" style="background:' + colorOf(m[1]) + '">' + hmShort(m[2]) + '-' + hmShort(m[3]) + '</span>'; }).join('') + '</div>';
-  });
-  g('cal').innerHTML = h;
-}
-
-// その日の、店舗ごとの全員の確定(自分の行は太字)
-function renderDetail() {
-  var x = C.days[DAY - 1]; if (!x) return;
-  var ym = C.month.split('-').map(Number);
-  g('detail').style.display = 'block';
-  var h = '<h2>' + ym[1] + '/' + x.d + '(' + W.charAt(x.w) + ')' + (x.hol ? ' <span style="color:#B42318;font-size:14px;">' + esc(x.hol) + '</span>' : '') + '</h2>';
-  var any = false;
-  C.stores.filter(function (s) { return s.open; }).forEach(function (s) {
-    var list = C.team.filter(function (t) { return t[0] === x.d && t[1] === s.code; });
-    if (!list.length) return;
-    any = true;
-    h += '<div class="st"><div class="sn" style="color:' + colorOf(s.code) + '">' + esc(s.name) + '(' + list.length + '人)</div>' +
-      list.map(function (t) {
-        var me = t[4] === C.name;
-        return '<div class="who' + (me ? ' me' : '') + '"><span>' + esc(t[4]) + '</span><span>' + hmShort(t[2]) + '〜' + hmShort(t[3]) +
-          (me ? '<a class="gcal" target="_blank" rel="noopener" href="' + esc(gcalUrl(x.d, s.code, t[2], t[3])) + '">Googleカレンダーに追加</a>' : '') + '</span></div>';
-      }).join('') + '</div>';
-  });
-  if (!any) h += '<div class="muted">この日の公開されたシフトはありません。</div>';
-  g('detail').innerHTML = h;
-}
-
-// Googleカレンダーの予定の追加画面のURL(25:00 などは翌日として入れる)
-function gcalUrl(d, store, s, e) {
-  var ym = C.month.split('-').map(Number);
-  var t = function (hm) {
-    var p = hm.split(':').map(Number), m = p[0] * 60 + p[1];
-    var dt = new Date(ym[0], ym[1] - 1, d + Math.floor(m / 1440)), mm = m % 1440;
-    var two = function (n) { return ('0' + n).slice(-2); };
-    return dt.getFullYear() + two(dt.getMonth() + 1) + two(dt.getDate()) + 'T' + two(Math.floor(mm / 60)) + two(mm % 60) + '00';
-  };
-  return 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
-    '&text=' + encodeURIComponent(storeName(store) + ' 勤務') +
-    '&dates=' + t(s) + '/' + t(e) + '&ctz=Asia%2FTokyo' +
-    '&location=' + encodeURIComponent(storeName(store)) +
-    '&details=' + encodeURIComponent(s + '〜' + e + '(シフトカレンダーより)');
-}
-
-// 購読(自動で更新)のURL
-// 端末に合わせて出し分ける：PC＝Googleカレンダーに登録 ／ iPhone＝標準のカレンダーに登録＋Googleは PCで ／ Android＝Googleは PCで
-var UA = navigator.userAgent || '';
-var IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && 'ontouchend' in document);
-var IS_ANDROID = /Android/.test(UA);
-function showIcs(url) {
-  g('icsBox').style.display = 'block';
-  g('icsUrl').textContent = url;
-  var webcal = url.replace(/^https:/, 'webcal:');
-  g('icsGoogle').href = 'https://calendar.google.com/calendar/render?cid=' + encodeURIComponent(webcal);
-  g('icsApple').href = webcal;
-  g('icsPc').style.display = (!IS_IOS && !IS_ANDROID) ? 'block' : 'none';
-  g('icsIos').style.display = IS_IOS ? 'block' : 'none';
-  g('icsGoogleHow').style.display = (IS_IOS || IS_ANDROID) ? 'block' : 'none';
-}
-g('icsShow').addEventListener('click', function () {
-  g('icsShow').disabled = true;
-  api('cal.ics.get').then(function (res) { g('icsShow').disabled = false; if (res.ok) showIcs(res.url); else g('icsMsg').textContent = '表示できませんでした：' + res.error; })
-    .catch(function () { g('icsShow').disabled = false; });
-});
-g('icsCopy').addEventListener('click', function () {
-  var u = g('icsUrl').textContent;
-  (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(function () { g('icsMsg').textContent = 'コピーしました'; })
-    .catch(function () { g('icsMsg').textContent = 'URLを長押しして選び、コピーしてください'; });
-});
-g('icsReset').addEventListener('click', function () {
-  if (!confirm('URLを作り直しますか？\n前のURLで登録したカレンダーには、シフトが入らなくなります(新しいURLで登録し直してください)。')) return;
-  api('cal.ics.reset').then(function (res) { if (res.ok) { showIcs(res.url); g('icsMsg').textContent = '作り直しました。新しいURLで登録し直してください。'; } });
-});
-
-g('cal').addEventListener('click', function (e) { var c = e.target.closest('.day[data-d]'); if (!c) return; DAY = Number(c.getAttribute('data-d')); renderCal(); renderDetail(); });
-g('month').addEventListener('change', function () { DAY = 0; load(g('month').value); });
 
 function load(month, quiet) {
-  return api('cal.get', month ? { month: month } : {}).then(function (res) {
+  if (!quiet) g('msg').textContent = '読み込んでいます…';
+  return api('board.get', month ? { month: month } : {}).then(function (res) {
     if (!res.ok) {
       if (quiet) return;
-      gate(res.error === 'AUTH' ? (res.reason === 'no_permission' ? 'シフトカレンダーを使う権限がありません。' : 'ログインの期限が切れました。\nポータルから開き直してください。') : '開けませんでした：' + res.error, true);
+      gate(res.error === 'AUTH' ? (res.reason === 'no_permission' ? 'シフト作成を使う権限がありません。' : 'ログインの期限が切れました。\nポータルから開き直してください。') : '開けませんでした：' + res.error, true);
       return;
     }
-    show(res.cal);
-  }).catch(function (e) { if (!quiet) { gate('通信に失敗しました。\n電波の良いところで開き直してください。', true); g('gdetail').textContent = e.message; } });
+    if (quiet && Object.keys(DIRTY).length) return; // 組んでいる途中なら、裏での読み直しで上書きしない
+    showBoard(res.board);
+  }).catch(function (e) { if (!quiet) { gate('通信に失敗しました。\n開き直してください。', true); g('gdetail').textContent = e.message; } });
 }
+var HOW = '取得';
 function readPrefetch() {
-  try { var x = JSON.parse(sessionStorage.getItem('prefetch_calendar') || 'null'); return x && Date.now() - x.at < 3 * 60 * 1000 && x.cal ? x.cal : null; } catch (e) { return null; }
+  try {
+    var x = JSON.parse(sessionStorage.getItem('prefetch_shiftboard') || 'null');
+    return x && Date.now() - x.at < 3 * 60 * 1000 && x.board && x.board.conf ? x.board : null; // 確定シフトを含まない古いデータは使わない
+  } catch (e) { return null; }
+}
+function showBoard(board) {
+  try { showBoardInner(board); }
+  catch (e) {
+    gate('画面を表示できませんでした。\nBotが新しい版になっているか確認してください。', true);
+    g('gdetail').textContent = '[表示] ' + (e && e.message ? e.message : e);
+  }
+}
+function showBoardInner(board) {
+  B = board;
+  initConf();
+  if (!STORE || !storeOf(STORE) || !isVisible(STORE)) STORE = visibleStores()[0] ? visibleStores()[0].code : (B.stores[0] ? B.stores[0].code : '');
+  g('otherWrap').style.display = myStores().length < B.stores.length ? '' : 'none'; // 全店舗が自分の店舗なら出さない
+  if (DAY > B.days.length) DAY = 1;
+  g('gate').style.display = 'none'; g('app').style.display = 'block';
+  g('me').textContent = S.name ? S.name + ' さん' : '';
+  g('msg').textContent = '';
+  if (!showBoard.shown) {
+    showBoard.shown = true;
+    g('ver').textContent = 'ver ' + PAGE_VERSION + '・開くまで ' + ((Date.now() - T0) / 1000).toFixed(1) + '秒(' + HOW + ')' +
+      (B.timing ? '(サーバー：データ ' + (B.timing['データ'] / 1000).toFixed(1) + '秒)' : '');
+  }
+  setState('保存済み', '');
+  renderAll();
 }
 
+function renderAll() {
+  var opt = function (m, tag) { return '<option value="' + m + '"' + (m === B.month ? ' selected' : '') + '>' + m.replace('-', '年') + '月' + tag + '</option>'; };
+  g('month').innerHTML = B.months.map(function (m) { return opt(m, m === B.target ? '(受付中)' : ''); }).join('') +
+    ((B.archived || []).length ? '<optgroup label="過去の月(見るだけ)">' + B.archived.slice().reverse().map(function (m) { return opt(m, '(過去)'); }).join('') + '</optgroup>' : '');
+  // 過去の月は見るだけ：編集・公開のボタンを隠す
+  var ro = !!B.readonly;
+  g('roNote').style.display = ro ? 'block' : 'none';
+  ['fillAll', 'clearDay', 'pub'].forEach(function (id) { g(id).style.display = ro ? 'none' : ''; });
+  g('pubState').style.display = ro ? 'none' : '';
+  renderPub();
+  g('tabs').innerHTML = visibleStores().map(function (s) { return '<button class="tab' + (s.code === STORE ? ' on' : '') + '" data-s="' + esc(s.code) + '">' + esc(s.name) + '</button>'; }).join(' ');
+  g('slotInfo').textContent = B.slot + '分刻み';
+  renderStrip(); renderDay(); renderUnsub();
+  if (typeof renderChecks === 'function') { renderChecks(); if (VIEWNOW === 'vAi') renderAi(); if (VIEWNOW === 'vRec') renderRec(); }
+}
+
+function renderStrip() {
+  g('strip').innerHTML = B.days.map(function (x) {
+    var sm = sums(x.d);
+    var cls = (x.w === 0 || x.hol ? ' sun' : (x.w === 6 ? ' sat' : '')) + (x.d === DAY ? ' on' : '') + (sm.short ? ' short' : '');
+    return '<div class="dcell' + cls + '" data-d="' + x.d + '" title="確定/希望の人数' + (x.hol ? '・' + esc(x.hol) : '') + '">' + x.d + '(' + W.charAt(x.w) + ')<div class="n">' +
+      sm.cfU.length + '<span class="muted">/' + sm.reqU.length + '</span>' + (DIRTY[key(STORE, x.d)] ? '*' : '') + '</div></div>';
+  }).join('');
+}
+
+function renderDay() {
+  var x = B.days[DAY - 1];
+  g('dayTitle').textContent = B.label + DAY + '日(' + W.charAt(x.w) + ')' + (x.hol ? ' ' + x.hol : '');
+  var sm = sums(DAY), cs = sm.cols, cf = confOf(STORE, DAY);
+  var h = '<thead><tr><th class="fix c0">氏名</th><th class="fix c1">グレード</th><th class="fix c2">希望・確定</th>';
+  cs.forEach(function (t, i) { if (t % 60 === 0 || i === 0) { var span = 0; for (var j = i; j < cs.length && (j === i || cs[j] % 60 !== 0); j++) span++; h += '<th class="hr" colspan="' + span + '">' + Math.floor(t / 60) + '</th>'; } });
+  h += '</tr></thead><tbody>';
+  var all = reqOf(DAY);
+  var first = function (u) {
+    var ts = all.filter(function (r) { return r[4] === u && r[1] === STORE; }).map(function (r) { return mins(r[2]); })
+      .concat(cf.filter(function (c) { return c[0] === u; }).map(function (c) { return mins(c[1]); }));
+    return ts.length ? Math.min.apply(null, ts) : 99999;
+  };
+  var uids = sm.reqU.slice();
+  sm.cfU.forEach(function (u) { if (uids.indexOf(u) === -1) uids.push(u); });
+  uids.sort(function (a, b) { return first(a) - first(b); });
+  if (g('showAll').checked) {
+    Object.keys(B.staff).forEach(function (u) {
+      var p = B.staff[u];
+      if (uids.indexOf(u) === -1 && (p.stores.indexOf('*') !== -1 || p.stores.indexOf(STORE) !== -1)) uids.push(u);
+    });
+  }
+  uids.forEach(function (u) {
+    var p = B.staff[u] || { name: u, grade: '' };
+    var mine = all.filter(function (r) { return r[4] === u && r[1] === STORE; });
+    var others = all.filter(function (r) { return r[4] === u && r[1] !== STORE; });
+    var myCf = cf.filter(function (c) { return c[0] === u; });
+    var otherCf = [];
+    B.stores.forEach(function (st) { if (st.code !== STORE) confOf(st.code, DAY).forEach(function (c) { if (c[0] === u) otherCf.push(st.name + ' ' + c[1] + '-' + c[2]); }); });
+    var outside = myCf.some(function (c) { for (var t = mins(c[1]); t < mins(c[2]); t += B.slot) if (!covered(mine, t)) return true; return false; });
+    h += '<tr class="staff' + (mine.length || myCf.length ? '' : ' none') + '" data-u="' + esc(u) + '"><td class="fix c0">' + esc(p.name) + '</td><td class="fix c1">' + esc(p.grade) + '</td>' +
+      '<td class="fix c2">希望 ' + esc(mine.map(function (r) { return r[2] + '-' + r[3]; }).join(' / ') || 'なし') +
+      (myCf.length ? '<div>確定 <b>' + esc(myCf.map(function (c) { return c[1] + '-' + c[2]; }).join(' / ')) + '</b>' + (outside ? ' <span class="warn">希望の外あり</span>' : '') + '</div>' : '') +
+      (others.length ? '<div class="other">他店舗の希望：' + esc(others.map(function (r) { return (storeOf(r[1]) ? storeOf(r[1]).name : r[1]) + ' ' + r[2] + '-' + r[3]; }).join(' / ')) + '</div>' : '') +
+      (otherCf.length ? '<div class="other">他店舗で確定：' + esc(otherCf.join(' / ')) + '</div>' : '') + '</td>';
+    cs.forEach(function (t) {
+      var on = covered(mine, t), c = confCovers(cf, u, t);
+      h += '<td class="s' + (t % 60 === 0 ? ' hb' : '') + (on ? ' on' : '') + (c ? ' cf' + (on ? '' : ' out') : '') + '" data-t="' + t + '" title="' + esc(p.name) + ' ' + hm(t) + '"></td>';
+    });
+    h += '</tr>';
+  });
+  if (!uids.length) h += '<tr class="none"><td class="fix c0" colspan="3">この日の希望はありません(「希望のない人も表示」で全員を出せます)</td>' + cs.map(function () { return '<td class="s"></td>'; }).join('') + '</tr>';
+  var hasNeed = sm.need.some(function (n) { return n > 0; });
+  var row = function (label, sub, arr, lowFn) {
+    return '<tr class="sum"><td class="fix c0">' + label + '</td><td class="fix c1"></td><td class="fix c2">' + sub + '</td>' +
+      arr.map(function (n, i) { return '<td class="s' + (cs[i] % 60 === 0 ? ' hb' : '') + (lowFn && lowFn(n, i) ? ' low' : '') + '">' + (n || '') + '</td>'; }).join('') + '</tr>';
+  };
+  if (hasNeed) h += row('必要人数', esc(sm.pattern), sm.need);
+  h += row('確定人数', hasNeed ? '赤＝必要人数に届かない' : '', sm.count, function (n, i) { return n < sm.need[i]; });
+  h += row('希望人数', '(参考)', sm.reqCount);
+  sm.crit.forEach(function (x) { h += row(esc(x.c.name), (x.c.min ? '最低' + x.c.min + '人(確定)' : ''), x.n, function (n) { return x.c.min && n < x.c.min; }); });
+  g('grid').innerHTML = h + '</tbody>';
+  g('prev').disabled = DAY <= 1; g('next').disabled = DAY >= B.days.length;
+  renderPanel();
+}
+
+function renderUnsub() {
+  var list = (B.unsubmitted[STORE] || []).map(function (u) { var p = B.staff[u] || {}; return p.name + (p.grade ? '(' + p.grade + ')' : ''); });
+  g('unsub').textContent = list.length ? list.join('、') : 'なし';
+}
+
+// ===== この日の調整(人ごと：希望を採用するか・時間・店舗を選び直す) =====
+function timesOf(code) { var st = storeOf(code), o = []; for (var t = st.start; t <= st.end; t += B.slot) o.push(hm(t)); return o; }
+function overlapHM(a1, a2, b1, b2) { return mins(a1) < mins(b2) && mins(b1) < mins(a2); }
+// その日の、ある人の行：確定(全店舗) ＋ まだ採用していない希望(どの確定とも重ならない希望)
+function personLines(uid) {
+  var confs = [];
+  B.stores.forEach(function (st) { confOf(st.code, DAY).forEach(function (c, i) { if (c[0] === uid) confs.push({ kind: 'conf', store: st.code, i: i, s: c[1], e: c[2] }); }); });
+  var reqs = reqOf(DAY).filter(function (r) { return r[4] === uid; })
+    .filter(function (r) { return !confs.some(function (x) { return overlapHM(x.s, x.e, r[2], r[3]); }); })
+    .map(function (r) { return { kind: 'req', store: r[1], s: r[2], e: r[3] }; });
+  return confs.concat(reqs).sort(function (a, b) { return mins(a.s) - mins(b.s); });
+}
+// 人ごとの問題：同じ人の確定が(店舗をまたいでも)重なる ／ 開始≧終了
+function badLines() {
+  var bad = {};
+  Object.keys(B.staff).concat(peopleOfDay()).forEach(function (uid) {
+    var cs = [];
+    B.stores.forEach(function (st) { confOf(st.code, DAY).forEach(function (c, i) { if (c[0] === uid) cs.push({ k: st.code + ':' + i, s: c[1], e: c[2] }); }); });
+    cs.forEach(function (a) {
+      if (mins(a.s) >= mins(a.e)) bad[a.k] = '開始が終了より後です';
+      cs.forEach(function (b) { if (a !== b && overlapHM(a.s, a.e, b.s, b.e)) bad[a.k] = '時間帯が重なっています'; });
+    });
+  });
+  return bad;
+}
+function peopleOfDay() {
+  var u = [];
+  reqOf(DAY).forEach(function (r) { if (u.indexOf(r[4]) === -1) u.push(r[4]); });
+  B.stores.forEach(function (st) { confOf(st.code, DAY).forEach(function (c) { if (u.indexOf(c[0]) === -1) u.push(c[0]); }); });
+  if (g('showAll').checked) Object.keys(B.staff).forEach(function (x) {
+    var p = B.staff[x]; if (u.indexOf(x) === -1 && (p.stores.indexOf('*') !== -1 || p.stores.indexOf(STORE) !== -1)) u.push(x);
+  });
+  return u;
+}
+function selHtml(list, v, f, attrs) {
+  return '<select data-f="' + f + '" ' + attrs + '>' + list.map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select>';
+}
+function storeSel(v, attrs) {
+  return '<select data-f="st" ' + attrs + '>' + visibleStores().map(function (s) { return '<option value="' + esc(s.code) + '"' + (s.code === v ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select>';
+}
+function renderPanel() {
+  var bad = badLines();
+  var all = reqOf(DAY);
+  var first = function (u) { var l = personLines(u); return l.length ? mins(l[0].s) : 99999; };
+  var uids = peopleOfDay().sort(function (a, b) { return first(a) - first(b); });
+  if (!uids.length) { g('panelBody').innerHTML = '<div class="muted" style="padding:10px 14px;">この日の希望はありません(「希望のない人も表示」で全員を出せます)</div>'; return; }
+  var h = '<table class="pn"><tr><th>氏名</th><th>グレード</th><th>希望</th><th>確定させる時間(チェック＝採用)</th></tr>';
+  uids.forEach(function (u) {
+    var p = B.staff[u] || { name: u, grade: '' };
+    var mine = all.filter(function (r) { return r[4] === u; });
+    var allLines = personLines(u);
+    var lines = allLines.filter(function (l) { return isVisible(l.store); });
+    var hidden = allLines.filter(function (l) { return !isVisible(l.store); });
+    var hasConf = lines.some(function (l) { return l.kind === 'conf'; });
+    h += '<tr data-u="' + esc(u) + '"><td class="nm">' + esc(p.name) + '</td><td>' + esc(p.grade) + '</td><td class="rq">' +
+      (mine.length ? esc(mine.map(function (r) { return (storeOf(r[1]) ? storeOf(r[1]).name : r[1]) + ' ' + r[2] + '-' + r[3]; }).join(' / ')) : '希望なし') + '</td><td>';
+    lines.forEach(function (l) {
+      if (l.kind === 'req') {
+        h += '<div class="ln req"><label><input type="checkbox" data-act="adopt" data-st="' + esc(l.store) + '" data-s="' + l.s + '" data-e="' + l.e + '"> ' +
+          esc(storeOf(l.store) ? storeOf(l.store).name : l.store) + ' ' + l.s + '-' + l.e + '(希望)</label></div>';
+      } else {
+        var k = l.store + ':' + l.i, attrs = 'data-st="' + esc(l.store) + '" data-i="' + l.i + '"';
+        var ts = timesOf(l.store);
+        var inReq = mine.some(function (r) { return r[1] === l.store && mins(r[2]) <= mins(l.s) && mins(l.e) <= mins(r[3]); });
+        h += '<div class="ln' + (bad[k] ? ' bad' : '') + '"><input type="checkbox" checked data-act="drop" ' + attrs + '> ' +
+          storeSel(l.store, attrs) + selHtml(ts.slice(0, -1), l.s, 's', attrs) + '〜' + selHtml(ts.slice(1), l.e, 'e', attrs) +
+          (bad[k] ? '<span class="tag2 t-bad">' + bad[k] + '</span>' : (inReq ? '' : '<span class="tag2 t-out">希望の外</span>')) + '</div>';
+      }
+    });
+    if (hidden.length) h += '<div class="ln muted">表示していない店舗：' + esc(hidden.map(function (l) { return (storeOf(l.store) ? storeOf(l.store).name : l.store) + ' ' + l.s + '-' + l.e + (l.kind === 'conf' ? '(確定)' : '(希望)'); }).join(' / ')) + '</div>';
+    h += '<div class="ln"><button class="mini2" data-act="add">＋時間帯</button>' + (hasConf || hidden.some(function (l) { return l.kind === 'conf'; }) ? '' : '<span class="tag2 t-no">入れない</span>') + '</div></td></tr>';
+  });
+  g('panelBody').innerHTML = h + '</table>';
+  if (B.readonly) Array.prototype.forEach.call(g('panelBody').querySelectorAll('input, select, button'), function (el) { el.disabled = true; });
+}
+// 確定を、指定の店舗に足す(同じ人の重なる・隣り合う確定は1つにまとめる)
+function addConfTo(store, uid, s, e) {
+  var k = key(store, DAY);
+  var list = (CONF[k] || []).slice();
+  var mine = list.filter(function (c) { return c[0] === uid; }).concat([[uid, s, e]]);
+  var rest = list.filter(function (c) { return c[0] !== uid; });
+  mine.sort(function (a, b) { return mins(a[1]) - mins(b[1]); });
+  var merged = [];
+  mine.forEach(function (c) {
+    var last = merged[merged.length - 1];
+    if (last && mins(c[1]) <= mins(last[2])) { if (mins(c[2]) > mins(last[2])) last[2] = c[2]; }
+    else merged.push([c[0], c[1], c[2]]);
+  });
+  CONF[k] = rest.concat(merged);
+}
+g('panelBody').addEventListener('change', function (e) {
+  var el = e.target, tr = el.closest('tr[data-u]'); if (!tr) return;
+  var uid = tr.getAttribute('data-u'), act = el.getAttribute('data-act'), f = el.getAttribute('data-f');
+  var st = el.getAttribute('data-st'), i = Number(el.getAttribute('data-i'));
+  if (act === 'adopt') { addConfTo(st, uid, el.getAttribute('data-s'), el.getAttribute('data-e')); return changedKeys([st]); }
+  if (act === 'drop') { CONF[key(st, DAY)].splice(i, 1); return changedKeys([st]); }
+  var c = (CONF[key(st, DAY)] || [])[i]; if (!c) return;
+  if (f === 's') { c[1] = el.value; return changedKeys([st]); }
+  if (f === 'e') { c[2] = el.value; return changedKeys([st]); }
+  if (f === 'st' && el.value !== st) {
+    // 店舗を変える：今の店舗から外し、新しい店舗に足す(新しい店舗で選べない時刻は、選べる範囲に寄せる)
+    var ns = el.value, ts = timesOf(ns), s1 = c[1], e1 = c[2];
+    if (ts.indexOf(s1) === -1) s1 = mins(s1) < mins(ts[0]) ? ts[0] : ts[ts.length - 2];
+    if (ts.indexOf(e1) === -1) e1 = mins(e1) > mins(ts[ts.length - 1]) ? ts[ts.length - 1] : ts[1];
+    CONF[key(st, DAY)].splice(i, 1);
+    (CONF[key(ns, DAY)] = CONF[key(ns, DAY)] || []).push([uid, s1, e1]);
+    return changedKeys([st, ns]);
+  }
+});
+g('panelBody').addEventListener('click', function (e) {
+  var b = e.target.closest('button[data-act="add"]'); if (!b) return;
+  var uid = b.closest('tr[data-u]').getAttribute('data-u');
+  var p = B.staff[uid] || { stores: [] };
+  var st = (p.stores.indexOf('*') !== -1 || p.stores.indexOf(STORE) !== -1) ? STORE : (p.stores[0] || STORE);
+  var ts = timesOf(st);
+  (CONF[key(st, DAY)] = CONF[key(st, DAY)] || []).push([uid, ts[0], ts[Math.min(ts.length - 1, 60 / B.slot * 4)]]);
+  changedKeys([st]);
+});
+// 変更があった店舗×日を未保存にし、2秒後にまとめて保存する(重なりなどがあれば保存しない)
+function changedKeys(stores) {
+  stores.forEach(function (st) { DIRTY[key(st, DAY)] = true; });
+  clearTimeout(saveTimer);
+  var bad = Object.keys(badLines()).length;
+  if (bad) setState('直してほしい時間帯があります(赤い行)。直すと保存します', 'err');
+  else {
+    setState('未保存(2秒後に保存)', 'dirty');
+    saveTimer = setTimeout(function () { saveDayAll(DAY); }, 2000);
+  }
+  renderStrip(); renderDay(); renderChecks();
+}
+// その日の、未保存の店舗をすべて「1回で」保存する(全部保存するか、どれも保存しないか)
+function saveDayAll(day) {
+  if (Object.keys(badLines()).length) { setState('直してほしい時間帯があります(赤い行)。直すと保存します', 'err'); return Promise.resolve(false); }
+  var keys = Object.keys(DIRTY).filter(function (k) { return DIRTY[k] && Number(k.split(':')[1]) === day; });
+  if (!keys.length) return Promise.resolve(true);
+  if (SAVING) return new Promise(function (ok) { setTimeout(function () { ok(saveDayAll(day)); }, 300); });
+  SAVING = true; clearTimeout(saveTimer);
+  setState('保存しています…', 'dirty');
+  var items = keys.map(function (k) {
+    return { store: k.split(':')[0], shifts: (CONF[k] || []).map(function (c) { return [c[0], c[1], c[2]]; }), ver: VER[k] || '' };
+  });
+  return api('board.save', { month: B.month, day: day, items: items }).then(function (res) {
+    SAVING = false;
+    if (res.ok) {
+      keys.forEach(function (k) { VER[k] = (res.vers || {})[k.split(':')[0]] || ''; delete DIRTY[k]; });
+      var n = new Date(); setState('保存済み ' + n.getHours() + ':' + ('0' + n.getMinutes()).slice(-2), '');
+      renderStrip();
+      return true;
+    }
+    if (res.error === 'conflict') {
+      var names = (res.stores || []).map(function (c) { var st = storeOf(c); return st ? st.name : c; }).join('・');
+      setState('ほかの人が' + (names ? names + 'の' : '') + 'この日を変更しました(保存していません)', 'err');
+      g('msg').innerHTML = '<a href="#" id="reloadBoard">読み込み直す</a>(この日の、まだ保存していない変更は消えます)';
+      g('reloadBoard').addEventListener('click', function (e) { e.preventDefault(); DIRTY = {}; load(B.month); });
+      return false;
+    }
+    setState(res.error === 'AUTH' ? 'ログインの期限切れ(ポータルから開き直す)' : '保存できませんでした：' + res.error, 'err');
+    return false;
+  }).catch(function () { SAVING = false; setState('通信に失敗しました', 'err'); return false; });
+}
+
+// ===== 確定シフトの編集(タイムラインのドラッグ・クリック) =====
+// 同じ人の時間帯が重なる・隣り合うときは1つにまとめる
+function addConf(uid, s, e) {
+  var k = key(STORE, DAY);
+  var list = (CONF[k] || []).slice();
+  var mine = list.filter(function (c) { return c[0] === uid; }).concat([[uid, hm(s), hm(e)]]);
+  var rest = list.filter(function (c) { return c[0] !== uid; });
+  mine.sort(function (a, b) { return mins(a[1]) - mins(b[1]); });
+  var merged = [];
+  mine.forEach(function (c) {
+    var last = merged[merged.length - 1];
+    if (last && mins(c[1]) <= mins(last[2])) { if (mins(c[2]) > mins(last[2])) last[2] = c[2]; }
+    else merged.push([c[0], c[1], c[2]]);
+  });
+  CONF[k] = rest.concat(merged);
+  changed();
+}
+function changed() { changedKeys([STORE]); }
+function setState(t, cls) {
+  g('saveState').textContent = t; g('saveState').className = cls || '';
+  // 保存に失敗したとき(通信など)だけ「もう一度保存」を出す。重なりの赤い行や、ほかの人の変更のときは出さない
+  g('saveDay').style.display = (cls === 'err' && /保存できませんでした|通信に失敗/.test(t)) ? '' : 'none';
+}
+
+// 別の日・店舗・月に移る前に、未保存の分を保存する
+function leaveDay() {
+  if (Object.keys(badLines()).length) { alert('赤い行(時間帯の重なりなど)を直してから移ってください'); return new Promise(function () {}); }
+  return saveDayAll(DAY);
+}
+
+// ドラッグ＝その時間を確定 ／ 希望をクリック＝希望どおりに確定 ／ 確定をクリック＝変更・削除
+var drag = null;
+g('grid').addEventListener('mousedown', function (e) {
+  if (B && B.readonly) return; // 過去の月は見るだけ
+  var td = e.target.closest('td.s'), tr = e.target.closest('tr.staff');
+  if (!td || !tr) return;
+  e.preventDefault();
+  drag = { uid: tr.getAttribute('data-u'), t0: Number(td.getAttribute('data-t')), t1: Number(td.getAttribute('data-t')), tr: tr };
+  td.classList.add('sel');
+});
+g('grid').addEventListener('mouseover', function (e) {
+  if (!drag) return;
+  var td = e.target.closest('td.s'), tr = e.target.closest('tr.staff');
+  if (!td || tr !== drag.tr) return;
+  drag.t1 = Number(td.getAttribute('data-t'));
+  var a = Math.min(drag.t0, drag.t1), b = Math.max(drag.t0, drag.t1);
+  Array.prototype.forEach.call(drag.tr.querySelectorAll('td.s'), function (c) { var t = Number(c.getAttribute('data-t')); c.classList.toggle('sel', t >= a && t <= b); });
+});
+document.addEventListener('mouseup', function (e) {
+  if (!drag) return;
+  var d = drag; drag = null;
+  var a = Math.min(d.t0, d.t1), b = Math.max(d.t0, d.t1);
+  if (a !== b) { addConf(d.uid, a, b + B.slot); return; }
+  // クリック
+  var cf = confOf(STORE, DAY);
+  var hit = cf.filter(function (c) { return c[0] === d.uid && mins(c[1]) <= a && a < mins(c[2]); })[0];
+  if (hit) { openEditor(hit, e.clientX, e.clientY); renderDay(); return; }
+  var req = reqOf(DAY, STORE).filter(function (r) { return r[4] === d.uid && mins(r[2]) <= a && a < mins(r[3]); })[0];
+  if (req) { addConf(d.uid, mins(req[2]), mins(req[3])); return; }
+  renderDay(); // 何もない所のクリックは、選択を消すだけ
+});
+
+// 確定の時刻の変更・削除
+var editing = null;
+function openEditor(c, x, y) {
+  editing = c;
+  var st = storeOf(STORE), opts = [];
+  for (var t = st.start; t <= st.end; t += B.slot) opts.push(hm(t));
+  var p = B.staff[c[0]] || { name: c[0] };
+  g('edTitle').textContent = p.name + ' の確定';
+  g('edStart').innerHTML = opts.slice(0, -1).map(function (o) { return '<option' + (o === c[1] ? ' selected' : '') + '>' + o + '</option>'; }).join('');
+  g('edEnd').innerHTML = opts.slice(1).map(function (o) { return '<option' + (o === c[2] ? ' selected' : '') + '>' + o + '</option>'; }).join('');
+  g('edMsg').textContent = '';
+  var ed = g('editor');
+  ed.style.display = 'block';
+  ed.style.left = Math.min(x, window.innerWidth - 280) + 'px';
+  ed.style.top = Math.min(y + 10, window.innerHeight - 160) + 'px';
+}
+function closeEditor() { g('editor').style.display = 'none'; editing = null; }
+g('edClose').addEventListener('click', closeEditor);
+g('edDel').addEventListener('click', function () {
+  var k = key(STORE, DAY);
+  CONF[k] = (CONF[k] || []).filter(function (c) { return c !== editing; });
+  closeEditor(); changed();
+});
+g('edOk').addEventListener('click', function () {
+  var s1 = mins(g('edStart').value), e1 = mins(g('edEnd').value);
+  if (s1 >= e1) { g('edMsg').textContent = '開始は終了より前にしてください'; return; }
+  var k = key(STORE, DAY), uid = editing[0];
+  CONF[k] = (CONF[k] || []).filter(function (c) { return c !== editing; });
+  closeEditor();
+  addConf(uid, s1, e1);
+});
+
+g('fillAll').addEventListener('click', function () {
+  if (!confirm('この日の、まだ確定のない人の希望を、すべて希望どおりに確定しますか？\n(あとから1人ずつ外したり、時間を変えたりできます)')) return;
+  // その日、まだどの店舗にも確定のない人の希望を、希望の店舗のまま採用する
+  var done = {}, touched = [];
+  B.stores.forEach(function (st) { confOf(st.code, DAY).forEach(function (c) { done[c[0]] = true; }); });
+  reqOf(DAY).forEach(function (r) {
+    if (done[r[4]] || !isVisible(r[1])) return;
+    addConfTo(r[1], r[4], r[2], r[3]);
+    if (touched.indexOf(r[1]) === -1) touched.push(r[1]);
+  });
+  if (touched.length) changedKeys(touched); else g('msg').textContent = '希望どおりに確定できる人はいません(全員確定済みか、希望がありません)';
+});
+function addConfQuiet(uid, s, e) { var k = key(STORE, DAY); (CONF[k] = CONF[k] || []).push([uid, hm(s), hm(e)]); }
+g('clearDay').addEventListener('click', function () {
+  if (!confOf(STORE, DAY).length) return;
+  if (!confirm('この日(この店舗)の確定をすべて消しますか？')) return;
+  CONF[key(STORE, DAY)] = []; changed();
+});
+g('saveDay').addEventListener('click', function () {
+  if (!Object.keys(DIRTY).some(function (k) { return DIRTY[k]; })) { setState('保存済み(変更はありません)', ''); return; }
+  saveDayAll(DAY);
+});
+
+// ===== 公開(スタッフのシフトカレンダーに出す)・勤務表の書き出し =====
+// ===== 締め切り(この月×この店舗) =====
+function renderDl() {
+  var x = (B.deadlines || {})[STORE];
+  if (!x) { g('dlState').textContent = ''; g('dlBtn').style.display = 'none'; return; }
+  var f = function (d) { var p = d.split('-'); return Number(p[1]) + '/' + Number(p[2]) + '(' + W.charAt(new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])).getDay()) + ')'; };
+  g('dlState').textContent = '希望の締め切り：' + f(x.date) + (x.ex ? '(初期値 ' + f(x.def) + ' から変更)' : '');
+  g('dlBtn').style.display = B.readonly ? 'none' : '';
+}
+g('dlBtn').addEventListener('click', function () {
+  var x = (B.deadlines || {})[STORE], st = storeOf(STORE);
+  var v = prompt(st.name + 'の' + B.label + '分の、シフト希望の締め切り日(例：' + x.date + ')\n空欄にすると初期値(' + x.def + ')に戻します', x.date);
+  if (v === null) return;
+  v = v.trim().replace(/\//g, '-');
+  if (v && !/^\d{4}-\d{1,2}-\d{1,2}$/.test(v)) { alert('「2026-12-20」の形で入れてください'); return; }
+  if (v) { var p = v.split('-'); v = p[0] + '-' + ('0' + p[1]).slice(-2) + '-' + ('0' + p[2]).slice(-2); }
+  var notify = confirm('新しい締め切りを、LINE WORKS の全体のチャットで知らせますか？\n［OK］知らせる　［キャンセル］知らせない');
+  g('dlBtn').disabled = true;
+  api('board.deadline', { month: B.month, store: STORE, date: v, notify: notify }).then(function (r) {
+    g('dlBtn').disabled = false;
+    if (!r || !r.ok) { alert('変えられませんでした：' + (r ? r.error : '')); return; }
+    B.deadlines[STORE] = { date: r.date, ex: r.ex, def: x.def };
+    renderDl();
+    g('msg').textContent = '締め切りを ' + r.date + ' にしました' + (notify ? (r.sent ? '(全体のチャットに知らせました)' : '(お試し中のため、全体のチャットには送っていません)') : '');
+  }).catch(function () { g('dlBtn').disabled = false; alert('通信に失敗しました'); });
+});
+function renderPub() {
+  renderDl();
+  var p = ((B.published || {})[STORE] || {})[B.month];
+  var st = storeOf(STORE);
+  g('pub').textContent = p ? 'この月の公開をやめる' : (st ? st.name : '') + 'のこの月を公開する';
+  g('pubState').textContent = p ? '公開中(' + p.at + '・' + p.by + ')' : '未公開(スタッフのカレンダーには出ません)';
+}
+g('pub').addEventListener('click', function () {
+  var on = !(((B.published || {})[STORE] || {})[B.month]);
+  var st = storeOf(STORE);
+  if (!confirm(on ? st.name + 'の' + B.label + 'のシフトを、スタッフのカレンダーに公開しますか？\n(公開後に直した分も、そのまま反映されます)' : st.name + 'の' + B.label + 'の公開をやめますか？\n(スタッフのカレンダーに出なくなります)')) return;
+  // 公開するときは、スタッフに知らせるかを選ぶ(知らせ方はシフト設定の「公開の通知」：個別／全体／両方／なし)
+  var notify = on ? confirm('スタッフに LINE WORKS で知らせますか？\n［OK］知らせる　［キャンセル］今回は知らせない') : false;
+  var chk = on ? checks() : [];
+  if (on && chk.length && !confirm('労働時間のチェックで ' + chk.length + '件の注意があります(「月の一覧とチェック」で確認できます)。このまま公開しますか？')) return;
+  leaveDay().then(function () {
+    return api('board.publish', { month: B.month, store: STORE, on: on, notify: notify });
+  }).then(function (res) {
+    if (!res || !res.ok) { g('msg').textContent = '公開を変えられませんでした：' + (res ? res.error : ''); return; }
+    B.published = res.published; renderPub();
+    g('msg').textContent = !on ? '公開をやめました' : '公開しました' + (!notify ? '(知らせていません)' : res.notify === 'なし' ? '(シフト設定の「公開の通知」が なし のため知らせていません)' :
+      '(' + [res.sent ? res.sent + '人に個別' : '', res.channel ? 'チャンネルに1通' : ''].filter(Boolean).join('・') + (res.failed && res.failed.length ? '／送れなかった：' + res.failed.join('、') : '') + ')');
+    renderChecks();
+  });
+});
+g('kinmu').addEventListener('click', function () {
+  g('kinmu').disabled = true; g('msg').textContent = '勤務表を書き出しています…';
+  leaveDay().then(function () { return api('board.kinmu', { month: B.month, store: STORE }); }).then(function (res) {
+    g('kinmu').disabled = false;
+    if (!res.ok) { g('msg').textContent = '書き出せませんでした：' + (res.error === 'AUTH' ? 'ログインの期限切れ' : res.error); return; }
+    g('msg').innerHTML = '書き出しました：<a href="' + esc(res.url) + '" target="_blank" rel="noopener">' + esc(res.sheet) + ' を開く</a>(Excelが必要なら、スプシの「ファイル→ダウンロード」)';
+  }).catch(function () { g('kinmu').disabled = false; g('msg').textContent = '通信に失敗しました'; });
+});
+g('showOther').addEventListener('change', function () { leaveDay().then(function () { if (!isVisible(STORE)) STORE = visibleStores()[0].code; renderAll(); }); });
+
+// ===== 操作(移動の前に保存する) =====
+g('month').addEventListener('change', function () { var m = g('month').value; leaveDay().then(function () { DAY = 1; load(m); }); });
+g('tabs').addEventListener('click', function (e) { var b = e.target.closest('.tab'); if (!b) return; var s2 = b.getAttribute('data-s'); leaveDay().then(function () { STORE = s2; closeEditor(); renderAll(); }); });
+g('strip').addEventListener('click', function (e) { var c = e.target.closest('.dcell'); if (!c) return; var d = Number(c.getAttribute('data-d')); leaveDay().then(function () { DAY = d; closeEditor(); renderStrip(); renderDay(); }); });
+g('prev').addEventListener('click', function () { if (DAY > 1) leaveDay().then(function () { DAY--; closeEditor(); renderStrip(); renderDay(); }); });
+g('next').addEventListener('click', function () { if (DAY < B.days.length) leaveDay().then(function () { DAY++; closeEditor(); renderStrip(); renderDay(); }); });
+g('showAll').addEventListener('change', renderDay);
+document.addEventListener('keydown', function (e) {
+  if (!B || e.target.tagName === 'SELECT') return;
+  if (e.key === 'ArrowLeft') g('prev').click();
+  if (e.key === 'ArrowRight') g('next').click();
+  if (e.key === 'Escape') closeEditor();
+});
+// 閉じるときに未保存があれば知らせる
+window.addEventListener('beforeunload', function (e) { if (Object.keys(DIRTY).length) { e.preventDefault(); e.returnValue = ''; } });
+g('export').addEventListener('click', function () {
+  g('export').disabled = true; g('msg').textContent = '書き出しています…';
+  api('board.export', { month: B.month, store: STORE }).then(function (res) {
+    g('export').disabled = false;
+    if (!res.ok) { g('msg').textContent = '書き出せませんでした：' + (res.error === 'AUTH' ? 'ログインの期限切れ' : res.error); return; }
+    g('msg').innerHTML = '書き出しました：<a href="' + esc(res.url) + '" target="_blank" rel="noopener">' + esc(res.sheet) + ' を開く</a>';
+  }).catch(function () { g('export').disabled = false; g('msg').textContent = '通信に失敗しました'; });
+});
+
 if (!S || !S.token || S.exp < Date.now()) gate('ポータルから開き直してください。\n(ログインの期限が切れたか、直接開かれました)', true);
-else if (!API) gate('シフトカレンダーを開く権限がないか、ポータルの設定が足りません。\nポータルから開き直してください。', true);
+else if (!API) gate('シフト作成を開く権限がないか、ポータルの設定が足りません。\nポータルから開き直してください。', true);
 else {
   var pre = readPrefetch();
-  if (pre) { HOW = '先読み'; show(pre); load(pre.month, true); }
+  if (pre) { HOW = '先読み'; showBoard(pre); load(pre.month, true); } // 表示してから裏で最新を確かめる
   else load('');
 }
+
+// =====================================================================
+// 休憩・実働・労働時間のチェック(シフト設定の「休憩の決まり」「労働時間の決まり」。雇用区分ごと)
+// =====================================================================
+function empOf(uid) { return ((B.staff || {})[uid] || {}).emp || ''; }
+function nameOfU(uid) { return ((B.staff || {})[uid] || {}).name || uid; }
+// 在籍(分)から休憩(分)：その雇用区分の行のうち、当てはまる(以上／超える)いちばん長いもの
+function breakOf(emp, span) {
+  return (B.breaks || []).filter(function (b) { return b.emp === emp && (b.strict ? span > b.over : span >= b.over); })
+    .reduce(function (a, b) { return Math.max(a, b.min); }, 0);
+}
+// その人のその日の在籍・休憩・実働(全店舗の確定を合わせる)
+function dayWork(uid, day) {
+  var span = 0, segs = [];
+  B.stores.forEach(function (st) { (CONF[key(st.code, day)] || []).forEach(function (c) { if (c[0] === uid) { span += mins(c[2]) - mins(c[1]); segs.push({ store: st.code, s: c[1], e: c[2] }); } }); });
+  var br = span ? breakOf(empOf(uid), span) : 0;
+  return { span: span, br: br, work: span - br, segs: segs };
+}
+function hhmm(m) { return Math.floor(m / 60) + ':' + ('0' + (m % 60)).slice(-2); }
+function hrs(m) { return (Math.round(m / 6) / 10).toFixed(1); }
+function ymOf(d) { return new Date(Number(B.month.slice(0, 4)), Number(B.month.slice(5, 7)) - 1, d); }
+// この月に確定がある人(全店舗)
+function confUids(storeOnly) {
+  var u = {};
+  Object.keys(CONF).forEach(function (k) { if (storeOnly && k.split(':')[0] !== storeOnly) return; (CONF[k] || []).forEach(function (c) { u[c[0]] = true; }); });
+  return Object.keys(u);
+}
+// 労働時間のチェック(この店舗に確定がある人。時間は全店舗で合わせる)。注意の配列
+function checks() {
+  if (!B) return [];
+  var out = [], last = B.days.length;
+  confUids(STORE).forEach(function (uid) {
+    var lim = (B.limits || []).filter(function (l) { return l.emp === empOf(uid); })[0];
+    if (!lim) return;
+    var nm = nameOfU(uid), w = {}, offs = 0, over = [], overMax = 0;
+    for (var d = 1; d <= last; d++) {
+      var x = dayWork(uid, d);
+      if (!x.span) offs++;
+      if (lim.day != null && x.work > lim.day * 60) { over.push(d); overMax = Math.max(overMax, x.work); }
+      // 週(月曜から)ごとに足す。月の途中で切れる週は、その月の中の日だけで数える
+      var dt = ymOf(d), mon = d - ((dt.getDay() + 6) % 7);
+      var wk = w[mon] = w[mon] || { work: 0, off: 0, days: 0, from: Math.max(1, mon), to: Math.min(last, mon + 6) };
+      wk.work += x.work; wk.days++; if (!x.span) wk.off++;
+    }
+    if (over.length) out.push(nm + '：1日の実働が上限 ' + lim.day + '時間を超える日 ' + over.length + '日(' + over.join('・') + '日。最大 ' + hrs(overMax) + '時間)');
+    Object.keys(w).forEach(function (k) {
+      var wk = w[k], full = wk.days === 7;
+      if (lim.week != null && wk.work > lim.week * 60) out.push(nm + '：' + wk.from + '日〜' + wk.to + '日の週の実働が ' + hrs(wk.work) + '時間(上限 ' + lim.week + '時間' + (full ? '' : '・月をまたぐ週はこの月の分だけ') + ')');
+      if (lim.weekOff != null && full && wk.off < lim.weekOff) out.push(nm + '：' + wk.from + '日〜' + wk.to + '日の週の休日が ' + wk.off + '日(' + lim.weekOff + '日以上)');
+    });
+    if (lim.monthOff != null && offs < lim.monthOff) out.push(nm + '：この月の休日が ' + offs + '日(' + lim.monthOff + '日以上)');
+  });
+  // 前月末日までに周知(公開)
+  var pub = ((B.published || {})[STORE] || {})[B.month];
+  var dl = new Date(Number(B.month.slice(0, 4)), Number(B.month.slice(5, 7)) - 1, 0, 23, 59);
+  if (!pub && new Date() > dl) out.push('前月末日(' + (dl.getMonth() + 1) + '/' + dl.getDate() + ')までに公開(周知)できていません');
+  return out;
+}
+function renderChecks() {
+  var n = checks().length;
+  g('chkBadge').hidden = !n; g('chkBadge').textContent = n;
+  if (!g('vMonth').hidden) renderMonth();
+}
+
+// ===== 月の一覧とチェック =====
+function renderMonth() {
+  var uids = confUids(STORE).sort(function (a, b) { return String(nameOfU(a)).localeCompare(String(nameOfU(b)), 'ja'); });
+  var st = storeOf(STORE), list = checks();
+  var h = '<h3 style="margin:4px 0;">' + esc(st ? st.name : '') + '　' + esc(B.label) + '</h3>' +
+    '<div class="muted">休憩はシフト設定の「休憩の決まり」から自動で数えます(時刻は決めない)。合計は全店舗の分を合わせた時間です。</div>' +
+    '<ul class="warnlist">' + (list.length ? list.map(function (x) { return '<li>⚠ ' + esc(x) + '</li>'; }).join('') : '<li class="ok">労働時間のチェック：注意はありません</li>') + '</ul>';
+  h += '<div class="grid-wrap"><table class="mt"><tr><th>氏名</th>' + B.days.map(function (x) {
+    return '<th class="' + (x.hol || x.w === 0 ? 'sun' : x.w === 6 ? 'sat' : '') + '">' + x.d + '<br>' + W.charAt(x.w) + '</th>';
+  }).join('') + '<th>日数</th><th>在籍</th><th>休憩</th><th>実働</th></tr>';
+  uids.forEach(function (uid) {
+    var tot = { n: 0, span: 0, br: 0, work: 0 };
+    h += '<tr><td class="nm">' + esc(nameOfU(uid)) + '<div class="muted" style="font-weight:400;">' + esc(empOf(uid) || '(雇用区分なし)') + '</div></td>';
+    B.days.forEach(function (x) {
+      var dw = dayWork(uid, x.d);
+      var here = dw.segs.filter(function (s) { return s.store === STORE; });
+      if (dw.span) { tot.n++; tot.span += dw.span; tot.br += dw.br; tot.work += dw.work; }
+      h += here.length ? '<td>' + here.map(function (s) { return s.s + '<br>' + s.e; }).join('<br>') + (dw.br ? '<div class="muted">休' + dw.br + '</div>' : '') + '</td>'
+        : (dw.span ? '<td class="off">他店</td>' : '<td class="off">-</td>');
+    });
+    h += '<td class="sum">' + tot.n + '</td><td class="sum">' + hrs(tot.span) + '</td><td class="sum">' + hrs(tot.br) + '</td><td class="sum">' + hrs(tot.work) + '</td></tr>';
+  });
+  h += '</table></div>';
+  if (!uids.length) h += '<div class="muted" style="margin-top:8px;">この月はまだ確定がありません</div>';
+  g('vMonth').innerHTML = h;
+}
+
+// ===== AI相談(文章を作って Claude などに貼り、返ってきた案を読み込む) =====
+function aiPrompt() {
+  var st = storeOf(STORE), lines = [];
+  lines.push('あなたはサウナ施設のシフト作成の担当です。次の条件で ' + st.name + ' の ' + B.label + ' のシフト案を作ってください。');
+  lines.push('');
+  lines.push('【営業時間】' + hm(st.start) + '〜' + hm(st.end) + '　【刻み】' + B.slot + '分');
+  lines.push('【必要人数】(日：時間帯=人数)');
+  B.days.forEach(function (x) {
+    var nd = ((B.needs || {})[STORE] || {})[x.d];
+    if (nd) lines.push(x.d + '日(' + W.charAt(x.w) + ')：' + nd.ranges.map(function (r) { return hm(r[0]) + '-' + hm(r[1]) + '=' + r[2] + '人'; }).join('、'));
+  });
+  lines.push('');
+  lines.push('【シフト希望】(氏名(雇用区分)：日 開始-終了。希望の外には入れない)');
+  var by = {};
+  B.req.filter(function (r) { return r[1] === STORE; }).forEach(function (r) { (by[r[4]] = by[r[4]] || []).push(r[0] + '日 ' + r[2] + '-' + r[3]); });
+  Object.keys(by).forEach(function (u) { lines.push(nameOfU(u) + '(' + (empOf(u) || '-') + ')：' + by[u].join('、')); });
+  lines.push('');
+  lines.push('【決まり】');
+  (B.breaks || []).forEach(function (b) { lines.push('・休憩：' + b.emp + 'は在籍' + (b.over / 60) + '時間' + (b.strict ? 'を超える' : '以上') + 'と' + b.min + '分(時刻は決めない)'); });
+  (B.limits || []).forEach(function (l) {
+    var t = [l.day != null ? '1日の実働' + l.day + '時間以内' : '', l.week != null ? '週(月曜から)の実働' + l.week + '時間以内' : '', l.weekOff != null ? '各週に休日' + l.weekOff + '日以上' : '', l.monthOff != null ? '月に休日' + l.monthOff + '日以上' : ''].filter(Boolean);
+    if (t.length) lines.push('・' + l.emp + '：' + t.join('、'));
+  });
+  lines.push('・必要人数を満たすことを優先し、特定の人に偏らないようにする');
+  lines.push('');
+  lines.push('【答え方】説明は不要です。1行に1人分を、次の形だけで書いてください(氏名は上の希望の書き方のまま)。');
+  lines.push('日|氏名|開始|終了');
+  lines.push('例：3|大井史洋|10:00|18:00');
+  return lines.join('\n');
+}
+var AI_PLAN = null;
+function renderAi() {
+  g('vAi').innerHTML =
+    '<div class="box" style="margin-bottom:12px;"><h3>1. 相談の文章(この店舗・この月)</h3><div class="muted">「コピー」して、Claude などのAIに貼り付けて送ってください。個人の連絡先などは入っていません。</div>' +
+    '<textarea class="big" id="aiQ" readonly>' + esc(aiPrompt()) + '</textarea><div style="margin-top:6px;"><button class="btn solid" id="aiCopy">コピー</button></div></div>' +
+    '<div class="box"><h3>2. AIの答えを貼り付けて読み込む</h3><div class="muted">「日|氏名|開始|終了」の行だけを読み込みます。読み込むと、答えに出てくる日の、この店舗の確定を<b>置き換え</b>ます(答えに無い日はそのまま)。</div>' +
+    '<textarea class="big" id="aiA" placeholder="ここに貼り付け"></textarea><div style="margin-top:6px;"><button class="btn" id="aiParse">読み込む前に確かめる</button> <button class="btn solid" id="aiApply" disabled>この案で確定にする</button></div><div id="aiMsg" style="margin-top:8px;"></div></div>';
+  g('aiCopy').onclick = function () { var t = g('aiQ'); t.select(); try { navigator.clipboard.writeText(t.value); } catch (e) { document.execCommand('copy'); } g('aiCopy').textContent = 'コピーしました'; };
+  g('aiParse').onclick = function () {
+    var st = storeOf(STORE), byName = {}, plan = {}, bad = [], n = 0;
+    Object.keys(B.staff).forEach(function (u) { byName[String(nameOfU(u)).replace(/[\s　]/g, '')] = u; });
+    g('aiA').value.split(/\r?\n/).forEach(function (line) {
+      var m = line.match(/^\s*(\d{1,2})\s*[|｜,\t]\s*(.+?)\s*[|｜,\t]\s*(\d{1,2}:\d{2})\s*[|｜,\t]\s*(\d{1,2}:\d{2})/);
+      if (!m) return;
+      var d = Number(m[1]), u = byName[m[2].replace(/[\s　]/g, '')], s = mins(m[3]), e = mins(m[4]);
+      if (!(d >= 1 && d <= B.days.length)) { bad.push(line + '(日付)'); return; }
+      if (!u) { bad.push(line + '(氏名が見つからない)'); return; }
+      if (!(s < e) || s < st.start || e > st.end) { bad.push(line + '(時刻・営業時間の外)'); return; }
+      (plan[d] = plan[d] || []).push([u, hm(s), hm(e)]); n++;
+    });
+    AI_PLAN = n ? plan : null;
+    g('aiApply').disabled = !AI_PLAN || !!B.readonly;
+    g('aiMsg').innerHTML = (n ? '<div>読み込める行：<b>' + n + '件</b>(' + Object.keys(plan).length + '日分：' + Object.keys(plan).join('・') + '日)</div>' : '<div class="muted">読み込める行がありません(「日|氏名|開始|終了」の形か確かめてください)</div>') +
+      (bad.length ? '<div style="color:var(--err);margin-top:4px;">読み込まない行 ' + bad.length + '件：<br>' + bad.slice(0, 10).map(esc).join('<br>') + '</div>' : '');
+  };
+  g('aiApply').onclick = function () {
+    if (!AI_PLAN) return;
+    var days = Object.keys(AI_PLAN).map(Number);
+    if (!confirm(days.length + '日分の、この店舗の確定を、AIの案で置き換えます。よろしいですか？')) return;
+    days.forEach(function (d) { CONF[key(STORE, d)] = AI_PLAN[d]; DIRTY[key(STORE, d)] = true; });
+    g('aiApply').disabled = true; g('aiMsg').innerHTML = '保存しています…';
+    var chain = Promise.resolve(true), okN = 0;
+    days.forEach(function (d) { chain = chain.then(function () { return saveDayAll(d).then(function (r) { if (r) okN++; }); }); });
+    chain.then(function () { g('aiMsg').innerHTML = okN + '/' + days.length + '日分を保存しました。「日ごと」「月の一覧」で確かめてください。'; AI_PLAN = null; renderStrip(); renderChecks(); });
+  };
+}
+
+// ===== 募集文(必要人数に届かない時間帯) =====
+function renderRec() {
+  var st = storeOf(STORE), lines = [];
+  B.days.forEach(function (x) {
+    var sm = sums(x.d), cs = sm.cols, i = 0;
+    while (i < cs.length) {
+      var lack = sm.need[i] - sm.count[i];
+      if (lack > 0) {
+        var j = i, mx = lack;
+        while (j + 1 < cs.length && sm.need[j + 1] - sm.count[j + 1] > 0) { j++; mx = Math.max(mx, sm.need[j] - sm.count[j]); }
+        lines.push('・' + Number(B.month.slice(5, 7)) + '/' + x.d + '(' + W.charAt(x.w) + ') ' + hm(cs[i]) + '〜' + hm(cs[j] + B.slot) + '　あと' + mx + '人');
+        i = j + 1;
+      } else i++;
+    }
+  });
+  var text = lines.length ? '【スタッフ募集】' + st.name + ' ' + B.label + '\n次の時間に入れる方を募集しています。入れる方は返信をお願いします！\n' + lines.join('\n') : '';
+  g('vRec').innerHTML = '<div class="box"><h3>募集文(確定が必要人数に届かない時間帯)</h3>' +
+    (text ? '<div class="muted">直してから「コピー」して、LINE WORKS などに貼り付けてください。</div><textarea class="big" id="recT">' + esc(text) + '</textarea><div style="margin-top:6px;"><button class="btn solid" id="recCopy">コピー</button></div>'
+      : '<div class="muted">必要人数に届かない時間帯はありません(必要人数はシフト設定の「必要人数」)。</div>') + '</div>';
+  if (g('recCopy')) g('recCopy').onclick = function () { var t = g('recT'); t.select(); try { navigator.clipboard.writeText(t.value); } catch (e) { document.execCommand('copy'); } g('recCopy').textContent = 'コピーしました'; };
+}
+
+// ===== 画面の切り替え =====
+var VIEWNOW = 'vDay';
+g('vtabs').addEventListener('click', function (e) {
+  var b = e.target.closest('.vtab'); if (!b) return;
+  var v = b.getAttribute('data-v');
+  leaveDay().then(function () {
+    VIEWNOW = v;
+    Array.prototype.forEach.call(document.querySelectorAll('.vtab'), function (x) { x.classList.toggle('on', x === b); });
+    ['vDay', 'vMonth', 'vAi', 'vRec'].forEach(function (id) { g(id).hidden = id !== v; });
+    if (v === 'vMonth') renderMonth();
+    if (v === 'vAi') renderAi();
+    if (v === 'vRec') renderRec();
+  });
+});
 </script>
 </body>
 </html>

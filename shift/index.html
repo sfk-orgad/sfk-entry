@@ -110,7 +110,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-11-05a';
+var PAGE_VERSION = '2026-11-16a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -230,7 +230,9 @@ function startForm(D) {
     $('back').href = D.portalUrl; $('back').style.visibility = 'visible';
     $('back2').href = D.portalUrl; $('backWrap').style.display = 'block';
   }
-  $('sub').textContent = '締め切り：' + D.month.deadline + '(締め切りまでは何度でも修正できます)';
+  $('sub').textContent = '締め切り：' + D.month.deadline + '(締め切りまでは何度でも修正できます)' +
+    // 店舗ごとに締め切りが違い、ほかの月を受け付けている店舗があるとき
+    ((D.closed || []).length ? '　※' + D.closed.map(function (x) { return x.name + 'は' + x.month + '分を受付中'; }).join('、') + '(この画面の月は締め切りました)' : '');
   $('maxr').textContent = D.maxRanges;
 
   if (!D.stores.length) {

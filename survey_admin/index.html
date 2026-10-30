@@ -106,7 +106,7 @@
       <div class="row" style="margin-top:12px;">
         <button class="ghost" id="autoLinkBtn" type="button">StaffMaster から今すぐ同期</button>
       </div>
-      <div class="sub" style="margin-top:6px;">スタッフID・お客様に見せる名前(呼び名)・所属・在籍は StaffMaster から10分おきに自動で入ります。手で直すのは、アンケートDBの「スタッフマスタ」の 名指し対象・ひとこと・特徴キーワード だけです。</div>
+      <div class="sub" style="margin-top:6px;">スタッフID・お客様に見せる名前(呼び名)・所属・在籍は StaffMaster から10分おきに自動で入ります。ひとこと・特徴キーワード・名指し対象も、ポータルの「スタッフ管理」で直します(StaffMaster が正)。</div>
       <div class="msg" id="linkMsg"></div>
     </div>
 
@@ -293,7 +293,7 @@ function parseVisitCsv(text) {
 <script>
 (function () {
   var KEY = '', STATUS = null, PARSED = null;
-  var PAGE_VERSION = '2026-11-08a';
+  var PAGE_VERSION = '2026-11-10a';
   var P = Portal.start({ tool: 'survey_admin', title: 'アンケートの管理' });
   if (!P) return;
   // 前の版の google.script.run の関数名 → Bot の API。最初の引数(合言葉)は使わない

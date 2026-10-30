@@ -83,15 +83,15 @@ textarea { min-height: 120px; resize: vertical; line-height: 1.7; }
   <!-- 暗証番号(ポータルの権限に加えて、もう1つの確認) -->
   <section id="vLogin" hidden>
     <h1>暗証番号</h1>
-    <p class="sub">管理者から受け取った暗証番号(合言葉)を入れてください。<br>1回入れると、操作が続くあいだ2時間は入れ直さなくてよくなります。</p>
+    <p class="sub">お店で決めている暗証番号を入れてください。<br>1回入れると、操作が続くあいだ2時間は入れ直さなくてよくなります。</p>
     <div class="card">
       <label class="field"><span>暗証番号</span>
-        <input type="password" id="code" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="例：abcd-2345">
+        <input type="password" id="code" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="暗証番号">
       </label>
       <button class="btn primary wide" id="btnLogin" type="button">開く</button>
       <div id="loginMsg" class="msg error" hidden></div>
     </div>
-    <button class="btn wide adminBtn" type="button" hidden style="margin-top:14px;">編集者と暗証番号の管理</button>
+    <button class="btn wide adminBtn" type="button" hidden style="margin-top:14px;">暗証番号の管理</button>
   </section>
 
   <!-- 一覧 -->
@@ -102,7 +102,7 @@ textarea { min-height: 120px; resize: vertical; line-height: 1.7; }
     </div>
     <div id="listMsg" class="msg ok" hidden></div>
     <button class="btn primary wide" id="btnNew" type="button">＋ 新しいお店を追加</button>
-    <button class="btn wide adminBtn" type="button" hidden style="margin-top:10px;">編集者と暗証番号の管理</button>
+    <button class="btn wide adminBtn" type="button" hidden style="margin-top:10px;">暗証番号の管理</button>
     <div class="search"><input type="text" id="q" placeholder="店名で探す"></div>
     <div id="shops"></div>
   </section>
@@ -154,15 +154,28 @@ textarea { min-height: 120px; resize: vertical; line-height: 1.7; }
   <!-- 編集者と暗証番号の管理(map_admin) -->
   <section id="vAdmin" hidden>
     <button class="back" id="btnAdminBack" type="button">← もどる</button>
-    <h1>編集者と暗証番号</h1>
-    <p class="sub">暗証番号は、発行したときにこの画面に1回だけ出ます。本人に直接伝えてください。<br>編集できるのは、ポータルの権限(周遊マップ 編集)と暗証番号の両方がある人だけです。</p>
+    <h1>暗証番号の管理</h1>
     <div id="adminMsg" class="msg error" hidden></div>
+    <!-- 共通の暗証番号(方式が「共通」のとき) -->
+    <div id="sharedBox" hidden>
+      <p class="sub">ポータルの権限(周遊マップ 編集)があるスタッフは、この暗証番号で誰でも入れます。変えると、入っている人も次の操作から入れ直しになります。</p>
+      <div class="card" style="margin-bottom:14px;">
+        <div id="sharedInfo" class="note" style="margin-bottom:10px;"></div>
+        <label class="field"><span>新しい暗証番号<small class="hint">英数字4〜20文字(例：数字4けた)。画面には残らないので、決めたら控えておく</small></span><input type="password" id="newPin" autocomplete="new-password" maxlength="20"></label>
+        <button class="btn primary wide" id="btnPin" type="button">この暗証番号にする</button>
+      </div>
+    </div>
+    <!-- 1人ずつの暗証番号(方式が「個人」のとき) -->
+    <div id="personBox" hidden>
+    <p class="sub">暗証番号は、発行したときにこの画面に1回だけ出ます。本人に直接伝えてください。<br>編集できるのは、ポータルの権限(周遊マップ 編集)と暗証番号の両方がある人だけです。</p>
     <div id="codeBox" class="card" hidden style="border:2px solid var(--ok);margin-bottom:14px;"></div>
     <div class="card" style="margin-bottom:14px;">
       <label class="field"><span>新しい編集者の名前<small class="hint">例：まつい(ポータルの名前と同じでなくてよい)</small></span><input type="text" id="newName" maxlength="40"></label>
       <button class="btn primary wide" id="btnAdd" type="button">追加して暗証番号を発行</button>
     </div>
     <div id="editors"></div>
+    </div>
+    <p class="note" id="modeNote" style="margin-top:14px;"></p>
   </section>
 
   <div id="loading" class="msg" hidden>読み込み中…</div>
@@ -172,7 +185,7 @@ textarea { min-height: 120px; resize: vertical; line-height: 1.7; }
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-03c';
+var PAGE_VERSION = '2026-11-11a';
 var TOOL = 'sfkmap_edit'; // ツール一覧のツールID(地図ごとに違う。Bot はこれで地図を決める)
 
 (() => {
@@ -396,6 +409,13 @@ async function adminCall(action, extra) {
       b.hidden = false; b.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
     renderEditors(r.editors || []);
+    if (r.mode) {
+      var shared = r.mode === '共通';
+      $('sharedBox').hidden = !shared; $('personBox').hidden = shared;
+      $('sharedInfo').textContent = r.shared ? '今の暗証番号：設定済み(' + r.shared.at + '・' + r.shared.by + ')' : 'まだ決めていません。決めるまで、だれも編集に入れません。';
+      $('modeNote').textContent = '暗証番号の方式：' + r.mode + '(掲載データのスプシの「マップの設定」の「暗証番号の方式」で、共通／個人を切り替え)';
+    }
+    if (r.pinChanged) { $('newPin').value = ''; msg('adminMsg', '暗証番号を変えました。スタッフに伝えてください。', 'ok'); }
   } catch (e) { fail('adminMsg', e); }
   finally { busy = false; }
 }
@@ -414,6 +434,12 @@ function renderEditors(list) {
     row.append(re, ac); c.append(row); box.append(c);
   });
 }
+$('btnPin').onclick = () => {
+  const pin = $('newPin').value.trim();
+  if (pin.length < 4) { msg('adminMsg', '4文字以上で決めてください', 'error'); return; }
+  if (!confirm('暗証番号を変えます。いま編集中の人も、次の操作から新しい暗証番号の入れ直しになります。よろしいですか？')) return;
+  adminCall('map.pinSet', { pin: pin });
+};
 $('btnAdd').onclick = () => {
   const name = $('newName').value.trim();
   if (!name) { msg('adminMsg', '名前を入れてください', 'error'); return; }

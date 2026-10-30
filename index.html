@@ -82,6 +82,10 @@
   .minecard .mrow { display: flex; gap: 10px; align-items: baseline; padding: 3px 0; font-size: 16px; }
   .minecard .mh { font-size: 13px; color: #5F6670; min-width: 5.5em; }
   .minecard b { font-size: 17px; } .minecard .ms { font-size: 14px; color: #5F6670; }
+  .todo { background: #FFF8E6; border: 1px solid #F1D39A; border-radius: 14px; padding: 8px 14px; margin: -4px 0 12px; }
+  .todo .mh { font-size: 13px; color: #8A5A00; font-weight: 700; margin-bottom: 2px; }
+  .todo a { display: block; padding: 6px 0; color: #5A3B00; text-decoration: none; font-size: 15px; border-top: 1px solid #F5E2BA; }
+  .todo a:first-of-type { border-top: none; }
 </style>
 </head>
 <body>
@@ -521,7 +525,7 @@ function renderPortal(res, at) {
   $('me').textContent = res.name ? res.name + ' さん' : '';
 
   // 自分の「次の出勤・今日の予定」(Bot のシフトカレンダーから。表示し終わってから裏で読む・10分覚える)
-  renderMine(res.items);
+  renderMine(res.items, res);
 
   // 今日の営業
   if (res.today && res.today.length) {
@@ -649,7 +653,7 @@ $('pcClose').addEventListener('click', () => { clearInterval(pcTimer); $('pcModa
 start();
 
 // ===== 自分の「次の出勤・今日の予定」(2026-11-19。マイページの入口) =====
-function renderMine(items) {
+function renderMine(items, res) {
   const cal = (items || []).find(it => it.tool === 'calendar' && it.api);
   if (!cal) { $('mine').innerHTML = ''; return; }
   const W2 = '日月火水木金土';
@@ -664,7 +668,16 @@ function renderMine(items) {
     } else h += '<span class="ms">公開されたシフトはまだありません</span>';
     h += '</div>';
     if (r.today && r.today.length) h += '<div class="mrow"><span class="mh">今日の予定</span><span>' + r.today.map(e => (e.s ? esc(e.s) + ' ' : '') + esc(e.title)).join('<br>') + '</span></div>';
-    $('mine').innerHTML = h + '</a>';
+    h += '</a>';
+    // やること(シフト希望の未提出・未読のお知らせ)
+    const todo = [];
+    const shiftTool = (items || []).find(it => it.tool === 'shift');
+    if (r.wish && shiftTool) todo.push('<a href="' + esc(shiftTool.url) + '">📝 ' + esc(r.wish.month) + 'のシフト希望がまだです(締め切り ' + esc(r.wish.deadline) + (r.wish.left <= 3 ? '・あと' + r.wish.left + '日' : '') + ')</a>');
+    const noticeTool = (items || []).find(it => it.tool === 'notice');
+    const unread = ((res && res.notices) || []).filter(n => !n.read).length;
+    if (unread && noticeTool) todo.push('<a href="' + esc(noticeTool.url) + '">📢 未読のお知らせが ' + unread + '件あります</a>');
+    if (todo.length) h += '<div class="todo"><div class="mh">やること</div>' + todo.join('') + '</div>';
+    $('mine').innerHTML = h;
   };
   try { const c = JSON.parse(sessionStorage.getItem('mine_cache') || 'null'); if (c && Date.now() - c.at < 10 * 60000) { draw(c.r); return; } } catch (e) {}
   let tok = '';

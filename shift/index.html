@@ -110,7 +110,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-11-16a';
+var PAGE_VERSION = '2026-11-20a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -465,6 +465,7 @@ function startForm(D) {
         $('overlay').style.display = 'none'; $('submitBtn').disabled = false;
         D.existing = { days: res.days, note: res.note, updatedAt: res.updatedAt };
         clearDraft();
+        try { sessionStorage.removeItem('mine_cache'); } catch (e) {} // ポータルの「やること」を読み直させる
         dirty = false;
         var dn = $('draftNote'); if (dn) dn.parentNode.removeChild(dn);
         $('doneMsg').textContent = D.month.label + '分を受け付けました(' + res.updatedAt + ')。締め切りまでは何度でも修正できます。';

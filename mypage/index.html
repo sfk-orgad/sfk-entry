@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>マイページ</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  マイページ(GitHub Pages の mypage/index.html。2026-11-20)
+  自分の情報(氏名・StaffID・雇用区分・所属・グレード・上長・呼び名)を見る。呼び名だけ本人が直せる
+  特徴キーワード・メモ・権限などは出さない。データは認証基盤(ツール一覧の mypage の行の API＝認証基盤のURL)
+-->
+<style>
+.me-row { display: flex; padding: 9px 0; border-top: 1px solid #EEF0F2; font-size: 16px; }
+.me-row:first-of-type { border-top: none; }
+.me-row .k { width: 6.5em; color: var(--p-muted); font-size: 14px; flex-shrink: 0; }
+.links a { display: block; padding: 12px 4px; border-top: 1px solid #EEF0F2; color: var(--p-ink); text-decoration: none; font-size: 16px; }
+.links a:first-child { border-top: none; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div class="p-card" id="info"></div>
+    <div class="p-card">
+      <h2 style="margin-top:0;">呼び名</h2>
+      <div class="p-note">お客様のアンケートなどに出る名前です(名字・ニックネームなど)。空にすると、アンケートには出ません。</div>
+      <input class="p-input" id="yobina" maxlength="20" style="margin-top:8px;">
+      <div id="msg" style="margin-top:8px;"></div>
+      <button class="p-btn p-solid p-big" id="save" style="margin-top:10px;width:100%;">保存する</button>
+    </div>
+    <div class="p-card links" id="links"></div>
+    <div class="p-note">住所・口座・緊急連絡先などの変更は、今は管理者に直接伝えてください(画面からの届け出は準備中です)。</div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-11-20a';
+var P = Portal.start({ tool: 'mypage', title: 'マイページ' });
+var g = Portal.$, esc = Portal.esc;
+function row(k, v) { return '<div class="me-row"><span class="k">' + esc(k) + '</span><span>' + (v ? esc(v) : '<span class="p-muted">―</span>') + '</span></div>'; }
+function load() {
+  return P.call('me.get', {}, { retry: true }).then(function (r) {
+    if (!r.ok) { Portal.gate(r.error === 'AUTH' ? Portal.authMessage(r, 'マイページ') : '開けませんでした：' + r.error, { back: true }); return; }
+    var m = r.me;
+    g('info').innerHTML = '<h2 style="margin-top:0;">' + esc(m.name) + ' さん</h2>' + row('StaffID', m.sid) + row('雇用区分', m.emp) + row('所属', m.stores) + row('グレード', m.grade) + row('上長', m.bosses);
+    g('yobina').value = m['呼び名'] || '';
+    // ほかのツールへの近道(ポータルが持っている入口のうち、あるものだけ)
+    var S = Portal.session() || {}, apis = S.apis || {};
+    var base = location.href.replace(/mypage\/.*$/, '');
+    var links = [['calendar', '🗓 シフトカレンダー(自分の予定・全体)'], ['shift', '📝 シフト希望を出す'], ['notice', '📢 お知らせ']]
+      .filter(function (x) { return apis[x[0]]; }).map(function (x) { return '<a href="' + esc(base + x[0] + '/') + '">' + esc(x[1]) + ' ›</a>'; });
+    g('links').innerHTML = links.length ? links.join('') : '<div class="p-muted">―</div>';
+    Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
+}
+g('save').addEventListener('click', function () {
+  var b = g('save'); b.disabled = true; b.textContent = '保存しています…'; g('msg').innerHTML = '';
+  P.call('me.save', { values: { '呼び名': g('yobina').value } }).then(function (r) {
+    b.disabled = false; b.textContent = '保存する';
+    if (!r.ok) { g('msg').innerHTML = '<div class="p-err">' + esc(r.error === 'AUTH' ? Portal.authMessage(r, 'マイページ') : r.error) + '</div>'; return; }
+    g('msg').innerHTML = '<div style="color:var(--p-ok);font-weight:700;">' + (r.unchanged ? '変わったところはありません' : '保存しました(アンケートには1時間ほどで反映されます)') + '</div>';
+  }).catch(function () { b.disabled = false; b.textContent = '保存する'; g('msg').innerHTML = '<div class="p-err">通信に失敗しました。もう一度押してください</div>'; });
+});
+if (P) load();
+</script>
+</body>
+</html>

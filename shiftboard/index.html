@@ -31,6 +31,23 @@
   .btn.solid { background: var(--c); color: #fff; border-color: var(--c); font-weight: 700; }
   .tab { padding: 7px 14px; border: 1px solid #B9C0C8; border-radius: 999px; background: #fff; cursor: pointer; font-family: inherit; font-size: 14px; }
   .tab.on { background: var(--c); color: #fff; border-color: var(--c); font-weight: 700; }
+  /* 画面の切り替え(日ごと・月の一覧とチェック・AI相談・募集文) */
+  .vtabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; border-bottom: 2px solid var(--soft); padding-bottom: 8px; }
+  .vtab { padding: 8px 16px; border: 1px solid #B9C0C8; border-radius: 10px 10px 0 0; background: #fff; cursor: pointer; font-family: inherit; font-size: 15px; }
+  .vtab.on { background: var(--c); color: #fff; border-color: var(--c); font-weight: 700; }
+  .vtab .badge { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: var(--err); color: #fff; font-size: 12px; }
+  .mt { border-collapse: collapse; font-size: 13px; }
+  .mt th, .mt td { border: 1px solid var(--line); padding: 3px 4px; text-align: center; white-space: nowrap; }
+  .mt th { background: var(--soft); position: sticky; top: 0; }
+  .mt td.nm { text-align: left; font-weight: 700; position: sticky; left: 0; background: #fff; }
+  .mt td.off { color: #B0B6BD; }
+  .mt td.bad { background: #FDECEA; }
+  .mt td.sum { background: #F7F9FA; font-weight: 700; }
+  .mt .sat { color: var(--sat); } .mt .sun { color: var(--err); }
+  .warnlist { margin: 10px 0; padding: 0; list-style: none; }
+  .warnlist li { padding: 6px 10px; border-left: 4px solid var(--err); background: #FFF6F5; margin-bottom: 6px; font-size: 14px; }
+  .warnlist li.ok { border-color: #1F7A3D; background: #EFF8F1; }
+  textarea.big { width: 100%; min-height: 220px; font-size: 13px; font-family: ui-monospace, Menlo, monospace; border: 1px solid #B9C0C8; border-radius: 8px; padding: 8px; }
   .muted { color: var(--muted); font-size: 12px; }
   /* 日の帯 */
   .strip { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 10px; }
@@ -118,7 +135,17 @@
       <span id="pubState" class="muted"></span>
       <span id="msg" class="muted"></span>
     </div>
+ <div class="vtabs" id="vtabs">
+      <button class="vtab on" data-v="vDay">日ごと(タイムライン)</button>
+      <button class="vtab" data-v="vMonth">月の一覧とチェック<span class="badge" id="chkBadge" hidden></span></button>
+      <button class="vtab" data-v="vAi">AI相談</button>
+      <button class="vtab" data-v="vRec">募集文</button>
+    </div>
     <div id="roNote" style="display:none;background:#FFF8E6;border:1px solid #F2D58A;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:14px;">過去の月(アーカイブ済み)です。<b>見るだけ</b>で、編集・公開はできません。勤務表・タイムラインの書き出しはできます。</div>
+    <div id="vMonth" hidden></div>
+    <div id="vAi" hidden></div>
+    <div id="vRec" hidden></div>
+    <div id="vDay">
     <div class="strip" id="strip"></div>
     <div class="bar2">
       <button class="btn" id="fillAll">全員を希望どおりに確定</button>
@@ -140,6 +167,7 @@
       <div class="box"><h3>この店舗の未提出(この月)</h3><div id="unsub" class="muted"></div></div>
       <div class="box"><h3>見方</h3><div class="muted">薄い黄色＝希望、青＝確定、オレンジ＝希望の外に置いた確定。<br>行の上をドラッグ＝その時間を確定／希望をクリック＝希望どおりに確定／確定をクリック＝時刻の変更・削除。<br>変更は2秒後に自動で保存(「この日を保存」ですぐ保存)。<br>下の行：必要人数・確定人数(必要人数に届かない時間は赤)・希望人数(参考)・グレード集計(確定で数える)。上の帯：確定人数/希望人数。下線が赤い日は確定に不足がある日。</div></div>
     </div>
+    </div>
     <div class="muted" id="ver" style="margin-top:10px;"></div>
   </div>
 </div>
@@ -151,7 +179,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-11-05a';
+var PAGE_VERSION = '2026-11-15a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -299,6 +327,7 @@ function renderAll() {
   g('tabs').innerHTML = visibleStores().map(function (s) { return '<button class="tab' + (s.code === STORE ? ' on' : '') + '" data-s="' + esc(s.code) + '">' + esc(s.name) + '</button>'; }).join(' ');
   g('slotInfo').textContent = B.slot + '分刻み';
   renderStrip(); renderDay(); renderUnsub();
+  if (typeof renderChecks === 'function') { renderChecks(); if (VIEWNOW === 'vAi') renderAi(); if (VIEWNOW === 'vRec') renderRec(); }
 }
 
 function renderStrip() {
@@ -499,7 +528,7 @@ function changedKeys(stores) {
     setState('未保存(2秒後に保存)', 'dirty');
     saveTimer = setTimeout(function () { saveDayAll(DAY); }, 2000);
   }
-  renderStrip(); renderDay();
+  renderStrip(); renderDay(); renderChecks();
 }
 // その日の、未保存の店舗をすべて「1回で」保存する(全部保存するか、どれも保存しないか)
 function saveDayAll(day) {
@@ -660,12 +689,18 @@ g('pub').addEventListener('click', function () {
   var on = !(((B.published || {})[STORE] || {})[B.month]);
   var st = storeOf(STORE);
   if (!confirm(on ? st.name + 'の' + B.label + 'のシフトを、スタッフのカレンダーに公開しますか？\n(公開後に直した分も、そのまま反映されます)' : st.name + 'の' + B.label + 'の公開をやめますか？\n(スタッフのカレンダーに出なくなります)')) return;
+  // 公開するときは、スタッフに知らせるかを選ぶ(知らせ方はシフト設定の「公開の通知」：個別／全体／両方／なし)
+  var notify = on ? confirm('スタッフに LINE WORKS で知らせますか？\n［OK］知らせる　［キャンセル］今回は知らせない') : false;
+  var chk = on ? checks() : [];
+  if (on && chk.length && !confirm('労働時間のチェックで ' + chk.length + '件の注意があります(「月の一覧とチェック」で確認できます)。このまま公開しますか？')) return;
   leaveDay().then(function () {
-    return api('board.publish', { month: B.month, store: STORE, on: on });
+    return api('board.publish', { month: B.month, store: STORE, on: on, notify: notify });
   }).then(function (res) {
     if (!res || !res.ok) { g('msg').textContent = '公開を変えられませんでした：' + (res ? res.error : ''); return; }
     B.published = res.published; renderPub();
-    g('msg').textContent = on ? '公開しました' : '公開をやめました';
+    g('msg').textContent = !on ? '公開をやめました' : '公開しました' + (!notify ? '(知らせていません)' : res.notify === 'なし' ? '(シフト設定の「公開の通知」が なし のため知らせていません)' :
+      '(' + [res.sent ? res.sent + '人に個別' : '', res.channel ? 'チャンネルに1通' : ''].filter(Boolean).join('・') + (res.failed && res.failed.length ? '／送れなかった：' + res.failed.join('、') : '') + ')');
+    renderChecks();
   });
 });
 g('kinmu').addEventListener('click', function () {
@@ -709,6 +744,200 @@ else {
   if (pre) { HOW = '先読み'; showBoard(pre); load(pre.month, true); } // 表示してから裏で最新を確かめる
   else load('');
 }
+
+// =====================================================================
+// 休憩・実働・労働時間のチェック(シフト設定の「休憩の決まり」「労働時間の決まり」。雇用区分ごと)
+// =====================================================================
+function empOf(uid) { return ((B.staff || {})[uid] || {}).emp || ''; }
+function nameOfU(uid) { return ((B.staff || {})[uid] || {}).name || uid; }
+// 在籍(分)から休憩(分)：その雇用区分の行のうち、当てはまる(以上／超える)いちばん長いもの
+function breakOf(emp, span) {
+  return (B.breaks || []).filter(function (b) { return b.emp === emp && (b.strict ? span > b.over : span >= b.over); })
+    .reduce(function (a, b) { return Math.max(a, b.min); }, 0);
+}
+// その人のその日の在籍・休憩・実働(全店舗の確定を合わせる)
+function dayWork(uid, day) {
+  var span = 0, segs = [];
+  B.stores.forEach(function (st) { (CONF[key(st.code, day)] || []).forEach(function (c) { if (c[0] === uid) { span += mins(c[2]) - mins(c[1]); segs.push({ store: st.code, s: c[1], e: c[2] }); } }); });
+  var br = span ? breakOf(empOf(uid), span) : 0;
+  return { span: span, br: br, work: span - br, segs: segs };
+}
+function hhmm(m) { return Math.floor(m / 60) + ':' + ('0' + (m % 60)).slice(-2); }
+function hrs(m) { return (Math.round(m / 6) / 10).toFixed(1); }
+function ymOf(d) { return new Date(Number(B.month.slice(0, 4)), Number(B.month.slice(5, 7)) - 1, d); }
+// この月に確定がある人(全店舗)
+function confUids(storeOnly) {
+  var u = {};
+  Object.keys(CONF).forEach(function (k) { if (storeOnly && k.split(':')[0] !== storeOnly) return; (CONF[k] || []).forEach(function (c) { u[c[0]] = true; }); });
+  return Object.keys(u);
+}
+// 労働時間のチェック(この店舗に確定がある人。時間は全店舗で合わせる)。注意の配列
+function checks() {
+  if (!B) return [];
+  var out = [], last = B.days.length;
+  confUids(STORE).forEach(function (uid) {
+    var lim = (B.limits || []).filter(function (l) { return l.emp === empOf(uid); })[0];
+    if (!lim) return;
+    var nm = nameOfU(uid), w = {}, offs = 0, over = [], overMax = 0;
+    for (var d = 1; d <= last; d++) {
+      var x = dayWork(uid, d);
+      if (!x.span) offs++;
+      if (lim.day != null && x.work > lim.day * 60) { over.push(d); overMax = Math.max(overMax, x.work); }
+      // 週(月曜から)ごとに足す。月の途中で切れる週は、その月の中の日だけで数える
+      var dt = ymOf(d), mon = d - ((dt.getDay() + 6) % 7);
+      var wk = w[mon] = w[mon] || { work: 0, off: 0, days: 0, from: Math.max(1, mon), to: Math.min(last, mon + 6) };
+      wk.work += x.work; wk.days++; if (!x.span) wk.off++;
+    }
+    if (over.length) out.push(nm + '：1日の実働が上限 ' + lim.day + '時間を超える日 ' + over.length + '日(' + over.join('・') + '日。最大 ' + hrs(overMax) + '時間)');
+    Object.keys(w).forEach(function (k) {
+      var wk = w[k], full = wk.days === 7;
+      if (lim.week != null && wk.work > lim.week * 60) out.push(nm + '：' + wk.from + '日〜' + wk.to + '日の週の実働が ' + hrs(wk.work) + '時間(上限 ' + lim.week + '時間' + (full ? '' : '・月をまたぐ週はこの月の分だけ') + ')');
+      if (lim.weekOff != null && full && wk.off < lim.weekOff) out.push(nm + '：' + wk.from + '日〜' + wk.to + '日の週の休日が ' + wk.off + '日(' + lim.weekOff + '日以上)');
+    });
+    if (lim.monthOff != null && offs < lim.monthOff) out.push(nm + '：この月の休日が ' + offs + '日(' + lim.monthOff + '日以上)');
+  });
+  // 前月末日までに周知(公開)
+  var pub = ((B.published || {})[STORE] || {})[B.month];
+  var dl = new Date(Number(B.month.slice(0, 4)), Number(B.month.slice(5, 7)) - 1, 0, 23, 59);
+  if (!pub && new Date() > dl) out.push('前月末日(' + (dl.getMonth() + 1) + '/' + dl.getDate() + ')までに公開(周知)できていません');
+  return out;
+}
+function renderChecks() {
+  var n = checks().length;
+  g('chkBadge').hidden = !n; g('chkBadge').textContent = n;
+  if (!g('vMonth').hidden) renderMonth();
+}
+
+// ===== 月の一覧とチェック =====
+function renderMonth() {
+  var uids = confUids(STORE).sort(function (a, b) { return String(nameOfU(a)).localeCompare(String(nameOfU(b)), 'ja'); });
+  var st = storeOf(STORE), list = checks();
+  var h = '<h3 style="margin:4px 0;">' + esc(st ? st.name : '') + '　' + esc(B.label) + '</h3>' +
+    '<div class="muted">休憩はシフト設定の「休憩の決まり」から自動で数えます(時刻は決めない)。合計は全店舗の分を合わせた時間です。</div>' +
+    '<ul class="warnlist">' + (list.length ? list.map(function (x) { return '<li>⚠ ' + esc(x) + '</li>'; }).join('') : '<li class="ok">労働時間のチェック：注意はありません</li>') + '</ul>';
+  h += '<div class="grid-wrap"><table class="mt"><tr><th>氏名</th>' + B.days.map(function (x) {
+    return '<th class="' + (x.hol || x.w === 0 ? 'sun' : x.w === 6 ? 'sat' : '') + '">' + x.d + '<br>' + W.charAt(x.w) + '</th>';
+  }).join('') + '<th>日数</th><th>在籍</th><th>休憩</th><th>実働</th></tr>';
+  uids.forEach(function (uid) {
+    var tot = { n: 0, span: 0, br: 0, work: 0 };
+    h += '<tr><td class="nm">' + esc(nameOfU(uid)) + '<div class="muted" style="font-weight:400;">' + esc(empOf(uid) || '(雇用区分なし)') + '</div></td>';
+    B.days.forEach(function (x) {
+      var dw = dayWork(uid, x.d);
+      var here = dw.segs.filter(function (s) { return s.store === STORE; });
+      if (dw.span) { tot.n++; tot.span += dw.span; tot.br += dw.br; tot.work += dw.work; }
+      h += here.length ? '<td>' + here.map(function (s) { return s.s + '<br>' + s.e; }).join('<br>') + (dw.br ? '<div class="muted">休' + dw.br + '</div>' : '') + '</td>'
+        : (dw.span ? '<td class="off">他店</td>' : '<td class="off">-</td>');
+    });
+    h += '<td class="sum">' + tot.n + '</td><td class="sum">' + hrs(tot.span) + '</td><td class="sum">' + hrs(tot.br) + '</td><td class="sum">' + hrs(tot.work) + '</td></tr>';
+  });
+  h += '</table></div>';
+  if (!uids.length) h += '<div class="muted" style="margin-top:8px;">この月はまだ確定がありません</div>';
+  g('vMonth').innerHTML = h;
+}
+
+// ===== AI相談(文章を作って Claude などに貼り、返ってきた案を読み込む) =====
+function aiPrompt() {
+  var st = storeOf(STORE), lines = [];
+  lines.push('あなたはサウナ施設のシフト作成の担当です。次の条件で ' + st.name + ' の ' + B.label + ' のシフト案を作ってください。');
+  lines.push('');
+  lines.push('【営業時間】' + hm(st.start) + '〜' + hm(st.end) + '　【刻み】' + B.slot + '分');
+  lines.push('【必要人数】(日：時間帯=人数)');
+  B.days.forEach(function (x) {
+    var nd = ((B.needs || {})[STORE] || {})[x.d];
+    if (nd) lines.push(x.d + '日(' + W.charAt(x.w) + ')：' + nd.ranges.map(function (r) { return hm(r[0]) + '-' + hm(r[1]) + '=' + r[2] + '人'; }).join('、'));
+  });
+  lines.push('');
+  lines.push('【シフト希望】(氏名(雇用区分)：日 開始-終了。希望の外には入れない)');
+  var by = {};
+  B.req.filter(function (r) { return r[1] === STORE; }).forEach(function (r) { (by[r[4]] = by[r[4]] || []).push(r[0] + '日 ' + r[2] + '-' + r[3]); });
+  Object.keys(by).forEach(function (u) { lines.push(nameOfU(u) + '(' + (empOf(u) || '-') + ')：' + by[u].join('、')); });
+  lines.push('');
+  lines.push('【決まり】');
+  (B.breaks || []).forEach(function (b) { lines.push('・休憩：' + b.emp + 'は在籍' + (b.over / 60) + '時間' + (b.strict ? 'を超える' : '以上') + 'と' + b.min + '分(時刻は決めない)'); });
+  (B.limits || []).forEach(function (l) {
+    var t = [l.day != null ? '1日の実働' + l.day + '時間以内' : '', l.week != null ? '週(月曜から)の実働' + l.week + '時間以内' : '', l.weekOff != null ? '各週に休日' + l.weekOff + '日以上' : '', l.monthOff != null ? '月に休日' + l.monthOff + '日以上' : ''].filter(Boolean);
+    if (t.length) lines.push('・' + l.emp + '：' + t.join('、'));
+  });
+  lines.push('・必要人数を満たすことを優先し、特定の人に偏らないようにする');
+  lines.push('');
+  lines.push('【答え方】説明は不要です。1行に1人分を、次の形だけで書いてください(氏名は上の希望の書き方のまま)。');
+  lines.push('日|氏名|開始|終了');
+  lines.push('例：3|大井史洋|10:00|18:00');
+  return lines.join('\n');
+}
+var AI_PLAN = null;
+function renderAi() {
+  g('vAi').innerHTML =
+    '<div class="box" style="margin-bottom:12px;"><h3>1. 相談の文章(この店舗・この月)</h3><div class="muted">「コピー」して、Claude などのAIに貼り付けて送ってください。個人の連絡先などは入っていません。</div>' +
+    '<textarea class="big" id="aiQ" readonly>' + esc(aiPrompt()) + '</textarea><div style="margin-top:6px;"><button class="btn solid" id="aiCopy">コピー</button></div></div>' +
+    '<div class="box"><h3>2. AIの答えを貼り付けて読み込む</h3><div class="muted">「日|氏名|開始|終了」の行だけを読み込みます。読み込むと、答えに出てくる日の、この店舗の確定を<b>置き換え</b>ます(答えに無い日はそのまま)。</div>' +
+    '<textarea class="big" id="aiA" placeholder="ここに貼り付け"></textarea><div style="margin-top:6px;"><button class="btn" id="aiParse">読み込む前に確かめる</button> <button class="btn solid" id="aiApply" disabled>この案で確定にする</button></div><div id="aiMsg" style="margin-top:8px;"></div></div>';
+  g('aiCopy').onclick = function () { var t = g('aiQ'); t.select(); try { navigator.clipboard.writeText(t.value); } catch (e) { document.execCommand('copy'); } g('aiCopy').textContent = 'コピーしました'; };
+  g('aiParse').onclick = function () {
+    var st = storeOf(STORE), byName = {}, plan = {}, bad = [], n = 0;
+    Object.keys(B.staff).forEach(function (u) { byName[String(nameOfU(u)).replace(/[\s　]/g, '')] = u; });
+    g('aiA').value.split(/\r?\n/).forEach(function (line) {
+      var m = line.match(/^\s*(\d{1,2})\s*[|｜,\t]\s*(.+?)\s*[|｜,\t]\s*(\d{1,2}:\d{2})\s*[|｜,\t]\s*(\d{1,2}:\d{2})/);
+      if (!m) return;
+      var d = Number(m[1]), u = byName[m[2].replace(/[\s　]/g, '')], s = mins(m[3]), e = mins(m[4]);
+      if (!(d >= 1 && d <= B.days.length)) { bad.push(line + '(日付)'); return; }
+      if (!u) { bad.push(line + '(氏名が見つからない)'); return; }
+      if (!(s < e) || s < st.start || e > st.end) { bad.push(line + '(時刻・営業時間の外)'); return; }
+      (plan[d] = plan[d] || []).push([u, hm(s), hm(e)]); n++;
+    });
+    AI_PLAN = n ? plan : null;
+    g('aiApply').disabled = !AI_PLAN || !!B.readonly;
+    g('aiMsg').innerHTML = (n ? '<div>読み込める行：<b>' + n + '件</b>(' + Object.keys(plan).length + '日分：' + Object.keys(plan).join('・') + '日)</div>' : '<div class="muted">読み込める行がありません(「日|氏名|開始|終了」の形か確かめてください)</div>') +
+      (bad.length ? '<div style="color:var(--err);margin-top:4px;">読み込まない行 ' + bad.length + '件：<br>' + bad.slice(0, 10).map(esc).join('<br>') + '</div>' : '');
+  };
+  g('aiApply').onclick = function () {
+    if (!AI_PLAN) return;
+    var days = Object.keys(AI_PLAN).map(Number);
+    if (!confirm(days.length + '日分の、この店舗の確定を、AIの案で置き換えます。よろしいですか？')) return;
+    days.forEach(function (d) { CONF[key(STORE, d)] = AI_PLAN[d]; DIRTY[key(STORE, d)] = true; });
+    g('aiApply').disabled = true; g('aiMsg').innerHTML = '保存しています…';
+    var chain = Promise.resolve(true), okN = 0;
+    days.forEach(function (d) { chain = chain.then(function () { return saveDayAll(d).then(function (r) { if (r) okN++; }); }); });
+    chain.then(function () { g('aiMsg').innerHTML = okN + '/' + days.length + '日分を保存しました。「日ごと」「月の一覧」で確かめてください。'; AI_PLAN = null; renderStrip(); renderChecks(); });
+  };
+}
+
+// ===== 募集文(必要人数に届かない時間帯) =====
+function renderRec() {
+  var st = storeOf(STORE), lines = [];
+  B.days.forEach(function (x) {
+    var sm = sums(x.d), cs = sm.cols, i = 0;
+    while (i < cs.length) {
+      var lack = sm.need[i] - sm.count[i];
+      if (lack > 0) {
+        var j = i, mx = lack;
+        while (j + 1 < cs.length && sm.need[j + 1] - sm.count[j + 1] > 0) { j++; mx = Math.max(mx, sm.need[j] - sm.count[j]); }
+        lines.push('・' + Number(B.month.slice(5, 7)) + '/' + x.d + '(' + W.charAt(x.w) + ') ' + hm(cs[i]) + '〜' + hm(cs[j] + B.slot) + '　あと' + mx + '人');
+        i = j + 1;
+      } else i++;
+    }
+  });
+  var text = lines.length ? '【スタッフ募集】' + st.name + ' ' + B.label + '\n次の時間に入れる方を募集しています。入れる方は返信をお願いします！\n' + lines.join('\n') : '';
+  g('vRec').innerHTML = '<div class="box"><h3>募集文(確定が必要人数に届かない時間帯)</h3>' +
+    (text ? '<div class="muted">直してから「コピー」して、LINE WORKS などに貼り付けてください。</div><textarea class="big" id="recT">' + esc(text) + '</textarea><div style="margin-top:6px;"><button class="btn solid" id="recCopy">コピー</button></div>'
+      : '<div class="muted">必要人数に届かない時間帯はありません(必要人数はシフト設定の「必要人数」)。</div>') + '</div>';
+  if (g('recCopy')) g('recCopy').onclick = function () { var t = g('recT'); t.select(); try { navigator.clipboard.writeText(t.value); } catch (e) { document.execCommand('copy'); } g('recCopy').textContent = 'コピーしました'; };
+}
+
+// ===== 画面の切り替え =====
+var VIEWNOW = 'vDay';
+g('vtabs').addEventListener('click', function (e) {
+  var b = e.target.closest('.vtab'); if (!b) return;
+  var v = b.getAttribute('data-v');
+  leaveDay().then(function () {
+    VIEWNOW = v;
+    Array.prototype.forEach.call(document.querySelectorAll('.vtab'), function (x) { x.classList.toggle('on', x === b); });
+    ['vDay', 'vMonth', 'vAi', 'vRec'].forEach(function (id) { g(id).hidden = id !== v; });
+    if (v === 'vMonth') renderMonth();
+    if (v === 'vAi') renderAi();
+    if (v === 'vRec') renderRec();
+  });
+});
 </script>
 </body>
 </html>

@@ -47,6 +47,29 @@
   .warnlist { margin: 10px 0; padding: 0; list-style: none; }
   .warnlist li { padding: 6px 10px; border-left: 4px solid var(--err); background: #FFF6F5; margin-bottom: 6px; font-size: 14px; }
   .warnlist li.ok { border-color: #1F7A3D; background: #EFF8F1; }
+  /* シフト表(印刷・PDF・Excel。2026-11-18) */
+  #sheetView { display: none; position: fixed; inset: 0; background: #E9ECEF; z-index: 100; overflow: auto; }
+  #sheetView .bar { position: sticky; top: 0; background: var(--c); color: #fff; padding: 8px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; z-index: 2; }
+  #sheetView .bar .btn { background: #fff; }
+  #sheetPage { background: #fff; margin: 12px auto; padding: 8mm; width: 297mm; min-height: 200mm; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+  .ps h1 { font-size: 13pt; margin: 0 0 2mm; } .ps .meta { font-size: 7.5pt; color: #555; margin-bottom: 2mm; display: flex; justify-content: space-between; }
+  .ps table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 6.6pt; }
+  .ps th, .ps td { border: .3mm solid #9AA3AD; padding: .4mm .2mm; text-align: center; overflow: hidden; white-space: nowrap; }
+  .ps th { background: #EEF1F4; font-weight: 700; }
+  .ps th.sun, .ps th.hol { color: #B42318; } .ps th.sat { color: #1D5BB8; }
+  .ps td.nm { text-align: left; font-weight: 700; font-size: 7.5pt; padding-left: 1mm; }
+  .ps td.nm small { font-weight: 400; color: #666; font-size: 6pt; }
+  .ps td.w { background: #FAFBFC; line-height: 1.15; } .ps td.sum { font-weight: 700; background: #F4F6F8; }
+  .ps tr.foot td { background: #F4F6F8; font-weight: 700; }
+  .ps .note { font-size: 6.5pt; color: #555; margin-top: 2mm; }
+  @media print {
+    @page { size: A4 landscape; margin: 6mm; }
+    html, body { background: #fff !important; }
+    body > *:not(#sheetView) { display: none !important; }
+    #sheetView { display: block !important; position: static; background: #fff; overflow: visible; }
+    #sheetView .bar { display: none; }
+    #sheetPage { margin: 0; padding: 0; width: auto; min-height: 0; box-shadow: none; }
+  }
   textarea.big { width: 100%; min-height: 220px; font-size: 13px; font-family: ui-monospace, Menlo, monospace; border: 1px solid #B9C0C8; border-radius: 8px; padding: 8px; }
   .muted { color: var(--muted); font-size: 12px; }
   /* 日の帯 */
@@ -131,6 +154,7 @@
       <label class="muted"><input type="checkbox" id="showAll"> 希望のない人も表示</label>
       <button class="btn" id="export">タイムラインを書き出す</button>
       <button class="btn" id="kinmu">勤務表を書き出す(スマレジの形)</button>
+      <button class="btn" id="sheetBtn">シフト表(PDF・Excel)</button>
       <button class="btn solid" id="pub"></button>
       <span id="pubState" class="muted"></span>
       <span id="dlState" class="muted"></span> <button class="btn" id="dlBtn">締め切りを変える</button>
@@ -173,6 +197,7 @@
   </div>
 </div>
 
+<div id="sheetView"><div class="bar"><b id="sheetTitle">シフト表</b><button class="btn" id="sheetPrint">印刷・PDFに保存</button><button class="btn" id="sheetXlsx">Excelでダウンロード</button><button class="btn" id="sheetClose">閉じる</button><span id="sheetMsg" style="font-size:13px;"></span></div><div id="sheetPage" class="ps"></div></div>
 <div id="editor">
   <div style="font-weight:700;" id="edTitle"></div>
   <div class="row"><select id="edStart"></select>〜<select id="edEnd"></select></div>
@@ -180,7 +205,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-11-16b';
+var PAGE_VERSION = '2026-11-18a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -964,6 +989,87 @@ g('vtabs').addEventListener('click', function (e) {
     if (v === 'vAi') renderAi();
     if (v === 'vRec') renderRec();
   });
+});
+
+// =====================================================================
+// シフト表(1か月×この店舗。印刷・PDF・Excel)。休憩はこの店舗のその日の在籍から決まりで数える
+// =====================================================================
+function shortHm(t) { var p = String(t).split(':'); return Number(p[0]) + (p[1] === '00' ? '' : ':' + p[1]); }
+function sheetData() {
+  var st = storeOf(STORE), uids = confUids(STORE);
+  uids.sort(function (a, b) { var ea = empOf(a), eb = empOf(b); return ea !== eb ? (ea === '社員' ? -1 : eb === '社員' ? 1 : ea.localeCompare(eb, 'ja')) : String(nameOfU(a)).localeCompare(String(nameOfU(b)), 'ja'); });
+  var rows = uids.map(function (uid) {
+    var tot = { n: 0, span: 0, br: 0, work: 0 }, cells = [];
+    B.days.forEach(function (x) {
+      var segs = (CONF[key(STORE, x.d)] || []).filter(function (c) { return c[0] === uid; }).sort(function (a, b) { return mins(a[1]) - mins(b[1]); });
+      if (!segs.length) { cells.push(null); return; }
+      var span = segs.reduce(function (a, c) { return a + mins(c[2]) - mins(c[1]); }, 0), br = breakOf(empOf(uid), span);
+      tot.n++; tot.span += span; tot.br += br; tot.work += span - br;
+      cells.push({ segs: segs, span: span, br: br });
+    });
+    return { uid: uid, name: nameOfU(uid), emp: empOf(uid), cells: cells, tot: tot };
+  });
+  var heads = B.days.map(function (x) { var u = {}; (CONF[key(STORE, x.d)] || []).forEach(function (c) { u[c[0]] = 1; }); return Object.keys(u).length; });
+  return { st: st, rows: rows, heads: heads };
+}
+function showSheet() {
+  var d = sheetData(), pub = ((B.published || {})[STORE] || {})[B.month];
+  var now = new Date(), stamp = now.getFullYear() + '/' + (now.getMonth() + 1) + '/' + now.getDate() + ' ' + now.getHours() + ':' + ('0' + now.getMinutes()).slice(-2);
+  var nmW = 22, sumW = 8.5, dayW = (281 - nmW - sumW * 4) / B.days.length; // A4横の幅(mm)に合わせる
+  var h = '<h1>' + esc(B.label) + '　' + esc(d.st.name) + '　シフト表</h1>' +
+    '<div class="meta"><span>' + (pub ? '公開：' + esc(pub.at) : '未公開(作成中)') + '</span><span>出力：' + stamp + '</span></div>' +
+    '<table><colgroup><col style="width:' + nmW + 'mm">' + B.days.map(function () { return '<col style="width:' + dayW.toFixed(2) + 'mm">'; }).join('') +
+    '<col style="width:' + sumW + 'mm"><col style="width:' + sumW + 'mm"><col style="width:' + sumW + 'mm"><col style="width:' + sumW + 'mm"></colgroup>' +
+    '<tr><th>氏名</th>' + B.days.map(function (x) { return '<th class="' + (x.hol ? 'hol' : x.w === 0 ? 'sun' : x.w === 6 ? 'sat' : '') + '">' + x.d + '<br>' + W.charAt(x.w) + '</th>'; }).join('') +
+    '<th>日数</th><th>在籍</th><th>休憩</th><th>実働</th></tr>';
+  d.rows.forEach(function (r) {
+    h += '<tr><td class="nm">' + esc(r.name) + (r.emp ? '<br><small>' + esc(r.emp) + '</small>' : '') + '</td>' + r.cells.map(function (c) {
+      // 狭いので、開始と終了を2行に(10- / 15:30)
+      return c ? '<td class="w">' + c.segs.map(function (s) { return shortHm(s[1]) + '-<br>' + shortHm(s[2]); }).join('<br>') + '</td>' : '<td></td>';
+    }).join('') + '<td class="sum">' + r.tot.n + '</td><td class="sum">' + hrs(r.tot.span) + '</td><td class="sum">' + hrs(r.tot.br) + '</td><td class="sum">' + hrs(r.tot.work) + '</td></tr>';
+  });
+  var all = d.rows.reduce(function (a, r) { a.n += r.tot.n; a.span += r.tot.span; a.br += r.tot.br; a.work += r.tot.work; return a; }, { n: 0, span: 0, br: 0, work: 0 });
+  h += '<tr class="foot"><td class="nm">人数</td>' + d.heads.map(function (n) { return '<td>' + (n || '') + '</td>'; }).join('') +
+    '<td>' + all.n + '</td><td>' + hrs(all.span) + '</td><td>' + hrs(all.br) + '</td><td>' + hrs(all.work) + '</td></tr></table>' +
+    '<div class="note">時間は上が開始・下が終了(10- / 18 ＝10:00〜18:00)。在籍・休憩・実働は時間。休憩は「休憩の決まり」(雇用区分ごと)で、この店舗のその日の在籍から自動で数えています。</div>';
+  if (!d.rows.length) h += '<p>この月は、この店舗の確定シフトがまだありません。</p>';
+  g('sheetPage').innerHTML = h;
+  g('sheetTitle').textContent = d.st.name + ' ' + B.label + ' シフト表';
+  g('sheetMsg').textContent = '';
+  g('sheetView').style.display = 'block';
+}
+g('sheetBtn').addEventListener('click', function () { leaveDay().then(showSheet); });
+g('sheetClose').addEventListener('click', function () { g('sheetView').style.display = 'none'; });
+g('sheetPrint').addEventListener('click', function () { window.print(); });
+// Excel：SheetJS(cdnjs)をそのときだけ読む
+function loadXlsx() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  return new Promise(function (ok, ng) {
+    var sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload = function () { ok(window.XLSX); }; sc.onerror = function () { ng(new Error('Excelの部品を読めませんでした')); };
+    document.head.appendChild(sc);
+  });
+}
+g('sheetXlsx').addEventListener('click', function () {
+  g('sheetMsg').textContent = '作っています…';
+  loadXlsx().then(function (X) {
+    var d = sheetData(), aoa = [];
+    aoa.push([B.label + ' ' + d.st.name + ' シフト表']);
+    aoa.push(['氏名', '雇用区分'].concat(B.days.map(function (x) { return x.d + '(' + W.charAt(x.w) + ')'; }), ['日数', '在籍(時間)', '休憩(時間)', '実働(時間)']));
+    d.rows.forEach(function (r) {
+      aoa.push([r.name, r.emp].concat(r.cells.map(function (c) { return c ? c.segs.map(function (s) { return s[1] + '-' + s[2]; }).join(' / ') : ''; }),
+        [r.tot.n, Number(hrs(r.tot.span)), Number(hrs(r.tot.br)), Number(hrs(r.tot.work))]));
+    });
+    aoa.push(['人数', ''].concat(d.heads.map(function (n) { return n || ''; })));
+    var ws = X.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{ wch: 14 }, { wch: 9 }].concat(B.days.map(function () { return { wch: 12 }; }), [{ wch: 6 }, { wch: 9 }, { wch: 9 }, { wch: 9 }]);
+    ws['!freeze'] = { xSplit: 2, ySplit: 2 };
+    var wb = X.utils.book_new();
+    X.utils.book_append_sheet(wb, ws, 'シフト表');
+    X.writeFile(wb, B.month + '_' + d.st.code + '_シフト表.xlsx');
+    g('sheetMsg').textContent = 'ダウンロードしました';
+  }).catch(function (e) { g('sheetMsg').textContent = e.message; });
 });
 </script>
 </body>

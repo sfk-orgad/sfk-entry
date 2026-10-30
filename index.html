@@ -78,6 +78,10 @@
   .code { font-size: 40px; font-weight: 700; letter-spacing: 8px; margin: 12px 0 6px; font-family: ui-monospace, Menlo, monospace; }
   .codein { font-size: 28px; letter-spacing: 6px; text-align: center; width: 220px; padding: 10px; border: 2px solid var(--line); border-radius: 12px; font-family: ui-monospace, Menlo, monospace; }
   .overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,.92); z-index: 50; align-items: center; justify-content: center; flex-direction: column; }
+  .minecard { display: block; background: #fff; border: 1px solid #D5DAE0; border-radius: 14px; padding: 10px 14px; margin-bottom: 12px; text-decoration: none; color: inherit; }
+  .minecard .mrow { display: flex; gap: 10px; align-items: baseline; padding: 3px 0; font-size: 16px; }
+  .minecard .mh { font-size: 13px; color: #5F6670; min-width: 5.5em; }
+  .minecard b { font-size: 17px; } .minecard .ms { font-size: 14px; color: #5F6670; }
 </style>
 </head>
 <body>
@@ -92,6 +96,7 @@
 <div id="portal">
   <header><div class="me" id="me"></div><h1>業務ポータル</h1></header>
   <div class="wrap">
+    <div id="mine"></div>
     <div id="today"></div>
     <div id="news"></div>
     <div id="tools"></div>
@@ -110,7 +115,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-11-05a';
+const PAGE_VERSION = '2026-11-19a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -515,6 +520,9 @@ function renderPortal(res, at) {
   $('portal').style.display = 'block';
   $('me').textContent = res.name ? res.name + ' さん' : '';
 
+  // 自分の「次の出勤・今日の予定」(Bot のシフトカレンダーから。表示し終わってから裏で読む・10分覚える)
+  renderMine(res.items);
+
   // 今日の営業
   if (res.today && res.today.length) {
     $('today').innerHTML = '<div class="today"><h2>今日の営業 ' + esc(res.today[0].date) + '</h2>' + res.today.map(t =>
@@ -639,6 +647,33 @@ window.addEventListener('pageshow', () => { $('overlay').style.display = 'none';
 $('pcOpen').addEventListener('click', openPcCode);
 $('pcClose').addEventListener('click', () => { clearInterval(pcTimer); $('pcModal').style.display = 'none'; });
 start();
+
+// ===== 自分の「次の出勤・今日の予定」(2026-11-19。マイページの入口) =====
+function renderMine(items) {
+  const cal = (items || []).find(it => it.tool === 'calendar' && it.api);
+  if (!cal) { $('mine').innerHTML = ''; return; }
+  const W2 = '日月火水木金土';
+  const draw = r => {
+    if (!r || !r.ok) { $('mine').innerHTML = ''; return; }
+    const nx = r.next;
+    let h = '<a class="minecard" href="' + esc(cal.url) + '"><div class="mrow"><span class="mh">🗓 次の出勤</span>';
+    if (nx) {
+      const p = nx.date.split('-').map(Number), w = new Date(p[0], p[1] - 1, p[2]).getDay();
+      const today = new Date(), isToday = p[1] === today.getMonth() + 1 && p[2] === today.getDate();
+      h += '<b>' + (isToday ? '今日 ' : p[1] + '/' + p[2] + '(' + W2.charAt(w) + ') ') + esc(nx.s) + '〜' + esc(nx.e) + '</b> <span class="ms">' + esc(nx.store) + '</span>';
+    } else h += '<span class="ms">公開されたシフトはまだありません</span>';
+    h += '</div>';
+    if (r.today && r.today.length) h += '<div class="mrow"><span class="mh">今日の予定</span><span>' + r.today.map(e => (e.s ? esc(e.s) + ' ' : '') + esc(e.title)).join('<br>') + '</span></div>';
+    $('mine').innerHTML = h + '</a>';
+  };
+  try { const c = JSON.parse(sessionStorage.getItem('mine_cache') || 'null'); if (c && Date.now() - c.at < 10 * 60000) { draw(c.r); return; } } catch (e) {}
+  let tok = '';
+  try { tok = (JSON.parse(sessionStorage.getItem('portal_session') || 'null') || {}).token || ''; } catch (e) {}
+  if (!tok) return;
+  fetch(cal.api, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ app: 'shift', action: 'cal.next', token: tok }) })
+    .then(x => x.text()).then(t => { const r = JSON.parse(t); try { sessionStorage.setItem('mine_cache', JSON.stringify({ at: Date.now(), r: r })); } catch (e) {} draw(r); })
+    .catch(() => {});
+}
 </script>
 </body>
 </html>

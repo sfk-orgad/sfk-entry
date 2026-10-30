@@ -3,12 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>スタッフ一覧</title>
+<title>スタッフ管理</title>
 <!-- 守り：このページが通信できる先を Google Apps Script だけに絞る(万一、文字が混入しても外へ送れないように)。URLを他サイトに渡さない -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <!--
-  スタッフ一覧(社員以上)：GitHub Pages の staff/index.html。ポータルと同じサイト
+  スタッフ管理(社員以上)：GitHub Pages の staff/index.html。ポータルと同じサイト(2026-11-10 に一覧から管理に)
+  ・行を押すと1人の画面：呼び名・上長(複数可)・ひとこと・特徴キーワード・名指し対象・メモを直せる(staff)
+    雇用区分・所属・ステータス・個別に許可するツールは管理者だけ(staff_admin)。グレードは評価ダッシュボードの昇格の承認で変わる
+  ・特徴キーワードなどは社員だけが見る(アルバイトのマイページなどには出さない)
   ・スタッフ名簿(StaffMaster)から、氏名・雇用区分・所属・メール・ステータス・グレード・オンボーディング(準備：の列)の状況を表示
   ・データは認証基盤から受け取る(ツール一覧の staff の行の API＝認証基盤のURL)。通行証の staff の権限が必要
   通行証とデータの入口は、ポータルがブラウザの中に置いたものを使う。秘密は置かない
@@ -36,11 +39,17 @@
   .bar i { display: block; height: 100%; background: var(--ok); }
   .todo { font-size: 12px; color: #B4581F; white-space: normal; max-width: 260px; }
   .done { font-size: 12px; color: var(--ok); }
+  #tbl tr[data-sid] { cursor: pointer; } #tbl tr[data-sid]:hover td { background: #F6F8F7; }
+  .ed { max-width: 640px; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 999px; background: var(--p-soft); margin: 0 6px 6px 0; font-size: 15px; }
+  .chip button { border: none; background: none; font-size: 16px; cursor: pointer; color: var(--muted); padding: 0 2px; }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #1F2328; color: #fff; padding: 12px 18px; border-radius: 12px; font-size: 16px; z-index: 50; }
 </style>
 </head>
 <body>
 <div id="app" hidden>
   <div class="p-wrap p-wide">
+    <div id="listArea">
     <div class="tools">
       <input type="search" id="q" placeholder="名前・メールで探す">
       <select id="fAffil"></select>
@@ -50,13 +59,16 @@
     </div>
     <div class="count" id="count"></div>
     <div class="tbl"><table id="tbl"></table></div>
+    </div>
+    <div id="editArea" class="ed" hidden></div>
     <div class="p-ver" id="ver"></div>
   </div>
 </div>
 
+<div class="toast" id="toast" hidden></div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-10-19a';
+var PAGE_VERSION = '2026-11-10a';
 var g = Portal.$, esc = Portal.esc;
 var D = null, SORT = { k: 'sid', asc: true };
 
@@ -75,13 +87,13 @@ function render() {
   });
   var key = function (x) { return SORT.k === 'prep' ? prepDone(x) : String(x[SORT.k] || ''); };
   list.sort(function (a, b) { var A = key(a), B = key(b); return (A < B ? -1 : A > B ? 1 : 0) * (SORT.asc ? 1 : -1); });
-  var cols = [['sid', 'StaffID'], ['name', '氏名'], ['emp', '雇用区分'], ['affilLabel', '所属'], ['mail', 'メール'], ['status', 'ステータス'], ['grade', 'グレード']];
+  var cols = [['sid', 'StaffID'], ['name', '氏名'], ['呼び名', '呼び名'], ['emp', '雇用区分'], ['affilLabel', '所属'], ['mail', 'メール'], ['status', 'ステータス'], ['grade', 'グレード']];
   if (D.prepKeys.length) cols.push(['prep', 'オンボーディング']);
   var h = '<tr>' + cols.map(function (c) { return '<th data-k="' + c[0] + '">' + c[1] + (SORT.k === c[0] ? (SORT.asc ? ' ▲' : ' ▼') : '') + '</th>'; }).join('') + '</tr>';
   list.forEach(function (x) {
     var n = prepDone(x), total = D.prepKeys.length;
     var todo = D.prepKeys.filter(function (k) { return !x.prep[k]; }).map(function (k) { return k.replace(/^準備：/, ''); });
-    h += '<tr><td>' + esc(x.sid) + '</td><td class="nm">' + esc(x.name) + '</td><td>' + esc(x.emp) + '</td><td>' + esc(x.affilLabel) + '</td>' +
+    h += '<tr data-sid="' + esc(x.sid) + '"><td>' + esc(x.sid) + '</td><td class="nm">' + esc(x.name) + '</td><td>' + esc(x['呼び名'] || '') + '</td><td>' + esc(x.emp) + '</td><td>' + esc(x.affilLabel) + '</td>' +
       '<td class="mail">' + (x.mail ? '<a href="mailto:' + esc(x.mail) + '">' + esc(x.mail) + '</a>' : '') + '</td>' +
       '<td><span class="st ' + (x.status === '在籍' ? 'on' : 'off') + '">' + esc(x.status) + '</span></td><td>' + esc(x.grade) + '</td>' +
       (total ? '<td><span class="bar"><i style="width:' + Math.round(n / total * 100) + '%"></i></span>' + n + '/' + total +
@@ -107,20 +119,75 @@ function show(res) {
 
 ['q', 'fAffil', 'fEmp', 'fAll', 'fTodo'].forEach(function (id) { g(id).addEventListener(id === 'q' ? 'input' : 'change', render); });
 g('tbl').addEventListener('click', function (e) {
+  var tr = e.target.closest('tr[data-sid]');
+  if (tr && !e.target.closest('a')) { showEdit(tr.getAttribute('data-sid')); return; }
   var th = e.target.closest('th[data-k]'); if (!th) return;
   var k = th.getAttribute('data-k');
   SORT = { k: k, asc: SORT.k === k ? !SORT.asc : true };
   render();
 });
 
+// ===== 1人の画面(直す) =====
+function nameOf(sid) { var x = D.staff.filter(function (s) { return s.sid === sid; })[0]; return x ? x.name : sid; }
+function toast(t) { var x = g('toast'); x.textContent = t; x.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { x.hidden = true; }, 3500); }
+function showEdit(sid) {
+  var x = D.staff.filter(function (s) { return s.sid === sid; })[0]; if (!x) return;
+  var bosses = String(x['上長'] || '').split(',').filter(Boolean);
+  var others = D.staff.filter(function (s) { return s.sid !== sid && s.status === '在籍'; });
+  var field = function (label, input, note) { return '<label class="p-label">' + esc(label) + '</label>' + input + (note ? '<div class="p-note">' + note + '</div>' : ''); };
+  var h = '<button class="p-btn" id="back">‹ 一覧へ</button><div class="p-card" style="margin-top:10px;"><h2 style="margin:0;">' + esc(x.name) + '</h2>' +
+    '<div class="p-note">' + esc(x.sid) + '・' + esc(x.emp) + '・' + esc(x.affilLabel) + '・' + esc(x.status) + (x.grade ? '・' + esc(x.grade) : '') + '</div></div>' +
+    '<div class="p-card">' +
+    field('呼び名', '<input class="p-input" data-k="呼び名" value="' + esc(x['呼び名'] || '') + '">', 'お客様のアンケートに出る名前(名字など)。空ならアンケートに出ない') +
+    field('上長(複数可)', '<div id="bossChips"></div><select class="p-select" id="bossAdd"><option value="">＋ 上長を足す</option>' +
+      others.map(function (o) { return '<option value="' + esc(o.sid) + '">' + esc(o.name) + '(' + esc(o.emp) + ')</option>'; }).join('') + '</select>') +
+    field('ひとこと', '<input class="p-input" data-k="ひとこと" value="' + esc(x['ひとこと'] || '') + '">', 'アンケートで名前の下に出る短い説明(例：ロウリュ担当)。本人が出してよい内容だけ') +
+    field('特徴キーワード', '<input class="p-input" data-k="特徴キーワード" value="' + esc(x['特徴キーワード'] || '') + '">', '名前がわからない回答から推測するための特徴。カンマ区切り(例：男性,メガネ,ロウリュ)。お客様・アルバイトには見せない') +
+    field('アンケートの名指し対象', '<select class="p-select" data-k="名指し対象"><option value="">○(初期値)</option><option' + (x['名指し対象'] === '○' ? ' selected' : '') + '>○</option><option' + (x['名指し対象'] === '×' ? ' selected' : '') + '>×</option></select>') +
+    field('メモ', '<textarea class="p-textarea" data-k="メモ">' + esc(x['メモ'] || '') + '</textarea>') + '</div>';
+  if (D.isAdmin) {
+    var emps = []; D.staff.forEach(function (s) { if (s.emp && emps.indexOf(s.emp) === -1) emps.push(s.emp); });
+    var mine = String(x['所属'] || '').split(',');
+    h += '<div class="p-card"><h2>管理者だけ</h2>' +
+      field('雇用区分', '<select class="p-select" data-k="雇用区分">' + emps.map(function (e) { return '<option' + (e === x['雇用区分'] ? ' selected' : '') + '>' + esc(e) + '</option>'; }).join('') + '</select>', '変えたら StaffID の頭文字も直す(checkStaffMaster)') +
+      field('所属', '<div id="affil">' + D.stores.map(function (st) { return '<label style="margin-right:12px;"><input type="checkbox" value="' + esc(st.code) + '"' + (mine.indexOf(st.code) !== -1 ? ' checked' : '') + '> ' + esc(st.name) + '</label>'; }).join('') + '</div>') +
+      field('ステータス', '<select class="p-select" data-k="ステータス">' + D.edit.status.map(function (e) { return '<option' + (e === x['ステータス'] ? ' selected' : '') + '>' + esc(e) + '</option>'; }).join('') + '</select>') +
+      field('個別に許可するツール', '<input class="p-input" data-k="個別に許可するツール" value="' + esc(x['個別に許可するツール'] || '') + '">', 'ツールIDをカンマ区切り(例：eval_admin)。ポータルの権限そのものなので注意') + '</div>';
+  }
+  h += '<div id="msg"></div><button class="p-btn p-solid p-big" id="save" style="width:100%;">保存する</button>';
+  g('listArea').hidden = true; g('editArea').hidden = false; g('editArea').innerHTML = h; window.scrollTo(0, 0);
+  var paint = function () {
+    g('bossChips').innerHTML = bosses.length ? bosses.map(function (b) { return '<span class="chip">' + esc(nameOf(b)) + '<button data-rm="' + esc(b) + '" aria-label="外す">×</button></span>'; }).join('') : '<div class="p-muted" style="margin-bottom:6px;">まだいません</div>';
+    Array.prototype.forEach.call(document.querySelectorAll('[data-rm]'), function (b) { b.onclick = function () { bosses = bosses.filter(function (y) { return y !== b.getAttribute('data-rm'); }); paint(); }; });
+  };
+  paint();
+  g('bossAdd').onchange = function () { var v = g('bossAdd').value; if (v && bosses.indexOf(v) === -1) bosses.push(v); g('bossAdd').value = ''; paint(); };
+  g('back').onclick = function () { g('editArea').hidden = true; g('listArea').hidden = false; };
+  g('save').onclick = function () {
+    var v = { '上長': bosses.join(',') };
+    Array.prototype.forEach.call(document.querySelectorAll('#editArea [data-k]'), function (el) { v[el.getAttribute('data-k')] = el.value; });
+    if (D.isAdmin) v['所属'] = Array.prototype.filter.call(document.querySelectorAll('#affil input'), function (c) { return c.checked; }).map(function (c) { return c.value; }).join(',');
+    var b = g('save'); b.disabled = true; b.textContent = '保存しています…'; g('msg').innerHTML = '';
+    P.call('staff.save', { sid: sid, ver: x.ver, values: v }).then(function (r) {
+      b.disabled = false; b.textContent = '保存する';
+      if (!r.ok) { if (r.error === 'AUTH') { Portal.gate(Portal.authMessage(r, 'スタッフ管理'), { back: true }); return; } g('msg').innerHTML = '<div class="p-err" style="margin-bottom:8px;">' + esc(r.error) + '</div>'; return; }
+      toast(r.unchanged ? '変わったところはありません' : '保存しました');
+      if (r.note) alert(r.note);
+      load(sid);
+    }).catch(function () { b.disabled = false; b.textContent = '保存する'; g('msg').innerHTML = '<div class="p-err">通信に失敗しました。もう一度押してください</div>'; });
+  };
+}
+
 // 通行証の確認とヘッダーは共通部品(Portal.start)。データは認証基盤から(app なし)
-var P = Portal.start({ tool: 'staff', title: 'スタッフ一覧' });
-if (P) {
-  P.call('staff.list', {}, { retry: true }).then(function (res) {
-    if (!res.ok) { Portal.gate(Portal.authMessage(res, 'スタッフ一覧'), { back: true }); return; }
+var P = Portal.start({ tool: 'staff', title: 'スタッフ管理' });
+function load(openSid) {
+  return P.call('staff.list', {}, { retry: true }).then(function (res) {
+    if (!res.ok) { Portal.gate(Portal.authMessage(res, 'スタッフ管理'), { back: true }); return; }
     show(res);
+    if (openSid) showEdit(openSid);
   }).catch(function (e) { Portal.gate('通信に失敗しました。\n開き直してください。', { back: true, detail: e.message }); });
 }
+if (P) load('');
 </script>
 </body>
 </html>

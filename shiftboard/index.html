@@ -131,6 +131,7 @@
   .box { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; min-width: 260px; }
   .box h3 { margin: 0 0 6px; font-size: 14px; }
   #msg { margin-left: 8px; }
+  .evm { font-size: 11px; color: #8A4B08; font-weight: 400; line-height: 1.3; white-space: normal; }
 </style>
 </head>
 <body>
@@ -152,6 +153,7 @@
       <span id="tabs"></span>
       <label class="muted" id="otherWrap"><input type="checkbox" id="showOther"> 他店舗も表示</label>
       <label class="muted"><input type="checkbox" id="showAll"> 希望のない人も表示</label>
+      <span class="muted">希望の外の人を入れる：</span><select id="addOut"></select><button class="btn" id="addOutBtn">行を足す</button>
       <button class="btn" id="export">タイムラインを書き出す</button>
       <button class="btn" id="kinmu">勤務表を書き出す(スマレジの形)</button>
       <button class="btn" id="sheetBtn">シフト表(PDF・Excel)</button>
@@ -205,7 +207,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-11-18a';
+var PAGE_VERSION = '2026-11-20a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -381,6 +383,7 @@ function renderDay() {
   var uids = sm.reqU.slice();
   sm.cfU.forEach(function (u) { if (uids.indexOf(u) === -1) uids.push(u); });
   uids.sort(function (a, b) { return first(a) - first(b); });
+  (ADDED[key(STORE, DAY)] || []).forEach(function (u) { if (uids.indexOf(u) === -1) uids.push(u); }); // 「希望の外の人を入れる」で足した人
   if (g('showAll').checked) {
     Object.keys(B.staff).forEach(function (u) {
       var p = B.staff[u];
@@ -395,7 +398,10 @@ function renderDay() {
     var otherCf = [];
     B.stores.forEach(function (st) { if (st.code !== STORE) confOf(st.code, DAY).forEach(function (c) { if (c[0] === u) otherCf.push(st.name + ' ' + c[1] + '-' + c[2]); }); });
     var outside = myCf.some(function (c) { for (var t = mins(c[1]); t < mins(c[2]); t += B.slot) if (!covered(mine, t)) return true; return false; });
-    h += '<tr class="staff' + (mine.length || myCf.length ? '' : ' none') + '" data-u="' + esc(u) + '"><td class="fix c0">' + esc(p.name) + '</td><td class="fix c1">' + esc(p.grade) + '</td>' +
+    // その日の予定(この時間はいない)を名前の下に
+    var evs = (B.events || []).filter(function (ev) { return ev.d === DAY && ev.members.indexOf(u) !== -1; });
+    var evH = evs.length ? '<div class="evm">' + evs.map(function (ev) { return '📅' + (ev.s ? ev.s + '-' + ev.e : '終日') + ' ' + esc(ev.title); }).join('<br>') + '</div>' : '';
+    h += '<tr class="staff' + (mine.length || myCf.length ? '' : ' none') + '" data-u="' + esc(u) + '"><td class="fix c0">' + esc(p.name) + evH + '</td><td class="fix c1">' + esc(p.grade) + '</td>' +
       '<td class="fix c2">希望 ' + esc(mine.map(function (r) { return r[2] + '-' + r[3]; }).join(' / ') || 'なし') +
       (myCf.length ? '<div>確定 <b>' + esc(myCf.map(function (c) { return c[1] + '-' + c[2]; }).join(' / ')) + '</b>' + (outside ? ' <span class="warn">希望の外あり</span>' : '') + '</div>' : '') +
       (others.length ? '<div class="other">他店舗の希望：' + esc(others.map(function (r) { return (storeOf(r[1]) ? storeOf(r[1]).name : r[1]) + ' ' + r[2] + '-' + r[3]; }).join(' / ')) + '</div>' : '') +
@@ -419,6 +425,7 @@ function renderDay() {
   g('grid').innerHTML = h + '</tbody>';
   g('prev').disabled = DAY <= 1; g('next').disabled = DAY >= B.days.length;
   renderPanel();
+  fillAddOut();
 }
 
 function renderUnsub() {
@@ -455,6 +462,7 @@ function peopleOfDay() {
   var u = [];
   reqOf(DAY).forEach(function (r) { if (u.indexOf(r[4]) === -1) u.push(r[4]); });
   B.stores.forEach(function (st) { confOf(st.code, DAY).forEach(function (c) { if (u.indexOf(c[0]) === -1) u.push(c[0]); }); });
+  (ADDED[key(STORE, DAY)] || []).forEach(function (x) { if (u.indexOf(x) === -1) u.push(x); });
   if (g('showAll').checked) Object.keys(B.staff).forEach(function (x) {
     var p = B.staff[x]; if (u.indexOf(x) === -1 && (p.stores.indexOf('*') !== -1 || p.stores.indexOf(STORE) !== -1)) u.push(x);
   });
@@ -639,7 +647,10 @@ document.addEventListener('mouseup', function (e) {
   if (!drag) return;
   var d = drag; drag = null;
   var a = Math.min(d.t0, d.t1), b = Math.max(d.t0, d.t1);
-  if (a !== b) { addConf(d.uid, a, b + B.slot); return; }
+  if (a !== b) {
+    if (!outsideOk(d.uid, a, b + B.slot)) { renderDay(); return; }
+    addConf(d.uid, a, b + B.slot); return;
+  }
   // クリック
   var cf = confOf(STORE, DAY);
   var hit = cf.filter(function (c) { return c[0] === d.uid && mins(c[1]) <= a && a < mins(c[2]); })[0];
@@ -1070,6 +1081,41 @@ g('sheetXlsx').addEventListener('click', function () {
     X.writeFile(wb, B.month + '_' + d.st.code + '_シフト表.xlsx');
     g('sheetMsg').textContent = 'ダウンロードしました';
   }).catch(function (e) { g('sheetMsg').textContent = e.message; });
+});
+
+// ===== 希望の外の人を入れる(シフト組みボードと同じ：本人に確認してから。2026-11-20) =====
+var ADDED = {};   // 日×店舗 → 足した人(この画面を開いている間だけ。確定にすれば残る)
+var OUTOK = {};   // 人×日×店舗 → 「本人に確認した」を押した
+// 希望の時間の中に収まっていなければ、本人に確認したかを聞く(同じ人・同じ日は1回だけ)
+function outsideOk(uid, s, e) {
+  var inReq = reqOf(DAY, STORE).some(function (r) { return r[4] === uid && mins(r[2]) <= s && e <= mins(r[3]); });
+  var k = uid + '|' + key(STORE, DAY);
+  if (inReq || OUTOK[k]) return true;
+  var p = B.staff[uid] || { name: uid };
+  var has = reqOf(DAY, STORE).some(function (r) { return r[4] === uid; });
+  if (!confirm(p.name + 'さんの' + (has ? '希望の時間の外' : 'この日の希望はありません') + 'です(' + hm(s) + '〜' + hm(e) + ')。\n本人に確認しましたか？\n［OK］確認した → 確定に入れる　［キャンセル］入れない')) return false;
+  OUTOK[k] = true;
+  return true;
+}
+// 足せる人：この店舗の所属で、この日の表にまだいない人
+function fillAddOut() {
+  if (!B || !g('addOut')) return;
+  var shown = {};
+  Array.prototype.forEach.call(document.querySelectorAll('#grid tr[data-u], #panelBody tr[data-u]'), function (tr) { shown[tr.getAttribute('data-u')] = 1; });
+  var list = Object.keys(B.staff).filter(function (u) { var p = B.staff[u]; return !shown[u] && (p.stores.indexOf('*') !== -1 || p.stores.indexOf(STORE) !== -1); })
+    .sort(function (a, b) { return String(B.staff[a].name).localeCompare(String(B.staff[b].name), 'ja'); });
+  g('addOut').innerHTML = '<option value="">(選ぶ)</option>' + list.map(function (u) { return '<option value="' + esc(u) + '">' + esc(B.staff[u].name) + '</option>'; }).join('');
+  g('addOutBtn').disabled = !list.length || !!B.readonly;
+}
+g('addOutBtn').addEventListener('click', function () {
+  var u = g('addOut').value; if (!u) { alert('入れる人を選んでください'); return; }
+  var p = B.staff[u];
+  if (!confirm(p.name + 'さんは、この日の希望がありません。\n本人に確認しましたか？\n［OK］確認した → 行を足す(このあと行の上をドラッグして時間を決める)')) return;
+  var k = key(STORE, DAY);
+  (ADDED[k] = ADDED[k] || []).push(u);
+  OUTOK[u + '|' + k] = true;
+  renderDay();
+  g('msg').textContent = p.name + 'さんの行を足しました。行の上をドラッグして時間を決めてください(オレンジ＝希望の外)';
 });
 </script>
 </body>

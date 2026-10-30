@@ -149,6 +149,7 @@ textarea { min-height: 120px; resize: vertical; line-height: 1.7; }
     <div class="savebar">
       <button class="btn primary wide" id="btnSave" type="button">保存する</button>
     </div>
+    <button class="btn wide danger" id="btnDelete" type="button" hidden style="margin-top:18px;">このお店を削除する</button>
   </section>
 
   <!-- 編集者と暗証番号の管理(map_admin) -->
@@ -185,7 +186,7 @@ textarea { min-height: 120px; resize: vertical; line-height: 1.7; }
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-11a';
+var PAGE_VERSION = '2026-11-12a';
 var TOOL = 'sfkmap_edit'; // ツール一覧のツールID(地図ごとに違う。Bot はこれで地図を決める)
 
 (() => {
@@ -273,6 +274,7 @@ function openEdit(shop) {
     ? 'ID ' + shop['ID'] + '　' + (/^(true|1|✓)$/i.test(shop['掲載']) ? '掲載中のお店です。保存すると約5分でサイトに反映されます。' : '未掲載のお店です。')
     : '保存すると未掲載で登録されます。承認者が掲載をONにするとサイトに出ます。';
   clearErrors(); msg('editMsg', ''); setMap(); renderPhotos(); dirty = false;
+  $('btnDelete').hidden = !shop; // 消せるのは登録済みのお店だけ
   show('vEdit');
 }
 document.addEventListener('input', e => { if (e.target.dataset && e.target.dataset.in) { current[e.target.dataset.in] = e.target.value; dirty = true; if (e.target.dataset.in === 'X' || e.target.dataset.in === 'Y') placePin(); } });
@@ -390,6 +392,20 @@ $('btnSave').onclick = async () => {
       : '「' + r.shop['店名'] + '」を保存しました。サイトへの反映は約5分後です。');
   } catch (e) { fail('editMsg', e); }
   finally { busy = false; $('btnSave').disabled = false; $('btnSave').textContent = '保存する'; }
+};
+
+// ----- お店を消す -----
+$('btnDelete').onclick = async () => {
+  if (busy || !original) return;
+  if (!confirm('「' + original['店名'] + '」を削除します。\n掲載中ならサイトからも消えます(約5分後)。消した内容は「変更履歴」シートに残ります。\nよろしいですか？')) return;
+  busy = true; $('btnDelete').disabled = true; $('btnDelete').textContent = '削除しています…'; msg('editMsg', '');
+  try {
+    const r = await call('map.delete', { id: original['ID'], original: original });
+    if (!r.ok) { msg('editMsg', r.error, 'error'); return; }
+    dirty = false;
+    await loadList('「' + (r.name || original['店名']) + '」を削除しました。' + (r.already ? '(すでに消えていました)' : 'サイトへの反映は約5分後です。'));
+  } catch (e) { fail('editMsg', e); }
+  finally { busy = false; $('btnDelete').disabled = false; $('btnDelete').textContent = 'このお店を削除する'; }
 };
 
 // ----- 編集者と暗証番号の管理(map_admin) -----

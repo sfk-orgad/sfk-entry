@@ -180,7 +180,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-11-16a';
+var PAGE_VERSION = '2026-11-16b';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -695,14 +695,14 @@ g('dlBtn').addEventListener('click', function () {
   v = v.trim().replace(/\//g, '-');
   if (v && !/^\d{4}-\d{1,2}-\d{1,2}$/.test(v)) { alert('「2026-12-20」の形で入れてください'); return; }
   if (v) { var p = v.split('-'); v = p[0] + '-' + ('0' + p[1]).slice(-2) + '-' + ('0' + p[2]).slice(-2); }
-  var notify = confirm('この店舗の未提出の人に、新しい締め切りを LINE WORKS で知らせますか？\n［OK］知らせる　［キャンセル］知らせない');
+  var notify = confirm('新しい締め切りを、LINE WORKS の全体のチャットで知らせますか？\n［OK］知らせる　［キャンセル］知らせない');
   g('dlBtn').disabled = true;
   api('board.deadline', { month: B.month, store: STORE, date: v, notify: notify }).then(function (r) {
     g('dlBtn').disabled = false;
     if (!r || !r.ok) { alert('変えられませんでした：' + (r ? r.error : '')); return; }
     B.deadlines[STORE] = { date: r.date, ex: r.ex, def: x.def };
     renderDl();
-    g('msg').textContent = '締め切りを ' + r.date + ' にしました' + (notify ? '(' + r.sent + '人に知らせました)' : '');
+    g('msg').textContent = '締め切りを ' + r.date + ' にしました' + (notify ? (r.sent ? '(全体のチャットに知らせました)' : '(お試し中のため、全体のチャットには送っていません)') : '');
   }).catch(function () { g('dlBtn').disabled = false; alert('通信に失敗しました'); });
 });
 function renderPub() {

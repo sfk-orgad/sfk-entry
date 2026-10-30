@@ -133,6 +133,7 @@
       <button class="btn" id="kinmu">勤務表を書き出す(スマレジの形)</button>
       <button class="btn solid" id="pub"></button>
       <span id="pubState" class="muted"></span>
+      <span id="dlState" class="muted"></span> <button class="btn" id="dlBtn">締め切りを変える</button>
       <span id="msg" class="muted"></span>
     </div>
  <div class="vtabs" id="vtabs">
@@ -179,7 +180,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-11-15a';
+var PAGE_VERSION = '2026-11-16a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -679,7 +680,33 @@ g('saveDay').addEventListener('click', function () {
 });
 
 // ===== 公開(スタッフのシフトカレンダーに出す)・勤務表の書き出し =====
+// ===== 締め切り(この月×この店舗) =====
+function renderDl() {
+  var x = (B.deadlines || {})[STORE];
+  if (!x) { g('dlState').textContent = ''; g('dlBtn').style.display = 'none'; return; }
+  var f = function (d) { var p = d.split('-'); return Number(p[1]) + '/' + Number(p[2]) + '(' + W.charAt(new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])).getDay()) + ')'; };
+  g('dlState').textContent = '希望の締め切り：' + f(x.date) + (x.ex ? '(初期値 ' + f(x.def) + ' から変更)' : '');
+  g('dlBtn').style.display = B.readonly ? 'none' : '';
+}
+g('dlBtn').addEventListener('click', function () {
+  var x = (B.deadlines || {})[STORE], st = storeOf(STORE);
+  var v = prompt(st.name + 'の' + B.label + '分の、シフト希望の締め切り日(例：' + x.date + ')\n空欄にすると初期値(' + x.def + ')に戻します', x.date);
+  if (v === null) return;
+  v = v.trim().replace(/\//g, '-');
+  if (v && !/^\d{4}-\d{1,2}-\d{1,2}$/.test(v)) { alert('「2026-12-20」の形で入れてください'); return; }
+  if (v) { var p = v.split('-'); v = p[0] + '-' + ('0' + p[1]).slice(-2) + '-' + ('0' + p[2]).slice(-2); }
+  var notify = confirm('この店舗の未提出の人に、新しい締め切りを LINE WORKS で知らせますか？\n［OK］知らせる　［キャンセル］知らせない');
+  g('dlBtn').disabled = true;
+  api('board.deadline', { month: B.month, store: STORE, date: v, notify: notify }).then(function (r) {
+    g('dlBtn').disabled = false;
+    if (!r || !r.ok) { alert('変えられませんでした：' + (r ? r.error : '')); return; }
+    B.deadlines[STORE] = { date: r.date, ex: r.ex, def: x.def };
+    renderDl();
+    g('msg').textContent = '締め切りを ' + r.date + ' にしました' + (notify ? '(' + r.sent + '人に知らせました)' : '');
+  }).catch(function () { g('dlBtn').disabled = false; alert('通信に失敗しました'); });
+});
 function renderPub() {
+  renderDl();
   var p = ((B.published || {})[STORE] || {})[B.month];
   var st = storeOf(STORE);
   g('pub').textContent = p ? 'この月の公開をやめる' : (st ? st.name : '') + 'のこの月を公開する';

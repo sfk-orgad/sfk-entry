@@ -8,6 +8,7 @@
   シフトカレンダー(スタッフ用)：GitHub Pages の calendar/index.html。ポータルと同じサイト
   ・自分の確定シフトを、2店舗まとめて1つの月カレンダーで見る(店舗ごとに色分け)
   ・日を押すと、その日に誰がどの店舗に入っているかが見える(グレードは出さない)
+  ・予定(2026-11-19)：日を押した画面の「＋ この日に予定を足す」。題名は全員に見え、メモは参加者と社員だけ。自分が参加者の予定はカレンダーのマスにも出る
   ・「自分」「全体」のタブ(2026-11-17)：全体＝その月の店舗ごとの全員のシフトの表(公開済みの店舗・月だけ)
   ・管理者がシフト作成で「公開」した店舗・月だけが出る
   通行証とデータの入口(BotのGASのURL)は、ポータルがブラウザの中に置いたものを使う。秘密は置かない
@@ -71,6 +72,20 @@
   .tt tr.me td { background: #FFFBE6; } .tt tr.me td.nm { background: #FFF4C2; }
   .tt td.t { line-height: 1.2; } .tt td.cnt { background: #F7F9FA; font-weight: 700; }
   .tt th.today { outline: 2px solid var(--c); outline-offset: -2px; }
+  /* 予定(2026-11-19) */
+  .chip.ev { background: #E8EEF0 !important; color: #16323A; border: 1px solid #B9C9CE; }
+  .evs { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
+  .ev1 { padding: 6px 0; border-bottom: 1px solid #EEF1F4; font-size: 14px; }
+  .ev1 .t { font-weight: 700; } .ev1 .m { color: var(--muted); font-size: 13px; white-space: pre-wrap; }
+  .ev1 button, .addev { font-size: 13px; padding: 4px 10px; border: 1px solid #B9C0C8; border-radius: 999px; background: #fff; cursor: pointer; font-family: inherit; margin: 4px 6px 0 0; }
+  .addev { background: var(--c); color: #fff; border-color: var(--c); font-size: 14px; padding: 7px 14px; }
+  #evForm { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 50; align-items: flex-end; justify-content: center; }
+  #evForm .in { background: #fff; width: 100%; max-width: 560px; border-radius: 16px 16px 0 0; padding: 16px; max-height: 90vh; overflow: auto; }
+  #evForm label { display: block; font-size: 14px; font-weight: 700; margin: 10px 0 4px; }
+  #evForm input[type=text], #evForm textarea, #evForm select { width: 100%; font-size: 16px; padding: 9px; border: 1px solid #B9C0C8; border-radius: 9px; font-family: inherit; }
+  #evForm .row2 { display: flex; gap: 8px; } #evForm .row2 select { flex: 1; }
+  .pchip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; background: var(--soft); margin: 0 6px 6px 0; font-size: 14px; }
+  .pchip button { border: none; background: none; cursor: pointer; font-size: 15px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -119,10 +134,23 @@
     </div>
     <div id="ver"></div>
   </div>
+  <div id="evForm"><div class="in">
+    <h2 id="evTitleH" style="margin:0 0 4px;font-size:18px;">予定を足す</h2>
+    <div class="muted">題名は全員に見えます。メモは参加者と社員だけに見えます。</div>
+    <label>日付</label><input type="text" id="evDate" readonly>
+    <label>題名<span class="muted">(会議の種類は【 】で。例：【店長会】月の振り返り)</span></label><input type="text" id="evT" maxlength="60">
+    <label><input type="checkbox" id="evAll"> 終日</label>
+    <div class="row2" id="evTimes"><select id="evS"></select><span style="align-self:center;">〜</span><select id="evE"></select></div>
+    <label>参加者(自分は自動で入ります)</label><div id="evPeople"></div><select id="evAdd"><option value="">＋ 参加者を足す</option></select>
+    <label>メモ</label><textarea id="evMemo" rows="3" maxlength="1000"></textarea>
+    <div id="evMsg" style="color:#B42318;margin-top:8px;"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;"><button class="addev" id="evSave" style="flex:1;">保存する</button><button class="ev1btn addev" id="evCancel" style="flex:1;background:#fff;color:var(--ink);border-color:#B9C0C8;">やめる</button></div>
+  </div>
+  </div>
 </div>
 
 <script>
-var PAGE_VERSION = '2026-11-17a';
+var PAGE_VERSION = '2026-11-19a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 var COLORS = ['#1F7A6B', '#7A4FB5', '#C2571A', '#2F6FBF', '#A23B72', '#4D7A1F']; // 店舗ごとの色(店舗シートの順)
@@ -215,7 +243,8 @@ function renderCal() {
     var isToday = now.getFullYear() === ym[0] && now.getMonth() + 1 === ym[1] && now.getDate() === x.d;
     h += '<div class="day' + (x.w === 0 ? ' sun' : (x.w === 6 ? ' sat' : '')) + (x.hol ? ' hol' : '') + (isToday ? ' today' : '') + (x.d === DAY ? ' on' : '') + '" data-d="' + x.d + '">' +
       '<div class="n">' + x.d + '</div>' +
-      mine.map(function (m) { return '<span class="chip" style="background:' + colorOf(m[1]) + '">' + hmShort(m[2]) + '-' + hmShort(m[3]) + '</span>'; }).join('') + '</div>';
+      mine.map(function (m) { return '<span class="chip" style="background:' + colorOf(m[1]) + '">' + hmShort(m[2]) + '-' + hmShort(m[3]) + '</span>'; }).join('') +
+      (C.events || []).filter(function (ev) { return ev.d === x.d && ev.mine; }).map(function (ev) { return '<span class="chip ev">' + esc(ev.title) + '</span>'; }).join('') + '</div>';
   });
   g('cal').innerHTML = h;
 }
@@ -239,6 +268,14 @@ function renderDetail() {
       }).join('') + '</div>';
   });
   if (!any) h += '<div class="muted">この日の公開されたシフトはありません。</div>';
+  // その日の予定(全員分。題名は全員に見える)
+  var evs = (C.events || []).filter(function (ev) { return ev.d === x.d; });
+  h += '<div class="evs"><div class="sn" style="font-weight:700;font-size:14px;">予定</div>' + (evs.length ? evs.map(function (ev) {
+    return '<div class="ev1"><span class="t">' + (ev.s ? hmShort(ev.s) + '〜' + hmShort(ev.e) : '終日') + '　' + esc(ev.title) + '</span>' +
+      '<div class="m">参加：' + esc(ev.names) + (ev.memo ? '\n' + esc(ev.memo) : '') + '</div>' +
+      (ev.canEdit ? '<button data-evedit="' + esc(ev.id) + '">直す</button><button data-evdel="' + esc(ev.id) + '">消す</button>' : '') + '</div>';
+  }).join('') : '<div class="muted">この日の予定はありません。</div>') +
+    '<button class="addev" id="evNew">＋ この日に予定を足す</button></div>';
   g('detail').innerHTML = h;
 }
 
@@ -357,6 +394,67 @@ g('vt').addEventListener('click', function (e) {
   if (all) renderAll(); else renderDetail();
 });
 g('stabs').addEventListener('click', function (e) { var b = e.target.closest('button[data-s]'); if (!b) return; TSTORE = b.getAttribute('data-s'); renderAll(); });
+
+// ===== 予定を足す・直す・消す(2026-11-19) =====
+var PEOPLE = null, EVSEL = [], EVID = '';
+function apiOnce(action, extra) { // 保存・削除はやり直さない(二重に足さないため)
+  return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ app: 'shift', action: action, token: S.token }, extra || {})) })
+    .then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); });
+}
+function timeOpts(sel, v) {
+  var h = '';
+  for (var m = 6 * 60; m <= 27 * 60; m += 15) { var t = Math.floor(m / 60) + ':' + ('0' + (m % 60)).slice(-2); h += '<option' + (t === v ? ' selected' : '') + '>' + t + '</option>'; }
+  g(sel).innerHTML = h;
+}
+function paintPeople() {
+  var nm = function (u) { var p = (PEOPLE || []).filter(function (x) { return x.uid === u; })[0]; return p ? p.name : u; };
+  g('evPeople').innerHTML = EVSEL.length ? EVSEL.map(function (u) { return '<span class="pchip">' + esc(nm(u)) + '<button data-rm="' + esc(u) + '">×</button></span>'; }).join('') : '<div class="muted">(自分だけ)</div>';
+  g('evAdd').innerHTML = '<option value="">＋ 参加者を足す</option>' + (PEOPLE || []).filter(function (p) { return EVSEL.indexOf(p.uid) === -1 && p.uid !== C.me; })
+    .map(function (p) { return '<option value="' + esc(p.uid) + '">' + esc(p.name) + '</option>'; }).join('');
+}
+function openEv(ev) {
+  var ym = C.month.split('-'), x = C.days[DAY - 1];
+  EVID = ev ? ev.id : ''; EVSEL = [];
+  g('evTitleH').textContent = ev ? '予定を直す' : '予定を足す';
+  g('evDate').value = ym[0] + '-' + ym[1] + '-' + ('0' + DAY).slice(-2) + '(' + W.charAt(x.w) + ')';
+  g('evT').value = ev ? ev.title : ''; g('evMemo').value = ev ? ev.memo : '';
+  g('evAll').checked = ev ? !ev.s : false;
+  timeOpts('evS', ev && ev.s ? ev.s : '10:00'); timeOpts('evE', ev && ev.e ? ev.e : '11:00');
+  g('evTimes').style.display = g('evAll').checked ? 'none' : 'flex';
+  g('evMsg').textContent = '';
+  g('evForm').style.display = 'flex';
+  var ready = PEOPLE ? Promise.resolve() : api('cal.people', {}).then(function (r) { PEOPLE = r.ok ? r.people : []; });
+  ready.then(function () {
+    if (ev) { var names = ev.names.split('、'); EVSEL = (PEOPLE || []).filter(function (p) { return names.indexOf(p.name) !== -1 && p.uid !== C.me; }).map(function (p) { return p.uid; }); }
+    paintPeople();
+  });
+}
+g('evAll').addEventListener('change', function () { g('evTimes').style.display = g('evAll').checked ? 'none' : 'flex'; });
+g('evAdd').addEventListener('change', function () { var v = g('evAdd').value; if (v) EVSEL.push(v); paintPeople(); });
+g('evPeople').addEventListener('click', function (e) { var b = e.target.closest('[data-rm]'); if (!b) return; EVSEL = EVSEL.filter(function (u) { return u !== b.getAttribute('data-rm'); }); paintPeople(); });
+g('evCancel').addEventListener('click', function () { g('evForm').style.display = 'none'; });
+g('evSave').addEventListener('click', function () {
+  var b = g('evSave'), all = g('evAll').checked;
+  b.disabled = true; b.textContent = '保存しています…'; g('evMsg').textContent = '';
+  apiOnce('cal.ev.save', { id: EVID, date: g('evDate').value.slice(0, 10), title: g('evT').value, memo: g('evMemo').value,
+    s: all ? '' : g('evS').value, e: all ? '' : g('evE').value, members: [C.me].concat(EVSEL) }).then(function (r) {
+    b.disabled = false; b.textContent = '保存する';
+    if (!r.ok) { g('evMsg').textContent = r.error === 'AUTH' ? 'ログインの期限が切れました。ポータルから開き直してください。' : r.error; return; }
+    g('evForm').style.display = 'none';
+    load(C.month, true);
+  }).catch(function () { b.disabled = false; b.textContent = '保存する'; g('evMsg').textContent = '通信に失敗しました。保存できたか、カレンダーで確かめてください。'; });
+});
+g('detail').addEventListener('click', function (e) {
+  if (e.target.closest('#evNew')) { openEv(null); return; }
+  var ed = e.target.closest('[data-evedit]'), del = e.target.closest('[data-evdel]');
+  if (ed) { openEv((C.events || []).filter(function (x) { return x.id === ed.getAttribute('data-evedit'); })[0]); return; }
+  if (del) {
+    var ev = (C.events || []).filter(function (x) { return x.id === del.getAttribute('data-evdel'); })[0];
+    if (!ev || !confirm('「' + ev.title + '」を消します。よろしいですか？')) return;
+    del.disabled = true;
+    apiOnce('cal.ev.delete', { id: ev.id }).then(function (r) { if (!r.ok) { alert(r.error); del.disabled = false; return; } load(C.month, true); });
+  }
+});
 </script>
 </body>
 </html>

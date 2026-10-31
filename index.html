@@ -84,8 +84,8 @@
   .minecard b { font-size: 17px; } .minecard .ms { font-size: 14px; color: #5F6670; }
   .todo { background: #FFF8E6; border: 1px solid #F1D39A; border-radius: 14px; padding: 8px 14px; margin: -4px 0 12px; }
   .todo .mh { font-size: 13px; color: #8A5A00; font-weight: 700; margin-bottom: 2px; }
-  .todo a { display: block; padding: 6px 0; color: #5A3B00; text-decoration: none; font-size: 15px; border-top: 1px solid #F5E2BA; }
-  .todo a:first-of-type { border-top: none; }
+  .todo .ti { padding: 6px 0; color: #5A3B00; font-size: 15px; border-top: 1px solid #F5E2BA; }
+  .todo .ti:first-of-type { border-top: none; }
 </style>
 </head>
 <body>
@@ -119,7 +119,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-11-19a';
+const PAGE_VERSION = '2026-11-20b';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -660,7 +660,8 @@ function renderMine(items, res) {
   const draw = r => {
     if (!r || !r.ok) { $('mine').innerHTML = ''; return; }
     const nx = r.next;
-    let h = '<a class="minecard" href="' + esc(cal.url) + '"><div class="mrow"><span class="mh">🗓 次の出勤</span>';
+    // リンクにはしない(ツールはカードから開く。直接のリンクだとうまく開かないことがあるため)
+    let h = '<div class="minecard"><div class="mrow"><span class="mh">🗓 次の出勤</span>';
     if (nx) {
       const p = nx.date.split('-').map(Number), w = new Date(p[0], p[1] - 1, p[2]).getDay();
       const today = new Date(), isToday = p[1] === today.getMonth() + 1 && p[2] === today.getDate();
@@ -668,14 +669,14 @@ function renderMine(items, res) {
     } else h += '<span class="ms">公開されたシフトはまだありません</span>';
     h += '</div>';
     if (r.today && r.today.length) h += '<div class="mrow"><span class="mh">今日の予定</span><span>' + r.today.map(e => (e.s ? esc(e.s) + ' ' : '') + esc(e.title)).join('<br>') + '</span></div>';
-    h += '</a>';
-    // やること(シフト希望の未提出・未読のお知らせ)
+    h += '</div>';
+    // やること(シフト希望の未提出・未読のお知らせ)。文字だけ(開くのは下のカードから)
     const todo = [];
     const shiftTool = (items || []).find(it => it.tool === 'shift');
-    if (r.wish && shiftTool) todo.push('<a href="' + esc(shiftTool.url) + '">📝 ' + esc(r.wish.month) + 'のシフト希望がまだです(締め切り ' + esc(r.wish.deadline) + (r.wish.left <= 3 ? '・あと' + r.wish.left + '日' : '') + ')</a>');
+    if (r.wish && shiftTool) todo.push('<div class="ti">📝 ' + esc(r.wish.month) + 'のシフト希望がまだです(締め切り ' + esc(r.wish.deadline) + (r.wish.left <= 3 ? '・あと' + r.wish.left + '日' : '') + ')</div>');
     const noticeTool = (items || []).find(it => it.tool === 'notice');
     const unread = ((res && res.notices) || []).filter(n => !n.read).length;
-    if (unread && noticeTool) todo.push('<a href="' + esc(noticeTool.url) + '">📢 未読のお知らせが ' + unread + '件あります</a>');
+    if (unread && noticeTool) todo.push('<div class="ti">📢 未読のお知らせが ' + unread + '件あります</div>');
     if (todo.length) h += '<div class="todo"><div class="mh">やること</div>' + todo.join('') + '</div>';
     $('mine').innerHTML = h;
   };

@@ -38,7 +38,7 @@
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-20a';
+var PAGE_VERSION = '2026-11-21a';
 var P = Portal.start({ tool: 'mypage', title: 'マイページ' });
 var g = Portal.$, esc = Portal.esc;
 function row(k, v) { return '<div class="me-row"><span class="k">' + esc(k) + '</span><span>' + (v ? esc(v) : '<span class="p-muted">―</span>') + '</span></div>'; }
@@ -49,10 +49,10 @@ function load() {
     g('info').innerHTML = '<h2 style="margin-top:0;">' + esc(m.name) + ' さん</h2>' + row('StaffID', m.sid) + row('雇用区分', m.emp) + row('所属', m.stores) + row('グレード', m.grade) + row('上長', m.bosses);
     g('yobina').value = m['呼び名'] || '';
     // ほかのツールへの近道(ポータルが持っている入口のうち、あるものだけ)
-    var S = Portal.session() || {}, apis = S.apis || {};
-    var base = location.href.replace(/mypage\/.*$/, '');
+    // 開く先は、ポータルのカードと同じURL(ポータルが portal_urls に入れておく。店舗などの引き継ぎも同じになる)
+    var urls = {}; try { urls = JSON.parse(sessionStorage.getItem('portal_urls') || '{}'); } catch (e) {}
     var links = [['calendar', '🗓 シフトカレンダー(自分の予定・全体)'], ['shift', '📝 シフト希望を出す'], ['notice', '📢 お知らせ']]
-      .filter(function (x) { return apis[x[0]]; }).map(function (x) { return '<a href="' + esc(base + x[0] + '/') + '">' + esc(x[1]) + ' ›</a>'; });
+      .filter(function (x) { return urls[x[0]]; }).map(function (x) { return '<a href="' + esc(urls[x[0]]) + '">' + esc(x[1]) + ' ›</a>'; });
     g('links').innerHTML = links.length ? links.join('') : '<div class="p-muted">―</div>';
     Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
   }).catch(function (e) { Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });

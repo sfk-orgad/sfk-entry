@@ -84,8 +84,10 @@
   .minecard b { font-size: 17px; } .minecard .ms { font-size: 14px; color: #5F6670; }
   .todo { background: #FFF8E6; border: 1px solid #F1D39A; border-radius: 14px; padding: 8px 14px; margin: -4px 0 12px; }
   .todo .mh { font-size: 13px; color: #8A5A00; font-weight: 700; margin-bottom: 2px; }
+  .todo summary { cursor: pointer; font-size: 15px; font-weight: 700; color: #8A5A00; padding: 2px 0; }
+  .todo .urg { margin-left: 8px; font-size: 12px; background: #B42318; color: #fff; border-radius: 999px; padding: 1px 8px; }
   .todo .ti { padding: 6px 0; color: #5A3B00; font-size: 15px; border-top: 1px solid #F5E2BA; }
-  .todo .ti:first-of-type { border-top: none; }
+  .todo .ti.soft { color: #6B6F75; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -119,7 +121,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-11-20b';
+const PAGE_VERSION = '2026-11-21a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -131,6 +133,7 @@ function lap(label, from) { TIMES.push(label + ' ' + ((Date.now() - from) / 1000
 showVer();
 
 // ===== 設定(秘密情報ではない) =====
+
 const WOFF_ID = 'zOLRGLwYG4i71sA08_geGw';
 const AUTH_API = 'https://script.google.com/macros/s/AKfycbyrk69F7F1E1LatE1e0hz_V2p8FVtdx5FxJQTJSDuiMDg7ETCXoLCJc3ZwynbArvSVClA/exec';
 // ===== ブラウザの中での受け渡し(同じサイトのツールの画面だけが読める。URLには出さない) =====
@@ -523,6 +526,11 @@ function renderPortal(res, at) {
   $('gate').style.display = 'none';
   $('portal').style.display = 'block';
   $('me').textContent = res.name ? res.name + ' さん' : '';
+  // 右上の名前を押すとマイページ(マイページのカードと同じ開き方。カードが無い人は何もしない)
+  const myTile = (res.items || []).find(x => x.tool === 'mypage');
+  $('me').style.cursor = myTile ? 'pointer' : '';
+  $('me').style.textDecoration = myTile ? 'underline' : '';
+  $('me').onclick = myTile ? () => { const b = document.querySelector('.tile[data-key="' + myTile.key + '"]'); if (b) b.click(); } : null;
 
   // 自分の「次の出勤・今日の予定」(Bot のシフトカレンダーから。表示し終わってから裏で読む・10分覚える)
   renderMine(res.items, res);
@@ -673,11 +681,16 @@ function renderMine(items, res) {
     // やること(シフト希望の未提出・未読のお知らせ)。文字だけ(開くのは下のカードから)
     const todo = [];
     const shiftTool = (items || []).find(it => it.tool === 'shift');
-    if (r.wish && shiftTool) todo.push('<div class="ti">📝 ' + esc(r.wish.month) + 'のシフト希望がまだです(締め切り ' + esc(r.wish.deadline) + (r.wish.left <= 3 ? '・あと' + r.wish.left + '日' : '') + ')</div>');
+    let urgent = 0;
+    if (r.wish && shiftTool) {
+      if (r.wish.left <= 7) { urgent++; todo.push('<div class="ti">📝 ' + esc(r.wish.month) + 'のシフト希望がまだです(締め切り ' + esc(r.wish.deadline) + '・あと' + r.wish.left + '日)</div>'); }
+      else todo.push('<div class="ti soft">📝 ' + esc(r.wish.month) + 'のシフト希望を出せます(締め切り ' + esc(r.wish.deadline) + ')。締め切りの1週間前までに出してください</div>');
+    }
     const noticeTool = (items || []).find(it => it.tool === 'notice');
     const unread = ((res && res.notices) || []).filter(n => !n.read).length;
-    if (unread && noticeTool) todo.push('<div class="ti">📢 未読のお知らせが ' + unread + '件あります</div>');
-    if (todo.length) h += '<div class="todo"><div class="mh">やること</div>' + todo.join('') + '</div>';
+    if (unread && noticeTool) { urgent++; todo.push('<div class="ti">📢 未読のお知らせが ' + unread + '件あります</div>'); }
+    // 最初は閉じておく(押すと開く)。急ぎ(締め切りまで1週間以内・未読)があれば見出しで分かるように
+    if (todo.length) h += '<details class="todo"><summary>やること ' + todo.length + '件' + (urgent ? '<span class="urg">急ぎ ' + urgent + '</span>' : '') + '</summary>' + todo.join('') + '</details>';
     $('mine').innerHTML = h;
   };
   try { const c = JSON.parse(sessionStorage.getItem('mine_cache') || 'null'); if (c && Date.now() - c.at < 10 * 60000) { draw(c.r); return; } } catch (e) {}

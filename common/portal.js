@@ -155,7 +155,10 @@
       app.insertBefore(h, app.firstChild);
     }
     h.className = 'p-header';
-    h.innerHTML = '<div class="p-top"><a href="' + Portal.PORTAL_URL + '">‹ ポータル</a><span>' + Portal.esc(name ? name + ' さん' : '') + '</span></div>' +
+    // 右上の名前：マイページを使える人は、押すとマイページへ(マイページの画面では押せない)
+    var S0 = Portal.session() || {}, toMy = S0.apis && S0.apis.mypage && !/\/mypage\//.test(location.pathname);
+    var nm = Portal.esc(name ? name + ' さん' : '');
+    h.innerHTML = '<div class="p-top"><a href="' + Portal.PORTAL_URL + '">‹ ポータル</a>' + (toMy ? '<a href="../mypage/" style="text-decoration:underline;">' + nm + '</a>' : '<span>' + nm + '</span>') + '</div>' +
       '<h1>' + Portal.esc(title || '') + '</h1>';
   };
 

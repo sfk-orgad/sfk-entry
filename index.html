@@ -121,7 +121,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-11-21a';
+const PAGE_VERSION = '2026-11-21b';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -133,7 +133,6 @@ function lap(label, from) { TIMES.push(label + ' ' + ((Date.now() - from) / 1000
 showVer();
 
 // ===== 設定(秘密情報ではない) =====
-
 const WOFF_ID = 'zOLRGLwYG4i71sA08_geGw';
 const AUTH_API = 'https://script.google.com/macros/s/AKfycbyrk69F7F1E1LatE1e0hz_V2p8FVtdx5FxJQTJSDuiMDg7ETCXoLCJc3ZwynbArvSVClA/exec';
 // ===== ブラウザの中での受け渡し(同じサイトのツールの画面だけが読める。URLには出さない) =====
@@ -511,6 +510,10 @@ function renderPortal(res, at) {
     const apis = {};
     res.items.forEach(it => { if (it.kind !== 'link' && it.api) apis[it.tool] = it.api; });
     apis._auth = AUTH_API; // 動作の記録の送り先(ツールの画面が使う)
+    // ツールの開く先(カードと同じURL。マイページの近道などが使う)
+    const urls = {};
+    res.items.forEach(it => { if (it.kind !== 'link' && it.url && !urls[it.tool]) urls[it.tool] = it.url; });
+    try { sessionStorage.setItem('portal_urls', JSON.stringify(urls)); } catch (e) {}
     try {
       sessionStorage.setItem(SESSION_KEY, JSON.stringify({ token: res.session, exp: res.sessionExp, name: res.name, apis: apis }));
       const show = Object.assign({}, res); delete show.session; // 表示用には通行証を持たない

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>打刻</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<!--
+  打刻の端末(GitHub Pages の clock/index.html。2026-11)。店舗のタブレットで開いたままにして使う。LINE WORKS のログインは使わない
+  ・最初に1回：店舗を選び、端末用の暗証番号(管理者がポータルの勤怠の画面で決める)を入れて登録 → この端末のブラウザに鍵が入る
+  ・打刻：名前を押して「出勤」「退勤」。休憩は決まりで自動で引く。打ち間違いは管理者が直す
+  ・鍵は、ブラウザのデータを消す・別のブラウザで開くと無くなる(もう一度登録する)。管理者は端末一覧で使えなくできる
+  ⚠ 下の BOT_API に Bot の Webアプリの URL(…/exec)を書く(差し替えのたびに書き戻す)
+-->
+<style>
+  :root { --c: #16323A; --in: #1F7A3D; --out: #B4531F; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #F2F4F5; color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  header { background: var(--c); color: #fff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }
+  header .st { font-size: 20px; font-weight: 700; } header .clock { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  header .dt { font-size: 14px; opacity: .85; text-align: right; }
+  main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+  .p { background: #fff; border: 2px solid var(--line); border-radius: 16px; padding: 14px; text-align: left; cursor: pointer; font-family: inherit; min-height: 96px; }
+  .p .n { font-size: 22px; font-weight: 700; } .p .s { font-size: 14px; color: var(--muted); margin-top: 4px; }
+  .p .b { display: inline-block; margin-top: 8px; font-size: 13px; padding: 2px 10px; border-radius: 999px; background: #EEF0F2; }
+  .p.on { border-color: var(--in); } .p.on .b { background: #E3F4E8; color: var(--in); font-weight: 700; }
+  .p.off .b { background: #FBEDE4; color: var(--out); }
+  .sec { font-size: 14px; color: var(--muted); margin: 18px 4px 8px; }
+  .box { background: #fff; border-radius: 16px; padding: 22px; max-width: 480px; margin: 30px auto; }
+  .box h2 { margin: 0 0 8px; } .box label { display: block; font-weight: 700; margin: 14px 0 4px; }
+  .box input, .box select { width: 100%; font-size: 20px; padding: 12px; border: 1px solid #B9C0C8; border-radius: 10px; font-family: inherit; }
+  .btn { width: 100%; font-size: 20px; padding: 14px; border: none; border-radius: 12px; background: var(--c); color: #fff; font-weight: 700; margin-top: 16px; cursor: pointer; font-family: inherit; }
+  .err { color: #B42318; margin-top: 10px; white-space: pre-wrap; }
+  #ask, #done { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 10; align-items: center; justify-content: center; }
+  #ask .in { background: #fff; border-radius: 20px; padding: 26px; width: min(92vw, 520px); text-align: center; }
+  #ask .nm { font-size: 30px; font-weight: 700; } #ask .row { display: flex; gap: 12px; margin-top: 18px; }
+  #ask .row button { flex: 1; font-size: 26px; padding: 22px 0; border: none; border-radius: 16px; color: #fff; font-weight: 700; cursor: pointer; font-family: inherit; }
+  #ask .ci { background: var(--in); } #ask .co { background: var(--out); } #ask .cancel { margin-top: 14px; font-size: 17px; background: none; border: none; color: var(--muted); cursor: pointer; }
+  #done .in { background: #fff; border-radius: 20px; padding: 36px; text-align: center; min-width: 60vw; }
+  #done .k { font-size: 44px; font-weight: 700; } #done .t { font-size: 22px; margin-top: 8px; }
+  .foot { font-size: 12px; color: var(--muted); text-align: center; margin: 20px 0; }
+</style>
+</head>
+<body>
+<header><div><div class="st" id="st">打刻</div><div style="font-size:13px;opacity:.8;" id="term"></div></div><div><div class="clock" id="clock">--:--</div><div class="dt" id="dt"></div></div></header>
+<main id="main"></main>
+<div id="ask"><div class="in"><div class="nm" id="askName"></div><div id="askState" style="color:var(--muted);margin-top:6px;"></div>
+  <div class="row"><button class="ci" id="doIn">出勤</button><button class="co" id="doOut">退勤</button></div><button class="cancel" id="askCancel">やめる</button><div class="err" id="askErr"></div></div></div>
+<div id="done"><div class="in"><div class="k" id="doneK"></div><div class="t" id="doneT"></div></div></div>
+<script>
+var BOT_API = '★BotのWebアプリのURL(…/exec)★';
+var PAGE_VERSION = '2026-11-22a';
+var KEY_NAME = 'att_key';
+var W = '日月火水木金土', B = null, CUR = null, BUSY = false;
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function key() { try { return localStorage.getItem(KEY_NAME) || ''; } catch (e) { return ''; } }
+function call(action, extra) {
+  return fetch(BOT_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ app: 'attend', action: action }, extra || {})) })
+    .then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); });
+}
+// 時計
+function tick() { var d = new Date(); $('clock').textContent = d.getHours() + ':' + ('0' + d.getMinutes()).slice(-2); $('dt').textContent = (d.getMonth() + 1) + '/' + d.getDate() + '(' + W.charAt(d.getDay()) + ')'; }
+setInterval(tick, 1000); tick();
+
+// ===== 登録(この端末に鍵がないとき) =====
+function showRegister(msg) {
+  $('st').textContent = '打刻の端末の登録'; $('term').textContent = '';
+  $('main').innerHTML = '<div class="box"><h2>この端末を登録します</h2><div style="color:var(--muted);">店舗のタブレットなど、打刻に使う端末で1回だけ行います。端末用の暗証番号は管理者に聞いてください。</div>' +
+    '<label>店舗</label><select id="rStore"><option value="">読み込み中…</option></select><label>端末の名前(例：受付のiPad)</label><input id="rName" maxlength="30">' +
+    '<label>端末用の暗証番号</label><input id="rPin" type="password" autocomplete="off"><button class="btn" id="rGo">登録する</button><div class="err" id="rErr">' + esc(msg || '') + '</div></div>';
+  call('att.stores').then(function (r) {
+    $('rStore').innerHTML = r.ok ? '<option value="">(選ぶ)</option>' + r.stores.map(function (s) { return '<option value="' + esc(s.code) + '">' + esc(s.name) + '</option>'; }).join('') : '<option value="">読めませんでした</option>';
+  }).catch(function () { $('rErr').textContent = '通信に失敗しました。BOT_API の設定と電波を確かめてください。'; });
+  $('rGo').onclick = function () {
+    $('rGo').disabled = true; $('rErr').textContent = '';
+    call('att.register', { store: $('rStore').value, name: $('rName').value, pin: $('rPin').value }).then(function (r) {
+      $('rGo').disabled = false;
+      if (!r.ok) { $('rErr').textContent = r.error; return; }
+      try { localStorage.setItem(KEY_NAME, r.key); } catch (e) { $('rErr').textContent = 'この端末のブラウザに保存できません(シークレットモードなら、ふつうのモードで開いてください)'; return; }
+      load();
+    }).catch(function () { $('rGo').disabled = false; $('rErr').textContent = '通信に失敗しました'; });
+  };
+}
+
+// ===== 打刻の画面 =====
+function load() {
+  if (!key()) { showRegister(); return; }
+  return call('att.board', { key: key() }).then(function (r) {
+    if (!r.ok) { if (r.error === 'TERMINAL') { try { localStorage.removeItem(KEY_NAME); } catch (e) {} showRegister(r.message); } else $('main').innerHTML = '<div class="box err">' + esc(r.error) + '</div>'; return; }
+    B = r; render();
+  }).catch(function () { if (!B) $('main').innerHTML = '<div class="box err">通信に失敗しました。電波を確かめて、画面を読み込み直してください。</div>'; });
+}
+function render() {
+  $('st').textContent = B.store.name; $('term').textContent = B.terminal + '・打刻';
+  var withShift = B.staff.filter(function (x) { return x.shift || x.state !== '未出勤'; }), others = B.staff.filter(function (x) { return !(x.shift || x.state !== '未出勤'); });
+  var card = function (x) {
+    return '<button class="p ' + (x.state === '出勤中' ? 'on' : x.state === '退勤済' ? 'off' : '') + '" data-u="' + esc(x.uid) + '"><div class="n">' + esc(x.name) + '</div>' +
+      '<div class="s">' + (x.shift ? '今日のシフト ' + esc(x.shift) : '　') + '</div><span class="b">' + esc(x.state) + (x.last ? '(' + esc(x.last) + ')' : '') + '</span></button>';
+  };
+  $('main').innerHTML = '<div class="sec">今日のシフト・出勤中の人</div><div class="grid">' + (withShift.map(card).join('') || '<div style="color:var(--muted);">いません</div>') + '</div>' +
+    '<div class="sec">ほかのスタッフ</div><div class="grid">' + others.map(card).join('') + '</div><div class="foot">ver ' + PAGE_VERSION + '</div>';
+}
+$('main').addEventListener('click', function (e) {
+  var b = e.target.closest('.p[data-u]'); if (!b || !B) return;
+  CUR = B.staff.filter(function (x) { return x.uid === b.getAttribute('data-u'); })[0];
+  $('askName').textContent = CUR.name + ' さん'; $('askState').textContent = CUR.state + (CUR.last ? '(' + CUR.last + ')' : ''); $('askErr').textContent = '';
+  $('ask').style.display = 'flex';
+});
+$('askCancel').onclick = function () { $('ask').style.display = 'none'; };
+function punch(kind) {
+  if (BUSY || !CUR) return;
+  if (kind === '出勤' && CUR.state === '出勤中' && !confirm('すでに出勤しています。もう一度「出勤」にしますか？')) return;
+  if (kind === '退勤' && CUR.state === '未出勤' && !confirm('まだ出勤していません。「退勤」にしますか？')) return;
+  BUSY = true; $('askErr').textContent = '送っています…';
+  call('att.punch', { key: key(), uid: CUR.uid, kind: kind }).then(function (r) {
+    BUSY = false;
+    if (!r.ok) { $('askErr').textContent = r.error === 'TERMINAL' ? r.message : r.error; return; }
+    $('ask').style.display = 'none';
+    $('doneK').textContent = r.kind; $('doneK').style.color = r.kind === '出勤' ? 'var(--in)' : 'var(--out)';
+    $('doneT').textContent = r.name + ' さん　' + r.time;
+    $('done').style.display = 'flex';
+    setTimeout(function () { $('done').style.display = 'none'; }, 2500);
+    load();
+  }).catch(function () { BUSY = false; $('askErr').textContent = '通信に失敗しました。もう一度押してください(二重にはなりません)'; });
+}
+$('doIn').onclick = function () { punch('出勤'); };
+$('doOut').onclick = function () { punch('退勤'); };
+setInterval(function () { if ($('ask').style.display !== 'flex') load(); }, 60000); // 1分ごとに状態を読み直す
+load();
+</script>
+</body>
+</html>

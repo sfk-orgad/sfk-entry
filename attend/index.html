@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>勤怠の管理</title>
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  勤怠の管理(GitHub Pages の attend/index.html。2026-11)。ツール一覧の attend_admin(管理者)
+  ・月の実績：人×日(出勤-退勤・在籍・休憩・実働)。印刷・PDF・Excel。打刻の抜け(退勤なし など)に⚠
+  ・直す：人・日を選んで、出勤〜退勤を入れ直す(理由が要る。勤怠のスプシの「修正記録」に残る)
+  ・端末：端末用の暗証番号を決める、登録された端末の一覧・使えなくする
+  データは Bot(Attend.gs、app=attend)。SheetJS は Excel のときだけ cdnjs から読む
+-->
+<style>
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.tabs button { padding: 8px 16px; border: 1px solid #B9C0C8; border-radius: 10px; background: #fff; cursor: pointer; font-family: inherit; font-size: 15px; }
+.tabs button.on { background: var(--p-c); color: #fff; border-color: var(--p-c); font-weight: 700; }
+.bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.bar select { font-size: 15px; padding: 7px; border-radius: 8px; border: 1px solid #B9C0C8; }
+.tw { overflow-x: auto; background: #fff; border: 1px solid var(--p-line); border-radius: 12px; }
+table.at { border-collapse: collapse; font-size: 12px; }
+.at th, .at td { border: 1px solid #E3E6EA; padding: 3px 4px; text-align: center; white-space: nowrap; }
+.at th { background: #F3F5F7; } .at th.sun { color: #B42318; } .at th.sat { color: #1D5BB8; }
+.at td.nm { text-align: left; font-weight: 700; position: sticky; left: 0; background: #fff; }
+.at td.sum { background: #F7F9FA; font-weight: 700; } .at td.w { color: #B42318; font-weight: 700; } .at td.fx { background: #FFF8E6; }
+.at td.c { cursor: pointer; } .at td.c:hover { background: #EEF4F6; }
+.seg { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; } .seg input { width: 90px; }
+#sheet { display: none; position: fixed; inset: 0; background: #E9ECEF; z-index: 100; overflow: auto; }
+#sheet .sb { position: sticky; top: 0; background: var(--p-c); color: #fff; padding: 8px 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+#sheet .sb button { background: #fff; border: none; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+#page { background: #fff; margin: 12px auto; padding: 8mm; width: 297mm; }
+.ps h1 { font-size: 13pt; margin: 0 0 2mm; } .ps .meta { font-size: 7.5pt; color: #555; margin-bottom: 2mm; }
+.ps table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 6.6pt; }
+.ps th, .ps td { border: .3mm solid #9AA3AD; padding: .4mm .2mm; text-align: center; overflow: hidden; }
+.ps th { background: #EEF1F4; } .ps td.nm { text-align: left; font-weight: 700; font-size: 7.3pt; } .ps td.sum { font-weight: 700; background: #F4F6F8; } .ps td.w { color: #B42318; }
+.ps .note { font-size: 6.5pt; color: #555; margin-top: 2mm; }
+@media print {
+  @page { size: A4 landscape; margin: 6mm; }
+  html, body { background: #fff !important; }
+  body > *:not(#sheet) { display: none !important; }
+  #sheet { display: block !important; position: static; background: #fff; } #sheet .sb { display: none; }
+  #page { margin: 0; padding: 0; width: auto; }
+}
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div class="tabs" id="tabs"><button class="on" data-t="month">月の実績</button><button data-t="term">端末</button></div>
+    <div id="vMonth">
+      <div class="bar"><select id="store"></select><select id="month"></select>
+        <button class="p-btn" id="reload">読み直す</button><button class="p-btn" id="print">印刷・PDF・Excel</button></div>
+      <div class="p-note">セルを押すと、その人・その日を直せます。⚠＝打刻の抜け(退勤なし など)。黄色＝管理者が直した日。休憩はシフト設定の「休憩の決まり」で自動。並行期間はスマレジが正です。</div>
+      <div class="tw" style="margin-top:8px;"><table class="at" id="tbl"></table></div>
+      <div class="p-card" id="fix" style="display:none;margin-top:12px;"></div>
+    </div>
+    <div id="vTerm" style="display:none;"></div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+<div id="sheet"><div class="sb"><b id="sTitle"></b><button id="sPrint">印刷・PDFに保存</button><button id="sXlsx">Excelでダウンロード</button><button id="sClose">閉じる</button><span id="sMsg"></span></div><div id="page" class="ps"></div></div>
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-11-22a';
+var P = Portal.start({ tool: 'attend_admin', title: '勤怠の管理' });
+var g = Portal.$, esc = Portal.esc, W = '日月火水木金土', M = null, INFO = null;
+function call(a, x, o) { return P.call(a, x, Object.assign({ app: 'attend' }, o || {})); }
+function hrs(m) { return (Math.round(m / 6) / 10).toFixed(1); }
+function fail(r) { if (r && r.error === 'AUTH') { Portal.gate(Portal.authMessage(r, '勤怠の管理'), { back: true }); return true; } return false; }
+
+function init() {
+  call('att.admin', {}, { retry: true }).then(function (r) {
+    if (!r.ok) { if (!fail(r)) Portal.gate('開けませんでした：' + r.error, { back: true }); return; }
+    INFO = r;
+    g('store').innerHTML = r.stores.map(function (s) { return '<option value="' + esc(s.code) + '">' + esc(s.name) + '</option>'; }).join('');
+    var d = new Date(), ms = [];
+    for (var k = 0; k >= -3; k--) { var t = new Date(d.getFullYear(), d.getMonth() + k, 1); ms.push(t.getFullYear() + '-' + ('0' + (t.getMonth() + 1)).slice(-2)); }
+    g('month').innerHTML = ms.map(function (m) { return '<option value="' + m + '">' + m.replace('-', '年') + '月</option>'; }).join('');
+    Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
+    loadMonth(); renderTerm();
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n開き直してください。', { back: true, detail: e.message }); });
+}
+function loadMonth() {
+  g('tbl').innerHTML = '<tr><td style="padding:12px;">読み込んでいます…</td></tr>'; g('fix').style.display = 'none';
+  call('att.month', { month: g('month').value, store: g('store').value }, { retry: true }).then(function (r) {
+    if (!r.ok) { if (!fail(r)) g('tbl').innerHTML = '<tr><td class="p-err">' + esc(r.error) + '</td></tr>'; return; }
+    M = r; renderMonth();
+  });
+}
+function cellText(c) { return c.segs.map(function (s) { return s[0] + '-' + (s[1] || '?'); }).join('<br>'); }
+function renderMonth() {
+  var h = '<tr><th>氏名</th>' + M.days.map(function (x) { return '<th class="' + (x.w === 0 ? 'sun' : x.w === 6 ? 'sat' : '') + '">' + x.d + '<br>' + W.charAt(x.w) + '</th>'; }).join('') + '<th>日数</th><th>在籍</th><th>休憩</th><th>実働</th></tr>';
+  var people = M.rows.slice();
+  M.staff.forEach(function (s) { if (!people.some(function (p) { return p.uid === s.uid; })) people.push({ uid: s.uid, name: s.name, emp: '', days: {}, tot: { n: 0, span: 0, br: 0, work: 0 } }); });
+  people.forEach(function (p) {
+    h += '<tr><td class="nm">' + esc(p.name) + '</td>' + M.days.map(function (x) {
+      var c = p.days[x.d];
+      return '<td class="c' + (c && c.warn.length ? ' w' : '') + (c && c.fixed ? ' fx' : '') + '" data-u="' + esc(p.uid) + '" data-d="' + x.d + '">' + (c ? (c.warn.length ? '⚠' : '') + cellText(c) : '') + '</td>';
+    }).join('') + '<td class="sum">' + p.tot.n + '</td><td class="sum">' + hrs(p.tot.span) + '</td><td class="sum">' + hrs(p.tot.br) + '</td><td class="sum">' + hrs(p.tot.work) + '</td></tr>';
+  });
+  g('tbl').innerHTML = h;
+}
+g('tbl').addEventListener('click', function (e) {
+  var td = e.target.closest('td.c'); if (!td || !M) return;
+  var uid = td.getAttribute('data-u'), d = Number(td.getAttribute('data-d'));
+  var p = M.rows.filter(function (r) { return r.uid === uid; })[0], c = p && p.days[d], nm = (p || M.staff.filter(function (s) { return s.uid === uid; })[0] || {}).name;
+  var segs = c ? c.segs.slice() : [];
+  if (!segs.length) segs.push(['', '']);
+  var date = M.month + '-' + ('0' + d).slice(-2);
+  var paint = function () {
+    g('fix').innerHTML = '<h2 style="margin-top:0;">' + esc(nm) + '　' + M.month.slice(5).replace(/^0/, '') + '/' + d + '</h2>' +
+      '<div class="p-note">出勤〜退勤を入れ直します。日をまたぐときは 25:30 のように。空にして保存すると、その日の打刻を消します。</div>' +
+      segs.map(function (s, i) { return '<div class="seg"><input class="p-input" data-i="' + i + '" data-k="0" value="' + esc(s[0]) + '" placeholder="9:00">〜<input class="p-input" data-i="' + i + '" data-k="1" value="' + esc(s[1]) + '" placeholder="18:00"><button class="p-btn" data-rm="' + i + '">×</button></div>'; }).join('') +
+      '<button class="p-btn" id="addSeg">＋ 出勤〜退勤を足す(中抜けのとき)</button>' +
+      '<label class="p-label">直す理由(必須)</label><input class="p-input" id="why" placeholder="例：打ち忘れ(本人に確認済み)">' +
+      '<div id="fixMsg"></div><button class="p-btn p-solid p-big" id="fixSave" style="width:100%;margin-top:10px;">保存する</button>';
+    g('fix').style.display = 'block'; g('fix').scrollIntoView({ behavior: 'smooth' });
+    Array.prototype.forEach.call(g('fix').querySelectorAll('input[data-i]'), function (el) { el.oninput = function () { segs[Number(el.getAttribute('data-i'))][Number(el.getAttribute('data-k'))] = el.value; }; });
+    Array.prototype.forEach.call(g('fix').querySelectorAll('[data-rm]'), function (b) { b.onclick = function () { segs.splice(Number(b.getAttribute('data-rm')), 1); paint(); }; });
+    g('addSeg').onclick = function () { segs.push(['', '']); paint(); };
+    g('fixSave').onclick = function () {
+      var b = g('fixSave'); b.disabled = true; b.textContent = '保存しています…';
+      call('att.fix', { store: g('store').value, date: date, uid: uid, segs: segs.filter(function (s) { return s[0] || s[1]; }), note: g('why').value }).then(function (r) {
+        b.disabled = false; b.textContent = '保存する';
+        if (!r.ok) { if (!fail(r)) g('fixMsg').innerHTML = '<div class="p-err">' + esc(r.error) + '</div>'; return; }
+        loadMonth();
+      });
+    };
+  };
+  paint();
+});
+g('reload').onclick = loadMonth; g('store').onchange = loadMonth; g('month').onchange = loadMonth;
+
+// ===== 端末 =====
+function renderTerm() {
+  var r = INFO;
+  g('vTerm').innerHTML = '<div class="p-card"><h2 style="margin-top:0;">端末用の暗証番号</h2><div class="p-note">打刻の端末(…/clock/)を登録するときに、その端末で1回だけ入れます。' + (r.pinSet ? '今は設定済みです。変えても、登録済みの端末はそのまま使えます。' : '<b style="color:var(--p-err);">まだ決めていません。</b>') + '</div>' +
+    '<input class="p-input" id="pin" type="password" placeholder="新しい暗証番号(4〜20文字)" style="margin-top:8px;"><button class="p-btn p-solid" id="pinSave" style="margin-top:8px;">この暗証番号にする</button><div id="pinMsg"></div></div>' +
+    '<div class="p-card"><h2 style="margin-top:0;">登録された端末</h2>' + (r.terminals.length ? r.terminals.map(function (t) {
+      return '<div style="display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid #EEF0F2;"><div style="flex:1;"><b>' + esc(t.name) + '</b>　' + esc(t.store) + '<div class="p-note">登録 ' + esc(t.at) + '・最後に使った ' + esc(t.last || 'まだ') + '</div></div>' +
+        '<span class="p-tag ' + (t.on ? 'p-on' : 'p-off') + '">' + (t.on ? '使える' : '使えない') + '</span><button class="p-btn" data-tid="' + esc(t.id) + '" data-on="' + (t.on ? '' : '1') + '">' + (t.on ? '使えなくする' : '使えるようにする') + '</button></div>';
+    }).join('') : '<div class="p-muted">まだありません。店舗のタブレットで …/clock/ を開いて登録してください。</div>') + '</div>';
+  g('pinSave').onclick = function () {
+    call('att.pin', { pin: g('pin').value }).then(function (x) { g('pinMsg').innerHTML = x.ok ? '<div style="color:var(--p-ok);">決めました</div>' : '<div class="p-err">' + esc(x.error) + '</div>'; if (x.ok) { INFO.pinSet = true; g('pin').value = ''; } });
+  };
+  Array.prototype.forEach.call(g('vTerm').querySelectorAll('[data-tid]'), function (b) {
+    b.onclick = function () {
+      var on = !!b.getAttribute('data-on');
+      if (!on && !confirm('この端末で打刻できなくします。よろしいですか？')) return;
+      call('att.terminal', { id: b.getAttribute('data-tid'), on: on }).then(function (x) { if (x.ok) { INFO = x; renderTerm(); } else alert(x.error); });
+    };
+  });
+}
+g('tabs').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  Array.prototype.forEach.call(g('tabs').children, function (x) { x.classList.toggle('on', x === b); });
+  g('vMonth').style.display = b.getAttribute('data-t') === 'month' ? '' : 'none';
+  g('vTerm').style.display = b.getAttribute('data-t') === 'term' ? '' : 'none';
+});
+
+// ===== 実績表(印刷・PDF・Excel) =====
+g('print').onclick = function () {
+  if (!M) return;
+  var st = g('store').selectedOptions[0].textContent, dw = (281 - 22 - 34) / M.days.length;
+  var h = '<h1>' + esc(M.label) + '　' + esc(st) + '　勤務実績</h1><div class="meta">出力：' + new Date().toLocaleString('ja-JP') + '(並行期間はスマレジが正)</div>' +
+    '<table><colgroup><col style="width:22mm">' + M.days.map(function () { return '<col style="width:' + dw.toFixed(2) + 'mm">'; }).join('') + '<col style="width:8.5mm"><col style="width:8.5mm"><col style="width:8.5mm"><col style="width:8.5mm"></colgroup>' +
+    '<tr><th>氏名</th>' + M.days.map(function (x) { return '<th>' + x.d + '<br>' + W.charAt(x.w) + '</th>'; }).join('') + '<th>日数</th><th>在籍</th><th>休憩</th><th>実働</th></tr>';
+  M.rows.forEach(function (p) {
+    h += '<tr><td class="nm">' + esc(p.name) + '</td>' + M.days.map(function (x) { var c = p.days[x.d]; return '<td' + (c && c.warn.length ? ' class="w"' : '') + '>' + (c ? c.segs.map(function (s) { return s[0] + '-<br>' + (s[1] || '?'); }).join('<br>') : '') + '</td>'; }).join('') +
+      '<td class="sum">' + p.tot.n + '</td><td class="sum">' + hrs(p.tot.span) + '</td><td class="sum">' + hrs(p.tot.br) + '</td><td class="sum">' + hrs(p.tot.work) + '</td></tr>';
+  });
+  h += '</table><div class="note">上が出勤・下が退勤(25:30＝翌1:30)。在籍・休憩・実働は時間。休憩は「休憩の決まり」で自動。? ＝退勤の打刻なし</div>';
+  g('page').innerHTML = h; g('sTitle').textContent = st + ' ' + M.label + ' 勤務実績'; g('sMsg').textContent = ''; g('sheet').style.display = 'block';
+};
+g('sClose').onclick = function () { g('sheet').style.display = 'none'; };
+g('sPrint').onclick = function () { window.print(); };
+g('sXlsx').onclick = function () {
+  g('sMsg').textContent = '作っています…';
+  var go = function (X) {
+    var aoa = [[M.label + ' ' + g('store').selectedOptions[0].textContent + ' 勤務実績'], ['氏名'].concat(M.days.map(function (x) { return x.d + '(' + W.charAt(x.w) + ')'; }), ['日数', '在籍(時間)', '休憩(時間)', '実働(時間)'])];
+    M.rows.forEach(function (p) { aoa.push([p.name].concat(M.days.map(function (x) { var c = p.days[x.d]; return c ? c.segs.map(function (s) { return s[0] + '-' + (s[1] || '?'); }).join(' / ') : ''; }), [p.tot.n, Number(hrs(p.tot.span)), Number(hrs(p.tot.br)), Number(hrs(p.tot.work))])); });
+    var ws = X.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 12 }].concat(M.days.map(function () { return { wch: 12 }; }), [{ wch: 6 }, { wch: 9 }, { wch: 9 }, { wch: 9 }]);
+    var wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, '勤務実績'); X.writeFile(wb, M.month + '_' + g('store').value + '_勤務実績.xlsx'); g('sMsg').textContent = 'ダウンロードしました';
+  };
+  if (window.XLSX) return go(window.XLSX);
+  var sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; sc.onload = function () { go(window.XLSX); }; sc.onerror = function () { g('sMsg').textContent = 'Excelの部品を読めませんでした'; }; document.head.appendChild(sc);
+};
+if (P) init();
+</script>
+</body>
+</html>

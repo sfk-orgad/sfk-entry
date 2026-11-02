@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>書類</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  書類(GitHub Pages の mydocs/index.html。2026-11)。ツール一覧の mydocs(全員)
+  自分の給与明細・源泉徴収票など(直近2年)を見る。初めてのときだけ電子交付への同意。PDFは PDF.js(../common/pdfjs/)で画面の中に描く
+  データは Bot(Paydoc.gs、app=paydoc)。本人の書類だけを Bot が中身ごと渡す(ファイルのURLは出さない)
+-->
+<style>
+.di { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: #fff; border: 1px solid var(--p-line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; cursor: pointer; font-family: inherit; font-size: 16px; color: var(--p-ink); }
+.di b { flex: 1; } .di .new { font-size: 12px; background: #B42318; color: #fff; border-radius: 999px; padding: 1px 8px; }
+#pdfPages canvas { width: 100%; height: auto; display: block; margin: 8px 0; box-shadow: 0 1px 4px rgba(0,0,0,.15); background: #fff; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div id="toolbar"></div>
+    <div id="view"></div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-11-26a';
+var P = Portal.start({ tool: 'mydocs', title: '書類' });
+var g = Portal.$, esc = Portal.esc, D = null, VIEW = 'list';
+function call(a, x, o) { return P.call(a, x, Object.assign({ app: 'paydoc' }, o || {})); }
+var PDFJS_VER = '3.11.174';
+// 部品の場所(このページから見た ../common/pdfjs/。エラーのときに分かるよう、完全なURLにしておく)
+var PDFJS_BASE = new URL('../common/pdfjs/', location.href).href;
+function loadScript(src) {
+  return new Promise(function (ok, ng) {
+    var sc = document.createElement('script');
+    sc.src = src;
+    sc.onload = function () { ok(); };
+    sc.onerror = function () { sc.parentNode && sc.parentNode.removeChild(sc); ng(new Error(src)); };
+    document.head.appendChild(sc);
+  });
+}
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  var src = PDFJS_BASE + 'pdf.min.js?v=' + PDFJS_VER;
+  // 失敗したら、端末が覚えている結果を使わずに、もう一度だけ読み込み直す(部品を置く前に開いた場合など)
+  return loadScript(src).catch(function () { return loadScript(src + '&t=' + Date.now()); }).then(function () {
+    if (!window.pdfjsLib) throw new Error('部品は読み込めたが、使える状態になりませんでした(端末のブラウザが古い可能性)');
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.js?v=' + PDFJS_VER;
+    return window.pdfjsLib;
+  }, function () {
+    throw new Error('PDFの表示の部品を読み込めませんでした\n(' + src + ' を開けるか、ブラウザで確かめてください)');
+  });
+}
+// PDF：最初の2ページだけすぐ描き、残りは画面に近づいたら描く(ページが多くても重くならない・スマホのメモリを使いすぎない)
+function showPdf(b64, libReady) {
+  var box = g('pdfPages');
+  (libReady || loadPdfJs()).then(function (lib) {
+    var bin = atob(b64), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return lib.getDocument({ data: bytes, isEvalSupported: false }).promise; // isEvalSupported：通信先の制限(eval禁止)の下でも動くように // isEvalSupported：通信先の制限(eval禁止)の下でも動くように
+  }).then(function (pdf) {
+    box.innerHTML = '<div class="p-note" id="pdfNote">全' + pdf.numPages + 'ページ</div>';
+    var width = Math.max(280, box.clientWidth - 16), dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var chain = Promise.resolve();
+    var draw = function (no, c) { // 描く順番は1枚ずつ(同時に描くと重い)
+      chain = chain.then(function () { return pdf.getPage(no); }).then(function (page) {
+        var vp1 = page.getViewport({ scale: 1 });
+        var vp = page.getViewport({ scale: (width / vp1.width) * dpr });
+        c.width = Math.floor(vp.width); c.height = Math.floor(vp.height); c.style.aspectRatio = '';
+        return page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      }).catch(function () {});
+    };
+    // 先にページの枠だけ並べる(1ページ目の縦横比で仮の高さ)。描いたら本当の大きさになる
+    return pdf.getPage(1).then(function (p1) {
+      var v = p1.getViewport({ scale: 1 }), ratio = v.width + ' / ' + v.height, pages = [];
+      for (var n = 1; n <= pdf.numPages; n++) {
+        var c = document.createElement('canvas');
+        c.style.aspectRatio = ratio; c.setAttribute('data-no', n);
+        box.appendChild(c); pages.push(c);
+      }
+      var lazy = 'IntersectionObserver' in window;
+      pages.forEach(function (c, i) { if (i < 2 || !lazy) draw(i + 1, c); });
+      if (!lazy) return;
+      var io = new IntersectionObserver(function (es) {
+        es.forEach(function (e) { if (e.isIntersecting) { io.unobserve(e.target); draw(Number(e.target.getAttribute('data-no')), e.target); } });
+      }, { rootMargin: '800px 0px' });
+      pages.slice(2).forEach(function (c) { io.observe(c); });
+    });
+  }).catch(function (e) { box.innerHTML = '<div class="p-err">PDFを表示できませんでした：' + esc(e && e.message ? e.message : e) + '</div>'; });
+}
+
+function load() {
+  return call('pd.mine', {}, { retry: true }).then(function (r) {
+    if (!r.ok) { Portal.gate(r.error === 'AUTH' ? Portal.authMessage(r, '書類') : '開けませんでした：' + r.error, { back: true }); return; }
+    D = r; Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
+    if (!D.consented) showConsent(); else showList();
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
+}
+function showConsent() {
+  g('toolbar').innerHTML = '';
+  g('view').innerHTML = '<div class="p-card"><h2 style="margin-top:0;">書類の受け取り方について</h2>' +
+    '<p>給与明細・源泉徴収票などは、紙ではなく、この画面で受け取ります(電子交付)。</p><ul style="padding-left:1.2em;line-height:1.8;">' +
+    '<li>届いたら LINE WORKS でお知らせします</li><li>見られるのはあなただけです</li><li>直近2年分を、いつでも見られます</li><li>紙が必要なときは、管理者に伝えてください</li></ul>' +
+    '<button class="p-btn p-solid p-big" id="agree" style="width:100%;">同意して、書類を見る</button></div>';
+  g('agree').onclick = function () {
+    g('agree').disabled = true;
+    call('pd.consent', {}).then(function (r) { if (!r.ok) { alert(r.error); g('agree').disabled = false; return; } D.consented = '1'; showList(); });
+  };
+}
+function showList() {
+  VIEW = 'list'; g('toolbar').innerHTML = '';
+  g('view').innerHTML = D.docs.length ? D.docs.map(function (d) {
+    return '<button class="di" data-id="' + esc(d.id) + '"><span>📄</span><b>' + esc(d.label) + '</b>' + (d.seen ? '<span class="p-muted" style="font-size:13px;">' + esc(d.at.slice(0, 10)) + '</span>' : '<span class="new">新しい</span>') + '</button>';
+  }).join('') : '<div class="p-card p-muted">まだ書類はありません。届いたら LINE WORKS でお知らせします。</div>';
+}
+g('view').addEventListener('click', function (e) {
+  var b = e.target.closest('.di[data-id]'); if (!b) return;
+  var d = D.docs.filter(function (x) { return x.id === b.getAttribute('data-id'); })[0];
+  VIEW = 'doc';
+  var lib = loadPdfJs(); lib.catch(function () {});
+  g('toolbar').innerHTML = '<button class="p-btn" id="back">‹ 一覧へ</button>';
+  g('back').onclick = showList;
+  g('view').innerHTML = '<div class="p-card"><h2 style="margin-top:0;">' + esc(d.label) + '</h2><div id="pdfPages">開いています…</div><div id="dl"></div></div>';
+  call('pd.get', { id: d.id }).then(function (r) {
+    if (VIEW !== 'doc') return;
+    if (!r.ok) { g('pdfPages').innerHTML = '<div class="p-err">' + esc(r.error) + '</div>'; return; }
+    d.seen = true;
+    showPdf(r.data, lib);
+    // 保存したい人のために(端末によっては使えない)
+    try {
+      var bin = atob(r.data), bytes = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      g('dl').innerHTML = '<div class="p-note" style="margin-top:8px;">数字や文字が出ていないときは、PDFを保存して、端末のアプリ(ファイル・PDFの表示)で開いてください。</div>' +
+        '<a class="p-btn p-solid" href="' + url + '" download="' + esc(r.name) + '" style="display:inline-block;margin-top:8px;">PDFを保存する</a>';
+    } catch (x) {}
+  }).catch(function () { g('pdfPages').innerHTML = '<div class="p-err">通信に失敗しました。もう一度開いてください。</div>'; });
+});
+if (P) load();
+</script>
+</body>
+</html>

@@ -18,6 +18,8 @@
 .me-row .k { width: 6.5em; color: var(--p-muted); font-size: 14px; flex-shrink: 0; }
 .links a { display: block; padding: 12px 4px; border-top: 1px solid #EEF0F2; color: var(--p-ink); text-decoration: none; font-size: 16px; }
 .links a:first-child { border-top: none; }
+.tdg { font-weight: 700; margin: 14px 0 4px; font-size: 15px; }
+.tdr { font-size: 14px; padding: 6px 0; border-top: 1px solid #EEF0F2; }
 </style>
 </head>
 <body>
@@ -31,14 +33,14 @@
       <div id="msg" style="margin-top:8px;"></div>
       <button class="p-btn p-solid p-big" id="save" style="margin-top:10px;width:100%;">保存する</button>
     </div>
+    <div class="p-card" id="td"><h2 style="margin-top:0;">届け出(住所・連絡先・口座)</h2><div class="p-muted">読み込んでいます…</div></div>
     <div class="p-card links" id="links"></div>
-    <div class="p-note">住所・口座・緊急連絡先などの変更は、今は管理者に直接伝えてください(画面からの届け出は準備中です)。</div>
     <div class="p-ver" id="ver"></div>
   </div>
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-21a';
+var PAGE_VERSION = '2026-11-24a';
 var P = Portal.start({ tool: 'mypage', title: 'マイページ' });
 var g = Portal.$, esc = Portal.esc;
 function row(k, v) { return '<div class="me-row"><span class="k">' + esc(k) + '</span><span>' + (v ? esc(v) : '<span class="p-muted">―</span>') + '</span></div>'; }
@@ -65,7 +67,58 @@ g('save').addEventListener('click', function () {
     g('msg').innerHTML = '<div style="color:var(--p-ok);font-weight:700;">' + (r.unchanged ? '変わったところはありません' : '保存しました(アンケートには1時間ほどで反映されます)') + '</div>';
   }).catch(function () { b.disabled = false; b.textContent = '保存する'; g('msg').innerHTML = '<div class="p-err">通信に失敗しました。もう一度押してください</div>'; });
 });
-if (P) load();
+
+// ===== 届け出(住所・連絡先・口座。2026-11-24) =====
+var TD = null, GROUPS = { address: '住所', tel: '電話', emergency: '緊急連絡先', bank: '振込口座' };
+function loadTd() {
+  P.call('todoke.mine', {}, { retry: true }).then(function (r) {
+    if (!r.ok) { g('td').innerHTML = '<h2 style="margin-top:0;">届け出</h2><div class="p-muted">' + esc(r.error === 'AUTH' ? '使えません' : r.error) + '</div>'; return; }
+    TD = r; renderTd(false);
+  });
+}
+function renderTd(editing) {
+  var cur = TD.current || {}, h = '<h2 style="margin-top:0;">届け出(住所・連絡先・口座)</h2>';
+  var pend = TD.requests.filter(function (x) { return x.state === '申請中'; })[0];
+  if (!editing) {
+    h += '<div class="p-note">変わったときだけ申請してください(必須ではありません)。見られるのは本人と、承認する担当者だけです。</div>';
+    var last = '';
+    TD.fields.forEach(function (f) {
+      if (f[1] !== last) { h += '<div class="tdg">' + esc(GROUPS[f[1]]) + '</div>'; last = f[1]; }
+      h += row(f[0], cur[f[0]] ? (f[0] === '口座番号' ? '****' + String(cur[f[0]]).slice(-3) : cur[f[0]]) : '');
+    });
+    h += pend ? '<div class="tdr" style="margin-top:10px;"><b>申請中</b>(' + esc(pend.at) + '・' + esc(pend.items) + ') <button class="p-btn" id="tdCancel">取り下げる</button></div>'
+      : '<button class="p-btn p-solid p-big" id="tdEdit" style="width:100%;margin-top:12px;">変更を申請する</button>';
+    var done = TD.requests.filter(function (x) { return x.state !== '申請中'; }).slice(0, 3);
+    if (done.length) h += '<div class="tdg">これまでの申請</div>' + done.map(function (x) { return '<div class="tdr">' + esc(x.at) + '　' + esc(x.state) + '(' + esc(x.items) + ')' + (x.reason ? '<br><span class="p-err">理由：' + esc(x.reason) + '</span>' : '') + '</div>'; }).join('');
+  } else {
+    h += '<div class="p-note">変える項目だけ入れてください。空の項目は今のままです。</div>';
+    var last2 = '';
+    TD.fields.forEach(function (f) {
+      if (f[1] !== last2) { h += '<div class="tdg">' + esc(GROUPS[f[1]]) + '</div>'; last2 = f[1]; }
+      var ph = f[0] === '口座の種別' ? '普通・当座・貯蓄' : f[0] === '口座番号' ? '7けた' : f[0] === '郵便番号' ? '123-4567' : (cur[f[0]] && f[0] !== '口座番号' ? '今：' + cur[f[0]] : '');
+      h += '<label class="p-label">' + esc(f[0]) + '</label><input class="p-input" data-td="' + esc(f[0]) + '" placeholder="' + esc(ph) + '">';
+    });
+    h += '<label class="p-label">メモ(任意)</label><input class="p-input" id="tdMemo" placeholder="例：引っ越しのため">' +
+      '<div id="tdMsg"></div><div style="display:flex;gap:8px;margin-top:12px;"><button class="p-btn p-solid p-big" id="tdSend" style="flex:1;">申請する</button><button class="p-btn p-big" id="tdBack" style="flex:1;">やめる</button></div>';
+  }
+  g('td').innerHTML = h;
+  if (g('tdEdit')) g('tdEdit').onclick = function () { renderTd(true); };
+  if (g('tdBack')) g('tdBack').onclick = function () { renderTd(false); };
+  if (g('tdCancel')) g('tdCancel').onclick = function () {
+    if (!confirm('申請を取り下げます。よろしいですか？')) return;
+    P.call('todoke.cancel', { id: pend.id }).then(function (r) { if (!r.ok) { alert(r.error); return; } loadTd(); });
+  };
+  if (g('tdSend')) g('tdSend').onclick = function () {
+    var v = {}; Array.prototype.forEach.call(document.querySelectorAll('[data-td]'), function (el) { if (el.value.trim()) v[el.getAttribute('data-td')] = el.value.trim(); });
+    var b = g('tdSend'); b.disabled = true; b.textContent = '送っています…'; g('tdMsg').innerHTML = '';
+    P.call('todoke.apply', { values: v, memo: g('tdMemo').value }).then(function (r) {
+      b.disabled = false; b.textContent = '申請する';
+      if (!r.ok) { g('tdMsg').innerHTML = '<div class="p-err" style="margin-top:8px;">' + esc(r.error) + '</div>'; return; }
+      alert('申請しました。承認されると、登録情報が変わります。'); loadTd();
+    }).catch(function () { b.disabled = false; b.textContent = '申請する'; g('tdMsg').innerHTML = '<div class="p-err">通信に失敗しました。申請できたか、この画面を開き直して確かめてください</div>'; });
+  };
+}
+if (P) { load(); loadTd(); }
 </script>
 </body>
 </html>

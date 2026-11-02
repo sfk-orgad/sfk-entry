@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>書類を配る</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  書類を配る(GitHub Pages の paydoc_admin/index.html。2026-11)。ツール一覧の paydoc_admin
+  税理士から届いた1人1ファイルのPDF(例：株式会社しふくのとき_054_松井亮介_2026年9月給与明細.pdf)をまとめて選ぶ
+  → ファイル名の従業員番号(なければ氏名)で StaffMaster の人と照合 → 確かめて「配る」→ 本人に LINE WORKS で知らせる
+  データは Bot(Paydoc.gs、app=paydoc)。PDFはドライブの「書類の配布_ファイル」へ(共有しない)
+-->
+<style>
+.drop { border: 2px dashed #9AA3AD; border-radius: 14px; padding: 26px; text-align: center; background: #fff; cursor: pointer; }
+.drop.on { border-color: var(--p-c); background: #EEF4F6; }
+table.pd { border-collapse: collapse; width: 100%; font-size: 14px; background: #fff; }
+.pd th, .pd td { border-bottom: 1px solid #EEF0F2; padding: 7px 6px; text-align: left; vertical-align: top; }
+.pd select { font-size: 14px; padding: 4px; }
+.ok { color: var(--p-ok); font-weight: 700; } .ng { color: var(--p-err); font-weight: 700; }
+.bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+.bar select, .bar input { font-size: 15px; padding: 7px; border: 1px solid #B9C0C8; border-radius: 8px; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div class="p-card">
+      <h2 style="margin-top:0;">1. PDFを選ぶ</h2>
+      <div class="bar"><span>書類の種類</span><select id="kind"></select><span>年月</span><input type="month" id="ym"></div>
+      <div class="p-note">ファイル名の年月・書類名から、種類と年月を自動で入れます(違えば直してください)。</div>
+      <label class="drop" id="drop" style="display:block;margin-top:8px;"><input type="file" id="files" accept="application/pdf" multiple hidden>ここにPDFをまとめてドロップ、または押して選ぶ</label>
+    </div>
+    <div class="p-card" id="step2" style="display:none;">
+      <h2 style="margin-top:0;">2. 照合を確かめて配る</h2>
+      <div id="sum"></div>
+      <table class="pd" id="tbl"></table>
+      <label style="display:block;margin-top:10px;"><input type="checkbox" id="notify" checked> 配ったあと、本人に LINE WORKS で知らせる</label>
+      <div id="msg" style="margin-top:8px;"></div>
+      <button class="p-btn p-solid p-big" id="send" style="width:100%;margin-top:10px;">照合できた人に配る</button>
+    </div>
+    <div class="p-card">
+      <h2 style="margin-top:0;">配った書類</h2>
+      <div class="bar"><input type="month" id="lym"><button class="p-btn" id="lload">見る</button></div>
+      <div id="list" class="p-muted">年月を選んで「見る」</div>
+    </div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-11-26a';
+var P = Portal.start({ tool: 'paydoc_admin', title: '書類を配る' });
+var g = Portal.$, esc = Portal.esc, STAFF = [], KINDS = [], ITEMS = [];
+function call(a, x, o) { return P.call(a, x, Object.assign({ app: 'paydoc' }, o || {})); }
+function z(s) { return String(s || '').replace(/^0+(?=\d)/, ''); }
+function nn(s) { return String(s || '').replace(/[\s　]/g, ''); }
+function init() {
+  call('pd.admin.staff', {}, { retry: true }).then(function (r) {
+    if (!r.ok) { Portal.gate(r.error === 'AUTH' ? Portal.authMessage(r, '書類を配る') : '開けませんでした：' + r.error, { back: true }); return; }
+    STAFF = r.staff; KINDS = r.kinds;
+    g('kind').innerHTML = KINDS.map(function (k) { return '<option>' + esc(k) + '</option>'; }).join('');
+    var d = new Date(); d.setMonth(d.getMonth() - 1); g('ym').value = g('lym').value = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2);
+    Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n開き直してください。', { back: true, detail: e.message }); });
+}
+// ファイル名：会社名_従業員番号_氏名_2026年9月給与明細.pdf
+function parseName(fn) {
+  var base = fn.replace(/\.pdf$/i, ''), parts = base.split('_');
+  var no = '', name = '', ym = '', kind = '';
+  parts.forEach(function (p, i) { if (!no && /^\d{1,6}$/.test(p)) { no = p; name = parts[i + 1] || ''; } });
+  var m = base.match(/(\d{4})年(\d{1,2})月/); if (m) ym = m[1] + '-' + ('0' + m[2]).slice(-2);
+  KINDS.forEach(function (k) { if (!kind && base.indexOf(k) !== -1) kind = k; });
+  return { no: no, name: name, ym: ym, kind: kind };
+}
+function match(p) {
+  var s = p.no ? STAFF.filter(function (x) { return x.no && x.no === z(p.no); }) : [];
+  if (!s.length && p.name) s = STAFF.filter(function (x) { return nn(x.name) === nn(p.name); });
+  return s.length === 1 ? s[0] : null;
+}
+function addFiles(list) {
+  ITEMS = [];
+  Array.prototype.forEach.call(list, function (f) {
+    if (!/\.pdf$/i.test(f.name)) return;
+    var p = parseName(f.name), m = match(p);
+    ITEMS.push({ file: f, p: p, sid: m ? m.sid : '', state: '' });
+  });
+  var first = ITEMS[0] && ITEMS[0].p;
+  if (first && first.ym) g('ym').value = first.ym;
+  if (first && first.kind) g('kind').value = first.kind;
+  render();
+}
+function render() {
+  var okN = ITEMS.filter(function (x) { return x.sid; }).length;
+  g('step2').style.display = ITEMS.length ? 'block' : 'none';
+  g('sum').innerHTML = '<div>' + ITEMS.length + 'ファイル(照合できた <span class="ok">' + okN + '</span>・できない <span class="ng">' + (ITEMS.length - okN) + '</span>)。照合できないものは、右で人を選べます。</div>';
+  var opts = '<option value="">(選ぶ)</option>' + STAFF.map(function (s) { return '<option value="' + esc(s.sid) + '">' + esc(s.name) + (s.no ? '(' + esc(s.no) + ')' : '') + (s.ok ? '' : '※未登録') + '</option>'; }).join('');
+  g('tbl').innerHTML = '<tr><th>ファイル</th><th>ファイル名の番号・氏名</th><th>配る人</th><th></th></tr>' + ITEMS.map(function (x, i) {
+    return '<tr><td>' + esc(x.file.name) + '</td><td>' + esc(x.p.no || '-') + '・' + esc(x.p.name || '-') + '</td><td><select data-i="' + i + '">' + opts.replace('value="' + esc(x.sid) + '"', 'value="' + esc(x.sid) + '" selected') + '</select></td><td>' +
+      (x.state ? x.state : x.sid ? '<span class="ok">照合OK</span>' : '<span class="ng">照合できない</span>') + '</td></tr>';
+  }).join('');
+  Array.prototype.forEach.call(g('tbl').querySelectorAll('select[data-i]'), function (el) { el.onchange = function () { ITEMS[Number(el.getAttribute('data-i'))].sid = el.value; render(); }; });
+}
+g('files').onchange = function () { addFiles(g('files').files); };
+['dragover', 'dragenter'].forEach(function (ev) { g('drop').addEventListener(ev, function (e) { e.preventDefault(); g('drop').classList.add('on'); }); });
+['dragleave', 'drop'].forEach(function (ev) { g('drop').addEventListener(ev, function (e) { e.preventDefault(); g('drop').classList.remove('on'); if (ev === 'drop') addFiles(e.dataTransfer.files); }); });
+function b64(file) {
+  return new Promise(function (ok, ng) { var r = new FileReader(); r.onload = function () { ok(String(r.result).split(',')[1]); }; r.onerror = ng; r.readAsDataURL(file); });
+}
+g('send').onclick = function () {
+  var targets = ITEMS.filter(function (x) { return x.sid && x.state.indexOf('配った') === -1; });
+  if (!targets.length) { alert('配れるファイルがありません'); return; }
+  var kind = g('kind').value, ym = g('ym').value;
+  if (!ym) { alert('年月を選んでください'); return; }
+  if (!confirm(ym.replace('-', '年') + '月の' + kind + 'を、' + targets.length + '人に配ります。よろしいですか？')) return;
+  var b = g('send'); b.disabled = true; var ids = [], fails = 0;
+  var chain = Promise.resolve();
+  targets.forEach(function (x, k) {
+    chain = chain.then(function () {
+      x.state = '送っています…'; render(); b.textContent = '配っています…(' + (k + 1) + '/' + targets.length + ')';
+      return b64(x.file).then(function (data) { return call('pd.admin.upload', { kind: kind, ym: ym, sid: x.sid, fileName: x.file.name, data: data }); })
+        .then(function (r) { if (r.ok) { ids.push(r.id); x.state = '<span class="ok">配った</span>'; } else { fails++; x.state = '<span class="ng">' + esc(r.error) + '</span>'; } render(); })
+        .catch(function () { fails++; x.state = '<span class="ng">通信に失敗</span>'; render(); });
+    });
+  });
+  chain.then(function () {
+    if (!ids.length || !g('notify').checked) return null;
+    return call('pd.admin.notify', { ids: ids });
+  }).then(function (n) {
+    b.disabled = false; b.textContent = '照合できた人に配る';
+    g('msg').innerHTML = '<div>' + ids.length + '人に配りました' + (fails ? '・<span class="ng">' + fails + '件は配れませんでした(表の右を見て、直してからもう一度)</span>' : '') +
+      (n ? '。' + (n.mode === 'お試し' ? 'お試し中のため、本人には知らせていません' : n.sent + '人に知らせました') : '') + '</div>';
+  });
+};
+g('lload').onclick = function () {
+  g('list').textContent = '読み込んでいます…';
+  call('pd.admin.list', { ym: g('lym').value }, { retry: true }).then(function (r) {
+    if (!r.ok) { g('list').textContent = r.error; return; }
+    var seen = r.rows.filter(function (x) { return x.seen; }).length;
+    g('list').innerHTML = r.rows.length ? '<div class="p-note">' + r.rows.length + '件(見た ' + seen + '・まだ ' + (r.rows.length - seen) + ')</div><table class="pd"><tr><th>氏名</th><th>書類</th><th>配った</th><th>見た</th></tr>' +
+      r.rows.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td>' + esc(x.kind) + '</td><td>' + esc(x.at) + '<br><span class="p-muted">' + esc(x.by) + '</span></td><td>' + (x.seen ? esc(x.seen) : '<span class="ng">まだ</span>') + '</td></tr>'; }).join('') + '</table>' : 'この年月に配った書類はありません';
+  });
+};
+if (P) init();
+</script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>届け出の承認</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  届け出の承認(GitHub Pages の todoke/index.html。2026-11-24)。ツール一覧の todoke_admin(指定した社員だけ)
+  ・申請中の届け出(前→後)を承認／却下(理由)。承認すると、届け出のスプシの「登録情報」に反映
+  ・全員の登録情報を見る(名前で絞り込み)
+  データは認証基盤(ツール一覧の todoke_admin の行の API＝認証基盤のURL)。大事な情報なので、画面を開きっぱなしにしない
+-->
+<style>
+.req { border: 1px solid var(--p-line); border-radius: 12px; padding: 12px; margin-bottom: 10px; background: #fff; }
+.req table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 6px 0; }
+.req th, .req td { border-bottom: 1px solid #EEF0F2; padding: 5px 4px; text-align: left; vertical-align: top; }
+.req td.af { font-weight: 700; color: #1F5B3A; }
+.pp { font-size: 14px; border-top: 1px solid #EEF0F2; padding: 8px 0; }
+.pp b { font-size: 15px; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div class="p-card"><h2 style="margin-top:0;">申請中</h2><div id="pend"></div></div>
+    <div class="p-card"><h2 style="margin-top:0;">全員の登録情報</h2><input class="p-input" id="q" placeholder="名前で絞り込み"><div id="people" style="margin-top:8px;"></div></div>
+    <div class="p-card"><h2 style="margin-top:0;">最近の処理</h2><div id="recent"></div></div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-11-24a';
+var P = Portal.start({ tool: 'todoke_admin', title: '届け出の承認' });
+var g = Portal.$, esc = Portal.esc, D = null;
+function load() {
+  return P.call('todoke.admin.list', {}, { retry: true }).then(function (r) {
+    if (!r.ok) { Portal.gate(r.error === 'AUTH' ? Portal.authMessage(r, '届け出の承認') : '開けませんでした：' + r.error, { back: true }); return; }
+    D = r; render(); Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n開き直してください。', { back: true, detail: e.message }); });
+}
+function render() {
+  g('pend').innerHTML = D.pending.length ? D.pending.map(function (p) {
+    return '<div class="req"><b>' + esc(p.name) + '</b>(' + esc(p.sid) + ')　<span class="p-muted">' + esc(p.at) + '</span>' + (p.memo ? '<div class="p-note">メモ：' + esc(p.memo) + '</div>' : '') +
+      '<table><tr><th>項目</th><th>今</th><th>申請</th></tr>' + p.changes.map(function (c) { return '<tr><td>' + esc(c.k) + '</td><td>' + esc(c.before || '―') + '</td><td class="af">' + esc(c.after) + '</td></tr>'; }).join('') + '</table>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="p-btn p-solid" data-ok="' + esc(p.id) + '">承認する</button><input class="p-input" id="why_' + esc(p.id) + '" placeholder="却下の理由" style="flex:1;min-width:160px;"><button class="p-btn" data-ng="' + esc(p.id) + '">却下する</button></div></div>';
+  }).join('') : '<div class="p-muted">申請中の届け出はありません</div>';
+  renderPeople();
+  g('recent').innerHTML = D.recent.length ? D.recent.map(function (x) { return '<div class="pp">' + esc(x.at) + '　' + esc(x.name) + '　' + esc(x.state) + (x.by ? '(' + esc(x.by) + ')' : '') + '</div>'; }).join('') : '<div class="p-muted">まだありません</div>';
+}
+function renderPeople() {
+  var q = g('q').value.trim();
+  var list = D.people.filter(function (p) { return !q || String(p.name).indexOf(q) !== -1; });
+  g('people').innerHTML = list.length ? list.map(function (p) {
+    return '<div class="pp"><b>' + esc(p.name) + '</b>(' + esc(p.sid) + ')<span class="p-muted">　更新 ' + esc(p.at) + '</span><br>' +
+      D.fields.map(function (f) { return p[f[0]] ? esc(f[0]) + '：' + esc(p[f[0]]) : ''; }).filter(Boolean).join('<br>') + '</div>';
+  }).join('') : '<div class="p-muted">' + (q ? '見つかりません' : 'まだ登録はありません(承認すると、ここに出ます)') + '</div>';
+}
+g('q').addEventListener('input', renderPeople);
+g('pend').addEventListener('click', function (e) {
+  var ok = e.target.closest('[data-ok]'), ng = e.target.closest('[data-ng]');
+  if (!ok && !ng) return;
+  var id = (ok || ng).getAttribute(ok ? 'data-ok' : 'data-ng'), reason = ng ? g('why_' + id).value.trim() : '';
+  if (ng && !reason) { alert('却下の理由を入れてください'); return; }
+  if (!confirm(ok ? 'この届け出を承認して、登録情報に反映します。よろしいですか？' : 'この届け出を却下します。よろしいですか？')) return;
+  (ok || ng).disabled = true;
+  P.call('todoke.admin.decide', { id: id, approve: !!ok, reason: reason }).then(function (r) { if (!r.ok) { alert(r.error); (ok || ng).disabled = false; return; } load(); });
+});
+if (P) load();
+</script>
+</body>
+</html>

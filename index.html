@@ -134,8 +134,8 @@ function lap(label, from) { TIMES.push(label + ' ' + ((Date.now() - from) / 1000
 showVer();
 
 // ===== 設定(秘密情報ではない) =====
-const WOFF_ID = '★WOFF ID★';
-const AUTH_API = '★認証基盤のWebアプリのURL(…/exec)★';
+const WOFF_ID = 'zOLRGLwYG4i71sA08_geGw';
+const AUTH_API = 'https://script.google.com/macros/s/AKfycbyrk69F7F1E1LatE1e0hz_V2p8FVtdx5FxJQTJSDuiMDg7ETCXoLCJc3ZwynbArvSVClA/exec';
 // ===== ブラウザの中での受け渡し(同じサイトのツールの画面だけが読める。URLには出さない) =====
 //   portal_session：{ token:通行証, exp:期限(ミリ秒), name, apis:{ ツールID: データの入口のURL } }  … ツールの画面が使う
 //   portal_data   ：{ at, res }  … ポータルの表示内容。10分以内に戻ってきたら、認証基盤を呼ばずに表示する

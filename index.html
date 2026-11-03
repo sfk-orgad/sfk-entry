@@ -107,6 +107,7 @@
     <div id="news"></div>
     <div id="tools"></div>
     <button class="pcbtn" id="pcOpen" style="display:none">PCで開く(コードを表示)</button>
+    <button class="pcbtn" id="remForget" style="display:none">この端末のログインを忘れる</button>
     <div class="ver" id="ver2"></div>
   </div>
 </div>
@@ -121,7 +122,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-11-30a';
+const PAGE_VERSION = '2026-12-01a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -133,8 +134,8 @@ function lap(label, from) { TIMES.push(label + ' ' + ((Date.now() - from) / 1000
 showVer();
 
 // ===== 設定(秘密情報ではない) =====
-const WOFF_ID = 'zOLRGLwYG4i71sA08_geGw';
-const AUTH_API = 'https://script.google.com/macros/s/AKfycbyrk69F7F1E1LatE1e0hz_V2p8FVtdx5FxJQTJSDuiMDg7ETCXoLCJc3ZwynbArvSVClA/exec';
+const WOFF_ID = '★WOFF ID★';
+const AUTH_API = '★認証基盤のWebアプリのURL(…/exec)★';
 // ===== ブラウザの中での受け渡し(同じサイトのツールの画面だけが読める。URLには出さない) =====
 //   portal_session：{ token:通行証, exp:期限(ミリ秒), name, apis:{ ツールID: データの入口のURL } }  … ツールの画面が使う
 //   portal_data   ：{ at, res }  … ポータルの表示内容。10分以内に戻ってきたら、認証基盤を呼ばずに表示する
@@ -234,6 +235,8 @@ const ERRORS = {
   mail_input: 'StaffID(例：A0012)とメールを、正しく入れてください。',
   mail_busy: '送る回数が多すぎます。30分ほど待ってから、もう一度ためしてください。',
   mail_code: 'コードが違うか、期限(10分)が切れています。もう一度コードを送ってください。',
+  remember_off: '',
+  remember_expired: 'この端末で覚えていたログインの期限が切れました。もう一度メールで入ってください。',
   pair_locked: 'コードの間違いが続いたため、しばらく受け付けを止めています。\n10分ほど待ってから試してください。',
   internal_error: '一時的なエラーが起きました。\n少し待ってから開き直してください。',
 };
@@ -261,7 +264,7 @@ async function start() {
   if (!woff.isLoggedIn()) {
     // アプリの外(PC版LINE WORKSから開いたChromeなど)でも、LINE WORKSのログイン画面を経由して本人を確認する
     const inClient = typeof woff.isInClient === 'function' ? woff.isInClient() : null;
-    if (inClient === false) { showPairInput(''); return; } // PCのブラウザなど：スマホで出したコードで入る
+    if (inClient === false) { tryRemember(); return; } // PCのブラウザなど：覚えたログイン → なければ入り方を選ぶ
     let tried = null;
     try { tried = sessionStorage.getItem(KEY + '_login'); } catch (e) {}
     if (!tried) {
@@ -530,6 +533,7 @@ function renderPortal(res, at) {
   let inApp = false;
   try { inApp = typeof woff !== 'undefined' && typeof woff.isInClient === 'function' && woff.isInClient() === true; } catch (e) { inApp = false; }
   $('pcOpen').style.display = (!pcMode() && inApp) ? 'block' : 'none'; // 「PCで開く」はスマホのアプリの中だけ
+  $('remForget').style.display = remKey() ? 'block' : 'none';         // メールでのログインを覚えている端末だけ
   prefetchTools(res.items); // 締めチェック・シフト希望のデータを先に読んでおく(表示し終わってから。表示の速さには影響しない)
   warmTools(res.items);
   $('gate').style.display = 'none';
@@ -722,7 +726,9 @@ function showMailLogin() {
     '<input class="codein" id="mMail" type="email" placeholder="メール" autocomplete="email" style="font-size:18px;letter-spacing:0;">' +
     '<button class="btn" id="mSend">コードを送る</button>' +
     '<div id="mStep2" style="display:none;"><div style="color:#5F6670;font-size:14px;margin:8px 0;">届いた6桁のコード(10分間・1回だけ)</div>' +
-    '<input class="codein" id="mCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"><button class="btn" id="mGo" style="margin-top:8px;">入る</button></div>' +
+    '<input class="codein" id="mCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000">' +
+    '<label style="display:block;font-size:14px;margin-top:8px;"><input type="checkbox" id="mRem" checked> この端末でログインを覚える(しばらくメールなしで入れる。共用のPCでは外す)</label>' +
+    '<button class="btn" id="mGo" style="margin-top:8px;">入る</button></div>' +
     '<div id="mMsg" style="font-size:14px;margin-top:6px;white-space:pre-wrap;"></div>' +
     '<a href="#" id="mBack" style="color:#5F6670;font-size:14px;margin-top:10px;">‹ ほかの入り方にもどる</a></div>');
   const post = body => fetch(AUTH_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) }).then(r => r.text()).then(t => JSON.parse(t));
@@ -738,11 +744,12 @@ function showMailLogin() {
     const code = String($('mCode').value || '').replace(/\D/g, '');
     if (code.length !== 6) { $('mMsg').style.color = '#B42318'; $('mMsg').textContent = '6桁の数字を入力してください。'; return; }
     $('mGo').disabled = true; $('mMsg').style.color = '#5F6670'; $('mMsg').textContent = '確かめています…';
-    let res; try { res = await post({ action: 'mail.redeem', sid: $('mSid').value, code: code }); } catch (e) { res = { ok: false, error: 'internal_error' }; }
+    let res; try { res = await post({ action: 'mail.redeem', sid: $('mSid').value, code: code, remember: $('mRem').checked }); } catch (e) { res = { ok: false, error: 'internal_error' }; }
     $('mGo').disabled = false;
     if (res.ok && res.maintenance && res.maintenance.all && !res.maintenance.tester) { show('ただいまメンテナンス中です。' + (res.maintenance.message ? '\n' + res.maintenance.message : ''), true); return; }
     if (!res.ok || !res.items) { $('mMsg').style.color = '#B42318'; $('mMsg').textContent = ERRORS[res.error] || ERRORS.internal_error; return; }
     try { sessionStorage.setItem('portal_pc', '1'); } catch (e) {}
+    if (res.rememberKey) { try { localStorage.setItem(REM_KEY, res.rememberKey); } catch (e) {} }
     PROFILE_ID = res.uid || '';
     renderPortal(res);
   };
@@ -750,6 +757,34 @@ function showMailLogin() {
   $('mCode').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
   $('mSid').focus();
 }
+
+// ===== メールでのログインを覚えた端末(鍵は localStorage。2026-12-01) =====
+const REM_KEY = 'portal_remember';
+function remKey() { try { return localStorage.getItem(REM_KEY) || ''; } catch (e) { return ''; } }
+async function tryRemember() {
+  const key = remKey();
+  if (!key) { showPairInput(''); return; }
+  show('ログインしています…');
+  let res;
+  try { const r = await fetch(AUTH_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'mail.remember', key: key }) }); res = JSON.parse(await r.text()); }
+  catch (e) { res = { ok: false, error: 'internal_error' }; }
+  if (res.ok && res.maintenance && res.maintenance.all && !res.maintenance.tester) { show('ただいまメンテナンス中です。' + (res.maintenance.message ? '\n' + res.maintenance.message : ''), true); return; }
+  if (!res.ok || !res.items) {
+    if (res.error === 'remember_off' || res.error === 'remember_expired' || res.error === 'mail_off') { try { localStorage.removeItem(REM_KEY); } catch (e) {} }
+    showPairInput(ERRORS[res.error] || '');
+    return;
+  }
+  try { sessionStorage.setItem('portal_pc', '1'); } catch (e) {}
+  PROFILE_ID = res.uid || '';
+  renderPortal(res);
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('#remForget')) return;
+  if (!confirm('この端末で覚えているログインを忘れます。次からは、またメールのコードで入ります。よろしいですか？')) return;
+  const key = remKey();
+  try { localStorage.removeItem(REM_KEY); sessionStorage.clear(); } catch (x) {}
+  fetch(AUTH_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'mail.forget', key: key }) }).catch(() => {}).then(() => location.reload());
+});
 </script>
 </body>
 </html>

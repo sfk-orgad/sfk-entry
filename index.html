@@ -121,7 +121,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-11-23a';
+const PAGE_VERSION = '2026-11-30a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -230,6 +230,10 @@ const ERRORS = {
   oauth_token: 'LINE WORKSでのログインを確認できませんでした。\nもう一度試すか、スマホのコードで入ってください。',
   oauth_me: 'LINE WORKSから本人の情報を受け取れませんでした。\nもう一度試すか、スマホのコードで入ってください。',
   oauth_off: 'ブラウザでのLINE WORKSログインは、まだ準備中です。\nスマホのコードで入ってください。',
+  mail_off: 'メールでのログインは、いま使えません。管理者に聞いてください。',
+  mail_input: 'StaffID(例：A0012)とメールを、正しく入れてください。',
+  mail_busy: '送る回数が多すぎます。30分ほど待ってから、もう一度ためしてください。',
+  mail_code: 'コードが違うか、期限(10分)が切れています。もう一度コードを送ってください。',
   pair_locked: 'コードの間違いが続いたため、しばらく受け付けを止めています。\n10分ほど待ってから試してください。',
   internal_error: '一時的なエラーが起きました。\n少し待ってから開き直してください。',
 };
@@ -416,8 +420,10 @@ function showPairInput(note) {
     '<div id="oauthErr" style="color:#B42318;font-size:14px;margin-top:10px;white-space:pre-wrap;"></div>' +
     '<div style="margin-top:22px;color:#5F6670;font-size:14px;">または、スマホで出した6桁のコード</div>' +
     '<div style="margin-top:8px;"><input class="codein" id="codeIn" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"></div>' +
-    '<button class="btn" id="codeGo">入る</button><div id="codeErr" style="color:#B42318;font-size:14px;margin-top:10px;white-space:pre-wrap;"></div>');
+    '<button class="btn" id="codeGo">入る</button><div id="codeErr" style="color:#B42318;font-size:14px;margin-top:10px;white-space:pre-wrap;"></div>' +
+    '<div style="margin-top:22px;"><a href="#" id="mailGo" style="color:#16323A;font-size:15px;">LINE WORKS を使わずに、メールで入る ›</a></div>');
   $('oauthGo').addEventListener('click', startOauth);
+  $('mailGo').addEventListener('click', e => { e.preventDefault(); showMailLogin(); });
   const go = async () => {
     const code = String($('codeIn').value || '').replace(/\D/g, '');
     if (code.length !== 6) { $('codeErr').textContent = '6桁の数字を入力してください。'; return; }
@@ -705,6 +711,44 @@ function renderMine(items, res) {
   fetch(cal.api, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ app: 'shift', action: 'cal.next', token: tok }) })
     .then(x => x.text()).then(t => { const r = JSON.parse(t); try { sessionStorage.setItem('mine_cache', JSON.stringify({ at: Date.now(), r: r })); } catch (e) {} draw(r); })
     .catch(() => {});
+}
+
+// ===== メールでのログイン(LINE WORKS を使わない。StaffID＋登録のメールに届く6桁のコード。2026-11-30) =====
+function showMailLogin() {
+  $('portal').style.display = 'none'; $('gate').style.display = 'flex';
+  show('メールで入ります。\nStaffID(マイページや名簿にある番号。例：A0012)と、登録しているメールを入れてください。\nそのメールに、6桁のコードが届きます。');
+  setAction('<div style="display:grid;gap:8px;max-width:320px;margin:0 auto;text-align:left;">' +
+    '<input class="codein" id="mSid" placeholder="StaffID(例：A0012)" autocomplete="username" style="font-size:18px;letter-spacing:0;">' +
+    '<input class="codein" id="mMail" type="email" placeholder="メール" autocomplete="email" style="font-size:18px;letter-spacing:0;">' +
+    '<button class="btn" id="mSend">コードを送る</button>' +
+    '<div id="mStep2" style="display:none;"><div style="color:#5F6670;font-size:14px;margin:8px 0;">届いた6桁のコード(10分間・1回だけ)</div>' +
+    '<input class="codein" id="mCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"><button class="btn" id="mGo" style="margin-top:8px;">入る</button></div>' +
+    '<div id="mMsg" style="font-size:14px;margin-top:6px;white-space:pre-wrap;"></div>' +
+    '<a href="#" id="mBack" style="color:#5F6670;font-size:14px;margin-top:10px;">‹ ほかの入り方にもどる</a></div>');
+  const post = body => fetch(AUTH_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) }).then(r => r.text()).then(t => JSON.parse(t));
+  $('mBack').addEventListener('click', e => { e.preventDefault(); showPairInput(''); });
+  $('mSend').addEventListener('click', async () => {
+    $('mSend').disabled = true; $('mMsg').style.color = '#5F6670'; $('mMsg').textContent = '送っています…';
+    let res; try { res = await post({ action: 'mail.start', sid: $('mSid').value, mail: $('mMail').value }); } catch (e) { res = { ok: false, error: 'internal_error' }; }
+    $('mSend').disabled = false;
+    if (!res.ok) { $('mMsg').style.color = '#B42318'; $('mMsg').textContent = ERRORS[res.error] || ERRORS.internal_error; return; }
+    $('mMsg').textContent = res.message; $('mStep2').style.display = 'block'; $('mSend').textContent = 'コードをもう一度送る'; $('mCode').focus();
+  });
+  const go = async () => {
+    const code = String($('mCode').value || '').replace(/\D/g, '');
+    if (code.length !== 6) { $('mMsg').style.color = '#B42318'; $('mMsg').textContent = '6桁の数字を入力してください。'; return; }
+    $('mGo').disabled = true; $('mMsg').style.color = '#5F6670'; $('mMsg').textContent = '確かめています…';
+    let res; try { res = await post({ action: 'mail.redeem', sid: $('mSid').value, code: code }); } catch (e) { res = { ok: false, error: 'internal_error' }; }
+    $('mGo').disabled = false;
+    if (res.ok && res.maintenance && res.maintenance.all && !res.maintenance.tester) { show('ただいまメンテナンス中です。' + (res.maintenance.message ? '\n' + res.maintenance.message : ''), true); return; }
+    if (!res.ok || !res.items) { $('mMsg').style.color = '#B42318'; $('mMsg').textContent = ERRORS[res.error] || ERRORS.internal_error; return; }
+    try { sessionStorage.setItem('portal_pc', '1'); } catch (e) {}
+    PROFILE_ID = res.uid || '';
+    renderPortal(res);
+  };
+  $('mGo').addEventListener('click', go);
+  $('mCode').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  $('mSid').focus();
 }
 </script>
 </body>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>スタッフアンケート</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  スタッフアンケートのダッシュボード(GitHub Pages の staffsurvey/index.html。2026-11)。社員だけ(ツール一覧 staffsurvey)
+  ・推移：回答の月ごと・質問ごとの平均点を、店舗ごと(または両店舗を比べて)
+  ・困りごと・提案：自由記述を1件ずつ起票したもの。状態(未対応・対応中・済み・対応しない)・担当・メモを付ける
+  ・やりがい：選んだ項目の数
+  データは Bot(StaffSurvey.gs、app=staffsv)。Google フォームとスプシは今までどおり
+-->
+<style>
+.tabs, .stabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.tabs button, .stabs button { padding: 8px 14px; border: 1px solid #B9C0C8; border-radius: 999px; background: #fff; cursor: pointer; font-family: inherit; font-size: 15px; }
+.tabs button.on, .stabs button.on { background: var(--p-c); color: #fff; border-color: var(--p-c); }
+.qgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.qc { background: #fff; border: 1px solid var(--p-line); border-radius: 12px; padding: 12px; }
+.qc h3 { margin: 0 0 4px; font-size: 15px; }
+.qc .big { font-size: 13px; color: var(--p-muted); }
+.legend { display: flex; gap: 14px; font-size: 13px; margin-bottom: 8px; flex-wrap: wrap; } .legend span { white-space: nowrap; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+.tk { background: #fff; border: 1px solid var(--p-line); border-radius: 12px; padding: 12px; margin-bottom: 8px; }
+.tk .h { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--p-muted); }
+.tk .t { font-size: 15px; margin: 6px 0; white-space: pre-wrap; }
+.st { font-size: 12px; padding: 1px 8px; border-radius: 999px; font-weight: 700; }
+.st.s0 { background: #FDECEA; color: #B42318; } .st.s1 { background: #FFF6E5; color: #8A5A00; } .st.s2 { background: #E3F4E8; color: #1F7A3D; } .st.s3 { background: #EEF0F2; color: #5F6670; }
+.kd { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: #E8EEF0; }
+.ed { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.ed select, .ed input, .ed textarea { font-size: 14px; padding: 6px; border: 1px solid #B9C0C8; border-radius: 8px; font-family: inherit; }
+.ed textarea { grid-column: 1 / -1; min-height: 44px; }
+.bar { display: flex; gap: 8px; align-items: center; margin: 4px 0; font-size: 14px; }
+.bar .n { width: 46%; } .bar .b { height: 14px; border-radius: 4px; } .bar .c { font-size: 13px; color: var(--p-muted); }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; } .filters select { font-size: 14px; padding: 6px; border-radius: 8px; border: 1px solid #B9C0C8; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap" style="max-width:1100px;">
+    <div class="tabs" id="tabs"><button class="on" data-v="trend">推移</button><button data-v="tickets">困りごと・提案</button><button data-v="choice">やりがい</button></div>
+    <div id="err"></div>
+    <div id="view"></div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-11-29b';
+var P = Portal.start({ tool: 'staffsurvey', title: 'スタッフアンケート' });
+var g = Portal.$, esc = Portal.esc, D = null, VIEW = 'trend', STORE = 'all', F = { store: '', state: 'open', kind: '' };
+var COLORS = ['#1D6F86', '#C8743A', '#6B4FA0', '#2E7D32'];
+function call(a, x, o) { return P.call(a, x, Object.assign({ app: 'staffsv' }, o || {})); }
+function ymL(ym) { return Number(ym.slice(5, 7)) + '月'; }
+
+function load() {
+  return call('ssv.get', {}, { retry: true }).then(function (r) {
+    if (!r.ok) { Portal.gate(r.error === 'AUTH' ? Portal.authMessage(r, 'スタッフアンケート') : '開けませんでした：' + r.error, { back: true }); return; }
+    D = r; Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
+    g('err').innerHTML = (r.errors || []).map(function (e) { return '<div class="p-err">' + esc(e) + '</div>'; }).join('');
+    render();
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n開き直してください。', { back: true, detail: e.message }); });
+}
+function render() { if (VIEW === 'trend') renderTrend(); else if (VIEW === 'tickets') renderTickets(); else renderChoice(); }
+
+// ===== 推移(質問ごとの小さな折れ線。店舗ごとに1本) =====
+function chart(q, stores, months) {
+  var w = 320, h = 186, l = 28, r = 16, t = 24, b = 34, iw = w - l - r, ih = h - t - b;
+  var X = function (i) { return l + (months.length < 2 ? iw / 2 : i * iw / (months.length - 1)); }, Y = function (v) { return t + (5 - v) / 4 * ih; };
+  var s = '<svg viewBox="0 0 ' + w + ' ' + h + '" width="100%" role="img" aria-label="' + esc(q.label) + 'の推移">';
+  [1, 2, 3, 4, 5].forEach(function (v) { s += '<line x1="' + l + '" x2="' + (w - r) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" stroke="#E6E9ED"/><text x="' + (l - 6) + '" y="' + (Y(v) + 4) + '" font-size="10" text-anchor="end" fill="#5F6670">' + v + '</text>'; });
+  months.forEach(function (ym, i) { s += '<text x="' + X(i) + '" y="' + (h - 16) + '" font-size="11" text-anchor="middle" fill="#5F6670">' + ymL(ym) + '</text>'; });
+  // 月ごとの各店舗の値(数字を上下どちらに置くかを決める)
+  var valAt = function (st, ym) { var m = st.months.filter(function (x) { return x.ym === ym; })[0]; return m && m.avg[q.key] != null ? m.avg[q.key] : null; };
+  stores.forEach(function (st, si) {
+    var pts = months.map(function (ym, i) { var m = st.months.filter(function (x) { return x.ym === ym; })[0]; return m && m.avg[q.key] != null ? [X(i), Y(m.avg[q.key]), m.avg[q.key], m.n] : null; });
+    var c = COLORS[si % COLORS.length], d = '';
+    pts.forEach(function (p) { if (p) d += (d ? 'L' : 'M') + p[0] + ' ' + p[1]; });
+    if (d) s += '<path d="' + d + '" fill="none" stroke="' + c + '" stroke-width="2.5"/>';
+    // 数字は1本目を点の上、2本目を点の下に(重ならないように)。回答が3人未満の月は白抜き(少なくて当てにならない)
+    pts.forEach(function (p, i) { if (!p) return;
+      var others = stores.filter(function (o) { return o !== st; }).map(function (o) { return valAt(o, months[i]); }).filter(function (v) { return v != null; });
+      var below = others.length && p[2] < Math.max.apply(null, others) || (others.length && p[2] === Math.max.apply(null, others) && si % 2);
+      var few = p[3] < 3, ly = below ? p[1] + 17 : p[1] - 9;
+      s += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="4.5" fill="' + (few ? '#fff' : c) + '" stroke="' + c + '" stroke-width="2"><title>' + esc(st.name) + ' ' + p[2] + '点(' + p[3] + '人)</title></circle><text x="' + p[0] + '" y="' + ly + '" font-size="11" text-anchor="middle" fill="' + c + '" font-weight="700">' + p[2].toFixed(1) + '</text>'; });
+  });
+  return s + '</svg>';
+}
+function renderTrend() {
+  var stores = STORE === 'all' ? D.stores : D.stores.filter(function (s) { return s.code === STORE; });
+  var months = []; stores.forEach(function (s) { s.months.forEach(function (m) { if (months.indexOf(m.ym) === -1) months.push(m.ym); }); }); months.sort();
+  var h = '<div class="stabs">' + D.stores.map(function (s) { return '<button data-s="' + esc(s.code) + '" class="' + (STORE === s.code ? 'on' : '') + '">' + esc(s.name) + '</button>'; }).join('') +
+    '<button data-s="all" class="' + (STORE === 'all' ? 'on' : '') + '">両店舗を比べる</button></div>';
+  h += '<div class="legend">' + stores.map(function (s, i) { return '<span><i style="background:' + COLORS[i % COLORS.length] + '"></i>' + esc(s.name) + '</span>'; }).join('') +
+    '<span class="p-muted">白抜きの点＝回答が3人未満の月。回答数：' + stores.map(function (s) { return esc(s.name) + ' ' + s.months.map(function (m) { return ymL(m.ym) + m.n + '人'; }).join('・'); }).join('／') + '</span></div>';
+  h += months.length ? '<div class="qgrid">' + D.questions.map(function (q) {
+    var last = stores.map(function (s) { var m = s.months.filter(function (x) { return x.avg[q.key] != null; }).slice(-1)[0]; return m ? esc(s.name) + ' ' + m.avg[q.key].toFixed(1) : ''; }).filter(Boolean).join('・');
+    return '<div class="qc"><h3>' + esc(q.label) + '</h3><div class="big">最新：' + last + '(5点満点)</div>' + chart(q, stores, months) + '</div>';
+  }).join('') + '</div>' : '<div class="p-card p-muted">まだ回答がありません</div>';
+  g('view').innerHTML = h;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-s]'), function (b) { b.onclick = function () { STORE = b.getAttribute('data-s'); render(); }; });
+}
+
+// ===== 困りごと・提案 =====
+function renderTickets() {
+  var list = D.tickets.filter(function (t) { return (!F.store || t.store === F.store) && (!F.kind || t.kind === F.kind) && (F.state === 'all' || (F.state === 'open' ? (t.state === '未対応' || t.state === '対応中') : t.state === F.state)); });
+  var nOpen = D.tickets.filter(function (t) { return t.state === '未対応'; }).length;
+  var opt = function (v, l, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(l) + '</option>'; };
+  var h = '<div class="filters"><select id="fStore">' + opt('', 'すべての店舗', F.store) + D.stores.map(function (s) { return opt(s.code, s.name, F.store); }).join('') + '</select>' +
+    '<select id="fKind">' + opt('', '困りごと・提案', F.kind) + opt('困りごと', '困りごと', F.kind) + opt('提案', '提案', F.kind) + '</select>' +
+    '<select id="fState">' + opt('open', '未対応・対応中', F.state) + D.states.map(function (s) { return opt(s, s, F.state); }).join('') + opt('all', 'すべて', F.state) + '</select>' +
+    '<span class="p-muted" style="align-self:center;">' + list.length + '件(未対応 ' + nOpen + '件)</span></div>';
+  h += list.length ? list.map(function (t) {
+    var si = D.states.indexOf(t.state);
+    return '<div class="tk" data-id="' + esc(t.id) + '"><div class="h"><span class="st s' + si + '">' + esc(t.state) + '</span><span class="kd">' + esc(t.kind) + '</span><span>' + esc((D.stores.filter(function (s) { return s.code === t.store; })[0] || {}).name || t.store) + '</span><span>' + esc(t.date) + '</span><span>' + esc(t.who) + '</span>' +
+      (t.at ? '<span>更新 ' + esc(t.at) + '(' + esc(t.by) + ')</span>' : '') + '</div><div class="t">' + esc(t.text) + '</div>' +
+      '<div class="ed"><select data-k="state">' + D.states.map(function (s) { return opt(s, s, t.state); }).join('') + '</select><input data-k="owner" placeholder="担当" value="' + esc(t.owner) + '">' +
+      '<textarea data-k="memo" placeholder="メモ(対応の内容など)">' + esc(t.memo) + '</textarea></div><button class="p-btn" data-save style="margin-top:6px;">保存</button> <span class="msg"></span></div>';
+  }).join('') : '<div class="p-card p-muted">該当する件はありません</div>';
+  g('view').innerHTML = h;
+  g('fStore').onchange = function () { F.store = this.value; render(); };
+  g('fKind').onchange = function () { F.kind = this.value; render(); };
+  g('fState').onchange = function () { F.state = this.value; render(); };
+}
+g('view').addEventListener('click', function (e) {
+  var b = e.target.closest('[data-save]'); if (!b) return;
+  var box = b.closest('.tk'), id = box.getAttribute('data-id'), t = D.tickets.filter(function (x) { return x.id === id; })[0];
+  var val = function (k) { return box.querySelector('[data-k="' + k + '"]').value; };
+  b.disabled = true; box.querySelector('.msg').textContent = '保存しています…';
+  call('ssv.ticket', { id: id, state: val('state'), owner: val('owner'), memo: val('memo'), ver: [t.state, t.owner, t.memo].join('|') }).then(function (r) {
+    b.disabled = false;
+    if (!r.ok) { box.querySelector('.msg').textContent = r.error; return; }
+    t.state = val('state'); t.owner = val('owner'); t.memo = val('memo'); t.at = '今'; t.by = (Portal.session() || {}).name || '';
+    box.querySelector('.msg').textContent = '保存しました';
+    setTimeout(render, 600);
+  }).catch(function () { b.disabled = false; box.querySelector('.msg').textContent = '通信に失敗しました'; });
+});
+
+// ===== やりがい(選んだ項目の数) =====
+function renderChoice() {
+  var stores = STORE === 'all' ? D.stores : D.stores.filter(function (s) { return s.code === STORE; });
+  var h = '<div class="stabs">' + D.stores.map(function (s) { return '<button data-s="' + esc(s.code) + '" class="' + (STORE === s.code ? 'on' : '') + '">' + esc(s.name) + '</button>'; }).join('') +
+    '<button data-s="all" class="' + (STORE === 'all' ? 'on' : '') + '">両店舗</button></div><div class="p-note">これまでの全回答で、選ばれた数(多い順)</div>';
+  D.choices.forEach(function (c) {
+    var cnt = {};
+    stores.forEach(function (s) { var o = c.by[s.code] || {}; Object.keys(o).forEach(function (k) { cnt[k] = (cnt[k] || 0) + o[k]; }); });
+    var keys = Object.keys(cnt).sort(function (a, b) { return cnt[b] - cnt[a]; }).slice(0, 12), max = keys.length ? cnt[keys[0]] : 1;
+    h += '<div class="p-card"><h3 style="margin-top:0;">' + esc(c.q) + '</h3>' + (keys.length ? keys.map(function (k) {
+      return '<div class="bar"><span class="n">' + esc(k) + '</span><span class="b" style="width:' + Math.max(4, cnt[k] / max * 40) + '%;background:' + COLORS[0] + ';"></span><span class="c">' + cnt[k] + '</span></div>';
+    }).join('') : '<div class="p-muted">まだありません</div>') + '</div>';
+  });
+  g('view').innerHTML = h;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-s]'), function (b) { b.onclick = function () { STORE = b.getAttribute('data-s'); render(); }; });
+}
+g('tabs').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  VIEW = b.getAttribute('data-v');
+  Array.prototype.forEach.call(g('tabs').children, function (x) { x.classList.toggle('on', x === b); });
+  render();
+});
+if (P) load();
+</script>
+</body>
+</html>

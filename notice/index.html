@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>お知らせ</title>
 <!-- 守り：このページが通信できる先を Google Apps Script だけに絞る。URLを他サイトに渡さない -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <link rel="stylesheet" href="../common/style.css?v=1">
 <!--
@@ -28,6 +28,7 @@
   .n-checks label { display: inline-flex; align-items: center; gap: 4px; margin: 4px 12px 4px 0; font-size: 15px; }
   .n-split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .n-who { font-size: 14px; line-height: 1.9; }
+  .n-att { margin: 6px 0; } #pdfPages canvas { width: 100%; height: auto; display: block; margin: 8px 0; box-shadow: 0 1px 4px rgba(0,0,0,.15); background: #fff; }
 </style>
 </head>
 <body>
@@ -41,7 +42,7 @@
 
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-05a';
+var PAGE_VERSION = '2026-12-05a';
 var g = Portal.$, esc = Portal.esc;
 var P = Portal.start({ tool: 'notice', title: 'お知らせ' });
 var D = null;           // notice.list の返事
@@ -68,11 +69,12 @@ function load(openId) {
   }).catch(function (e) { if (!D) Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
 }
 // 本文を取る(一度取ったものは通信しない)
+var FILES = {}; // お知らせID → 添付の一覧
 function getBody(n) {
   if (BODY[n.id] != null) return Promise.resolve(BODY[n.id]);
   return P.call('notice.get', { id: n.id }, { retry: true }).then(function (r) {
     if (!r.ok) throw new Error(r.error === 'AUTH' ? Portal.authMessage(r, 'お知らせ') : r.error);
-    BODY[n.id] = r.body; return r.body;
+    BODY[n.id] = r.body; FILES[n.id] = r.files || []; return r.body;
   });
 }
 
@@ -116,8 +118,9 @@ function openNotice(id) {
   }
   g('view').innerHTML = '<div class="p-card"><h2>' + (n.important ? '⚠ ' : '') + esc(n.title) + '</h2>' +
     '<div class="p-note">' + esc(n.start) + (n.end ? ' 〜 ' + esc(n.end) : '') + (n.author ? '・' + esc(n.author) : '') + '</div>' +
-    '<div class="n-body" id="nBody" style="margin-top:10px;">' + (BODY[n.id] != null ? esc(BODY[n.id]) : '<span class="p-muted">読み込んでいます…</span>') + '</div></div>';
-  if (BODY[n.id] == null) getBody(n).then(function (b) { if (OPEN === id && g('nBody')) g('nBody').textContent = b; })
+    '<div class="n-body" id="nBody" style="margin-top:10px;">' + (BODY[n.id] != null ? esc(BODY[n.id]) : '<span class="p-muted">読み込んでいます…</span>') + '</div><div id="nFiles"></div></div>';
+  if (BODY[n.id] != null) renderFiles(n);
+  if (BODY[n.id] == null) getBody(n).then(function (b) { if (OPEN === id && g('nBody')) { g('nBody').textContent = b; renderFiles(n); } })
     .catch(function (e) { if (OPEN === id && g('nBody')) g('nBody').innerHTML = '<span class="p-err">' + esc(e.message || '本文を読めませんでした') + '</span>'; });
   if (!n.read && n.mine && n.live) {
     P.call('notice.read', { id: id }, { retry: true }).then(function (r) { if (r.ok) n.read = true; }).catch(function () {});
@@ -165,16 +168,43 @@ function showEdit(n) {
     '<div class="n-checks" style="margin-top:12px;"><label><input type="checkbox" id="fImp"' + (n && n.important ? ' checked' : '') + '>重要(目立たせる)</label>' +
     '<label><input type="checkbox" id="fBot"' + (n && n.bot ? ' checked' : '') + (n && n.sent ? ' disabled' : '') + '>Botでも店舗のチャットに送る' + (n && n.sent ? '(送信済み)' : '') + '</label>' +
     (n ? '<label><input type="checkbox" id="fOff"' + (n.enabled ? '' : ' checked') + '>取り下げる(ポータルに出さない)</label>' : '') + '</div>' +
+    '<label class="p-label">添付(PDF・画像。3つまで・1つ10MBまで)</label><div id="fFiles"></div><input type="file" id="fFile" accept="application/pdf,image/jpeg,image/png" style="margin-top:6px;">' +
     '<button class="p-btn p-solid p-big" id="fSave" style="margin-top:16px;">' + (n ? '保存する' : '掲載する') + '</button><div class="p-err" id="fErr" style="margin-top:8px;"></div></div>';
   g('fTitle').value = n ? n.title : '';
   g('fBody').value = n ? BODY[n.id] : '';
   g('fStart').value = n ? toLocal(n.start) : nowLocal();
   g('fEnd').value = n ? toLocal(n.end) : '';
+  // 添付(選んだらすぐ送ってドライブに置き、保存のときにお知らせに付ける)
+  var att = (n && FILES[n.id] ? FILES[n.id] : []).slice(), uploading = 0;
+  var paintAtt = function () {
+    g('fFiles').innerHTML = att.length ? att.map(function (f, i) { return '<div class="n-att">' + (f.type === 'application/pdf' ? '📄 ' : '🖼 ') + esc(f.name) + ' <span class="p-note">' + Math.ceil(f.size / 1024) + 'KB</span> <button class="p-btn" data-rm="' + i + '" style="padding:2px 10px;">外す</button></div>'; }).join('') : '<div class="p-note">なし</div>';
+    g('fFile').disabled = att.length >= 3;
+    Array.prototype.forEach.call(g('fFiles').querySelectorAll('[data-rm]'), function (b) { b.onclick = function () { att.splice(Number(b.getAttribute('data-rm')), 1); paintAtt(); }; });
+  };
+  paintAtt();
+  g('fFile').addEventListener('change', function () {
+    var file = g('fFile').files[0]; g('fFile').value = '';
+    if (!file) return;
+    if (['application/pdf', 'image/jpeg', 'image/png'].indexOf(file.type) === -1) { g('fErr').textContent = 'つけられるのは PDF・JPEG・PNG だけです'; return; }
+    if (file.size > 10 * 1024 * 1024) { g('fErr').textContent = '1つ10MBまでです'; return; }
+    uploading++; g('fErr').textContent = ''; g('fFiles').insertAdjacentHTML('beforeend', '<div class="p-note" id="upNow">「' + esc(file.name) + '」を送っています…</div>');
+    var rd = new FileReader();
+    rd.onload = function () {
+      P.call('notice.upload', { name: file.name, type: file.type, data: String(rd.result).split(',')[1] }).then(function (r) {
+        uploading--;
+        if (!r.ok) { g('fErr').textContent = r.error; paintAtt(); return; }
+        att.push(r.file); paintAtt();
+      }).catch(function () { uploading--; g('fErr').textContent = '添付を送れませんでした。もう一度選んでください'; paintAtt(); });
+    };
+    rd.readAsDataURL(file);
+  });
   g('fSave').addEventListener('click', function () {
+    if (uploading) { g('fErr').textContent = '添付を送っています。終わってから保存してください'; return; }
     var vals = function (name) { return Array.prototype.map.call(document.querySelectorAll('input[name="' + name + '"]:checked'), function (x) { return x.value; }); };
     var fmt = function (v) { return v ? v.replace('T', ' ').replace(/-/g, '/') : ''; };
     var req = { reqId: reqId, id: n ? n.id : '', title: g('fTitle').value.trim(), body: g('fBody').value, start: fmt(g('fStart').value), end: fmt(g('fEnd').value),
-      emps: vals('emp'), stores: vals('store'), important: g('fImp').checked, bot: g('fBot').checked, enabled: !(g('fOff') && g('fOff').checked) };
+      emps: vals('emp'), stores: vals('store'), important: g('fImp').checked, bot: g('fBot').checked, enabled: !(g('fOff') && g('fOff').checked),
+      files: att.map(function (f) { return { id: f.id, name: f.name }; }) };
     if (!req.title) { g('fErr').textContent = 'タイトルを入れてください'; return; }
     if (!req.start) { g('fErr').textContent = '掲載開始を入れてください'; return; }
     if (req.bot && !(n && n.sent) && !confirm('掲載開始の時刻になったら、対象の店舗のチャットにも送ります。よいですか？')) return;
@@ -183,7 +213,7 @@ function showEdit(n) {
     // 押し直しても同じ番号なので、サーバーは1件しか書かない(やり直しの自動送信はしない)
     P.call('notice.save', req).then(function (r) {
       if (!r.ok) { g('fSave').disabled = false; g('fSave').textContent = label; g('fErr').textContent = r.error === 'AUTH' ? Portal.authMessage(r, 'お知らせを書く') : r.error; return; }
-      BODY[r.id] = req.body.trim();
+      BODY[r.id] = req.body.trim(); FILES[r.id] = att.slice();
       showDone(r, req, !n);
     }).catch(function () {
       g('fSave').disabled = false; g('fSave').textContent = label;
@@ -233,6 +263,96 @@ function showDone(r, req, isNew) {
 if (P) {
   var q = (location.search.match(/[?&]id=([^&]+)/) || [])[1];
   load(q ? decodeURIComponent(q) : '');
+}
+
+// ===== 添付を見る(画像はそのまま、PDFは画面の中に描く。2026-12) =====
+var PDFJS_VER = '3.11.174';
+// 部品の場所(このページから見た ../common/pdfjs/。エラーのときに分かるよう、完全なURLにしておく)
+var PDFJS_BASE = new URL('../common/pdfjs/', location.href).href;
+function loadScript(src) {
+  return new Promise(function (ok, ng) {
+    var sc = document.createElement('script');
+    sc.src = src;
+    sc.onload = function () { ok(); };
+    sc.onerror = function () { sc.parentNode && sc.parentNode.removeChild(sc); ng(new Error(src)); };
+    document.head.appendChild(sc);
+  });
+}
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  var src = PDFJS_BASE + 'pdf.min.js?v=' + PDFJS_VER;
+  // 失敗したら、端末が覚えている結果を使わずに、もう一度だけ読み込み直す(部品を置く前に開いた場合など)
+  return loadScript(src).catch(function () { return loadScript(src + '&t=' + Date.now()); }).then(function () {
+    if (!window.pdfjsLib) throw new Error('部品は読み込めたが、使える状態になりませんでした(端末のブラウザが古い可能性)');
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.js?v=' + PDFJS_VER;
+    return window.pdfjsLib;
+  }, function () {
+    throw new Error('PDFの表示の部品を読み込めませんでした\n(' + src + ' を開けるか、ブラウザで確かめてください)');
+  });
+}
+// PDF：最初の2ページだけすぐ描き、残りは画面に近づいたら描く(ページが多くても重くならない・スマホのメモリを使いすぎない)
+function showPdf(b64, libReady) {
+  var box = g('pdfPages');
+  (libReady || loadPdfJs()).then(function (lib) {
+    var bin = atob(b64), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return lib.getDocument({ data: bytes, isEvalSupported: false }).promise; // isEvalSupported：通信先の制限(eval禁止)の下でも動くように // isEvalSupported：通信先の制限(eval禁止)の下でも動くように
+  }).then(function (pdf) {
+    box.innerHTML = '<div class="p-note" id="pdfNote">全' + pdf.numPages + 'ページ</div>';
+    var width = Math.max(280, box.clientWidth - 16), dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var chain = Promise.resolve();
+    var draw = function (no, c) { // 描く順番は1枚ずつ(同時に描くと重い)
+      chain = chain.then(function () { return pdf.getPage(no); }).then(function (page) {
+        var vp1 = page.getViewport({ scale: 1 });
+        var vp = page.getViewport({ scale: (width / vp1.width) * dpr });
+        c.width = Math.floor(vp.width); c.height = Math.floor(vp.height); c.style.aspectRatio = '';
+        return page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      }).catch(function () {});
+    };
+    // 先にページの枠だけ並べる(1ページ目の縦横比で仮の高さ)。描いたら本当の大きさになる
+    return pdf.getPage(1).then(function (p1) {
+      var v = p1.getViewport({ scale: 1 }), ratio = v.width + ' / ' + v.height, pages = [];
+      for (var n = 1; n <= pdf.numPages; n++) {
+        var c = document.createElement('canvas');
+        c.style.aspectRatio = ratio; c.setAttribute('data-no', n);
+        box.appendChild(c); pages.push(c);
+      }
+      var lazy = 'IntersectionObserver' in window;
+      pages.forEach(function (c, i) { if (i < 2 || !lazy) draw(i + 1, c); });
+      if (!lazy) return;
+      var io = new IntersectionObserver(function (es) {
+        es.forEach(function (e) { if (e.isIntersecting) { io.unobserve(e.target); draw(Number(e.target.getAttribute('data-no')), e.target); } });
+      }, { rootMargin: '800px 0px' });
+      pages.slice(2).forEach(function (c) { io.observe(c); });
+    });
+  }).catch(function (e) { box.innerHTML = '<div class="p-err">PDFを表示できませんでした：' + esc(e && e.message ? e.message : e) + '</div>'; });
+}
+
+function renderFiles(n) {
+  var fs = FILES[n.id] || [];
+  if (!g('nFiles')) return;
+  g('nFiles').innerHTML = fs.length ? '<div class="p-label" style="margin-top:14px;">添付</div>' + fs.map(function (f, i) {
+    return '<div class="n-att"><button class="p-btn" data-open="' + i + '">' + (f.type === 'application/pdf' ? '📄 ' : '🖼 ') + esc(f.name) + ' を開く</button><div id="att' + i + '"></div></div>';
+  }).join('') : '';
+  Array.prototype.forEach.call(g('nFiles').querySelectorAll('[data-open]'), function (b) {
+    b.onclick = function () {
+      var i = Number(b.getAttribute('data-open')), f = fs[i], box = g('att' + i);
+      b.disabled = true; box.innerHTML = '<div class="p-note">開いています…</div>';
+      var lib = f.type === 'application/pdf' ? loadPdfJs() : null; if (lib) lib.catch(function () {});
+      P.call('notice.file', { id: n.id, fid: f.id }).then(function (r) {
+        b.disabled = false;
+        if (!r.ok) { box.innerHTML = '<div class="p-err">' + esc(r.error) + '</div>'; return; }
+        var bin = atob(r.data), bytes = new Uint8Array(bin.length); for (var k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+        var url = URL.createObjectURL(new Blob([bytes], { type: r.type }));
+        var save = '<a class="p-btn" href="' + url + '" download="' + esc(r.name) + '" style="display:inline-block;margin-top:6px;">保存する</a>';
+        if (r.type === 'application/pdf') {
+          Array.prototype.forEach.call(document.querySelectorAll('#pdfPages'), function (e) { e.removeAttribute('id'); }); // 前に開いたPDFの欄と混ざらないように
+          box.innerHTML = '<div id="pdfPages"></div>' + save; showPdf(r.data, lib);
+        }
+        else box.innerHTML = '<img src="' + url + '" alt="' + esc(r.name) + '" style="max-width:100%;border-radius:8px;margin-top:6px;">' + save;
+      }).catch(function () { b.disabled = false; box.innerHTML = '<div class="p-err">通信に失敗しました。もう一度押してください</div>'; });
+    };
+  });
 }
 </script>
 </body>

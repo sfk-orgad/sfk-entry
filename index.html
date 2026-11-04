@@ -122,7 +122,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-12-04a';
+const PAGE_VERSION = '2026-12-06a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -424,8 +424,11 @@ function showPairInput(note) {
     '<div style="margin-top:22px;color:#5F6670;font-size:14px;">または、スマホで出した6桁のコード</div>' +
     '<div style="margin-top:8px;"><input class="codein" id="codeIn" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000"></div>' +
     '<button class="btn" id="codeGo">入る</button><div id="codeErr" style="color:#B42318;font-size:14px;margin-top:10px;white-space:pre-wrap;"></div>' +
-    '<div style="margin-top:22px;"><a href="#" id="mailGo" style="color:#16323A;font-size:15px;">LINE WORKS を使わずに、メールで入る ›</a></div>');
-  $('oauthGo').addEventListener('click', startOauth);
+    '<div style="margin-top:22px;"><a href="#" id="mailGo" style="color:#16323A;font-size:15px;">LINE WORKS を使わずに、メールで入る ›</a></div>' +
+    '<label style="display:block;font-size:14px;margin-top:16px;color:#5F6670;"><input type="checkbox" id="remAll" checked> この端末でログインを覚える(しばらくログインなしで入れる。共用のPCでは外す)</label>');
+  // 覚えるかどうか(LINE WORKS のログインは画面を離れるので、選んだ値を覚えておく)
+  const remPref = () => { const c = $('remAll'); const v = c ? c.checked : true; try { sessionStorage.setItem('rem_pref', v ? '1' : '0'); } catch (e) {} return v; };
+  $('oauthGo').addEventListener('click', () => { remPref(); startOauth(); });
   $('mailGo').addEventListener('click', e => { e.preventDefault(); showMailLogin(); });
   const go = async () => {
     const code = String($('codeIn').value || '').replace(/\D/g, '');
@@ -433,13 +436,14 @@ function showPairInput(note) {
     $('codeGo').disabled = true; $('codeErr').textContent = '';
     let res = null;
     try {
-      const r = await fetch(AUTH_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'pair.redeem', code: code }) });
+      const r = await fetch(AUTH_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'pair.redeem', code: code, remember: remPref() }) });
       res = JSON.parse(await r.text());
     } catch (e) { res = { ok: false, error: 'internal_error' }; }
     $('codeGo').disabled = false;
     if (res.ok && res.maintenance && res.maintenance.all && !res.maintenance.tester) { show('ただいまメンテナンス中です。' + (res.maintenance.message ? '\n' + res.maintenance.message : ''), true); return; }
     if (!res.ok || !res.items) { $('codeErr').textContent = ERRORS[res.error] || ERRORS.internal_error; return; }
     try { sessionStorage.setItem('portal_pc', '1'); } catch (e) {}
+    if (res.rememberKey) { try { localStorage.setItem(REM_KEY, res.rememberKey); } catch (e) {} }
     PROFILE_ID = res.uid || '';
     renderPortal(res);
   };
@@ -472,7 +476,7 @@ async function finishOauth(code, state) {
   let res = null;
   try {
     const r = await fetch(AUTH_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'oauth.finish', code: code, state: state, redirectUri: location.origin + location.pathname }) });
+      body: JSON.stringify({ action: 'oauth.finish', code: code, state: state, redirectUri: location.origin + location.pathname, remember: (() => { try { return sessionStorage.getItem('rem_pref') !== '0'; } catch (e) { return true; } })() }) });
     res = JSON.parse(await r.text());
   } catch (e) { res = { ok: false, error: 'internal_error' }; }
   if (res.ok && res.maintenance && res.maintenance.all && !res.maintenance.tester) { show('ただいまメンテナンス中です。' + (res.maintenance.message ? '\n' + res.maintenance.message : ''), true); return; }
@@ -483,6 +487,7 @@ async function finishOauth(code, state) {
     return;
   }
   try { sessionStorage.setItem('portal_pc', '1'); } catch (e) {} // アプリの外：表示を端末に長く残さない(PCと同じ扱い)
+  if (res.rememberKey) { try { localStorage.setItem(REM_KEY, res.rememberKey); } catch (e) {} } // この端末でログインを覚える
   PROFILE_ID = res.uid || '';
   renderPortal(res);
 }
@@ -739,7 +744,7 @@ function showMailLogin() {
     '<button class="btn" id="mSend">コードを送る</button>' +
     '<div id="mStep2" style="display:none;"><div style="color:#5F6670;font-size:14px;margin:8px 0;">届いた6桁のコード(10分間・1回だけ)</div>' +
     '<input class="codein" id="mCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000">' +
-    '<label style="display:block;font-size:14px;margin-top:8px;"><input type="checkbox" id="mRem" checked> この端末でログインを覚える(しばらくメールなしで入れる。共用のPCでは外す)</label>' +
+    '<label style="display:block;font-size:14px;margin-top:8px;"><input type="checkbox" id="mRem"' + ((() => { try { return sessionStorage.getItem('rem_pref') === '0'; } catch (e) { return false; } })() ? '' : ' checked') + '> この端末でログインを覚える(しばらくメールなしで入れる。共用のPCでは外す)</label>' +
     '<button class="btn" id="mGo" style="margin-top:8px;">入る</button></div>' +
     '<div id="mMsg" style="font-size:14px;margin-top:6px;white-space:pre-wrap;"></div>' +
     '<a href="#" id="mBack" style="color:#5F6670;font-size:14px;margin-top:10px;">‹ ほかの入り方にもどる</a></div>');

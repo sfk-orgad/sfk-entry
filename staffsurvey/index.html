@@ -12,6 +12,7 @@
   ・推移：回答の月ごと・質問ごとの平均点を、店舗ごと(または両店舗を比べて)
   ・困りごと・提案：自由記述を1件ずつ起票したもの。状態(未対応・対応中・済み・対応しない)・担当・メモを付ける
   ・やりがい：選んだ項目の数
+  ・アンサーシート(2026-12)：困りごと・提案に「会社からの回答」を書き、「アンサーシートに載せる」にチェック → 「アンサーシートを作る」で、チェックした件の問いと回答を1枚に(印刷・PDF。名前は出さない)
   データは Bot(StaffSurvey.gs、app=staffsv)。Google フォームとスプシは今までどおり
 -->
 <style>
@@ -36,6 +37,27 @@
 .bar { display: flex; gap: 8px; align-items: center; margin: 4px 0; font-size: 14px; }
 .bar .n { width: 46%; } .bar .b { height: 14px; border-radius: 4px; } .bar .c { font-size: 13px; color: var(--p-muted); }
 .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; } .filters select { font-size: 14px; padding: 6px; border-radius: 8px; border: 1px solid #B9C0C8; }
+.ans { grid-column: 1 / -1; } .ans textarea { width: 100%; min-height: 56px; box-sizing: border-box; }
+.onsheet { grid-column: 1 / -1; font-size: 14px; }
+#sheetView { display: none; position: fixed; inset: 0; background: #E9ECEF; z-index: 100; overflow: auto; }
+#sheetView .sb { position: sticky; top: 0; background: var(--p-c); color: #fff; padding: 8px 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+#sheetView .sb button { background: #fff; border: none; border-radius: 8px; padding: 6px 12px; cursor: pointer; font-family: inherit; }
+#sheetView .sb input { font-size: 14px; padding: 4px 6px; border-radius: 6px; border: none; width: 260px; }
+#asPage { background: #fff; margin: 12px auto; padding: 14mm 14mm; width: 210mm; min-height: 280mm; box-sizing: border-box; color: #1F2328; }
+#asPage h1 { font-size: 18pt; margin: 0 0 2mm; } #asPage .meta { font-size: 9pt; color: #5F6670; margin-bottom: 6mm; }
+#asPage h2 { font-size: 12pt; margin: 6mm 0 2mm; padding-bottom: 1mm; border-bottom: .5mm solid #1D6F86; color: #1D6F86; }
+#asPage .qa { margin: 0 0 4mm; page-break-inside: avoid; }
+#asPage .q { font-size: 10.5pt; background: #F3F5F7; border-radius: 2mm; padding: 2.5mm 3mm; white-space: pre-wrap; }
+#asPage .q b { color: #5F6670; font-size: 9pt; margin-right: 2mm; }
+#asPage .a { font-size: 10.5pt; padding: 2.5mm 3mm 0 6mm; white-space: pre-wrap; }
+#asPage .a b { color: #C8743A; font-size: 9pt; margin-right: 2mm; }
+@media print {
+  @page { size: A4 portrait; margin: 10mm; }
+  html, body { background: #fff !important; }
+  body > *:not(#sheetView) { display: none !important; }
+  #sheetView { display: block !important; position: static; background: #fff; } #sheetView .sb { display: none; }
+  #asPage { margin: 0; padding: 0; width: auto; min-height: 0; }
+}
 </style>
 </head>
 <body>
@@ -47,9 +69,10 @@
     <div class="p-ver" id="ver"></div>
   </div>
 </div>
+<div id="sheetView"><div class="sb"><b>アンサーシート</b><input id="asTitle" placeholder="見出し"><button id="asPrint">印刷・PDFに保存</button><button id="asClose">閉じる</button></div><div id="asPage"></div></div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-29b';
+var PAGE_VERSION = '2026-12-02a';
 var P = Portal.start({ tool: 'staffsurvey', title: 'スタッフアンケート' });
 var g = Portal.$, esc = Portal.esc, D = null, VIEW = 'trend', STORE = 'all', F = { store: '', state: 'open', kind: '' };
 var COLORS = ['#1D6F86', '#C8743A', '#6B4FA0', '#2E7D32'];
@@ -112,28 +135,35 @@ function renderTickets() {
   var h = '<div class="filters"><select id="fStore">' + opt('', 'すべての店舗', F.store) + D.stores.map(function (s) { return opt(s.code, s.name, F.store); }).join('') + '</select>' +
     '<select id="fKind">' + opt('', '困りごと・提案', F.kind) + opt('困りごと', '困りごと', F.kind) + opt('提案', '提案', F.kind) + '</select>' +
     '<select id="fState">' + opt('open', '未対応・対応中', F.state) + D.states.map(function (s) { return opt(s, s, F.state); }).join('') + opt('all', 'すべて', F.state) + '</select>' +
-    '<span class="p-muted" style="align-self:center;">' + list.length + '件(未対応 ' + nOpen + '件)</span></div>';
+    '<span class="p-muted" style="align-self:center;">' + list.length + '件(未対応 ' + nOpen + '件)</span>' +
+    '<button class="p-btn p-solid" id="asMake" style="margin-left:auto;">アンサーシートを作る(' + D.tickets.filter(function (t) { return t.sheet && (!F.store || t.store === F.store); }).length + '件)</button></div>';
   h += list.length ? list.map(function (t) {
     var si = D.states.indexOf(t.state);
     return '<div class="tk" data-id="' + esc(t.id) + '"><div class="h"><span class="st s' + si + '">' + esc(t.state) + '</span><span class="kd">' + esc(t.kind) + '</span><span>' + esc((D.stores.filter(function (s) { return s.code === t.store; })[0] || {}).name || t.store) + '</span><span>' + esc(t.date) + '</span><span>' + esc(t.who) + '</span>' +
       (t.at ? '<span>更新 ' + esc(t.at) + '(' + esc(t.by) + ')</span>' : '') + '</div><div class="t">' + esc(t.text) + '</div>' +
       '<div class="ed"><select data-k="state">' + D.states.map(function (s) { return opt(s, s, t.state); }).join('') + '</select><input data-k="owner" placeholder="担当" value="' + esc(t.owner) + '">' +
-      '<textarea data-k="memo" placeholder="メモ(対応の内容など)">' + esc(t.memo) + '</textarea></div><button class="p-btn" data-save style="margin-top:6px;">保存</button> <span class="msg"></span></div>';
+      '<textarea data-k="memo" placeholder="メモ(社員だけが見る。対応の内容など)">' + esc(t.memo) + '</textarea>' +
+      '<div class="ans"><textarea data-k="answer" placeholder="会社からの回答(アンサーシートに載せる文。スタッフ全員に見せる前提で)">' + esc(t.answer) + '</textarea></div>' +
+      '<label class="onsheet"><input type="checkbox" data-k="sheet"' + (t.sheet ? ' checked' : '') + '> アンサーシートに載せる</label></div>' +
+      '<button class="p-btn" data-save style="margin-top:6px;">保存</button> <span class="msg"></span></div>';
   }).join('') : '<div class="p-card p-muted">該当する件はありません</div>';
   g('view').innerHTML = h;
   g('fStore').onchange = function () { F.store = this.value; render(); };
   g('fKind').onchange = function () { F.kind = this.value; render(); };
   g('fState').onchange = function () { F.state = this.value; render(); };
+  g('asMake').onclick = showAnswerSheet;
 }
 g('view').addEventListener('click', function (e) {
   var b = e.target.closest('[data-save]'); if (!b) return;
   var box = b.closest('.tk'), id = box.getAttribute('data-id'), t = D.tickets.filter(function (x) { return x.id === id; })[0];
   var val = function (k) { return box.querySelector('[data-k="' + k + '"]').value; };
+  var onSheet = box.querySelector('[data-k="sheet"]').checked;
+  if (onSheet && !val('answer').trim()) { box.querySelector('.msg').textContent = 'アンサーシートに載せるときは、会社からの回答を書いてください'; return; }
   b.disabled = true; box.querySelector('.msg').textContent = '保存しています…';
-  call('ssv.ticket', { id: id, state: val('state'), owner: val('owner'), memo: val('memo'), ver: [t.state, t.owner, t.memo].join('|') }).then(function (r) {
+  call('ssv.ticket', { id: id, state: val('state'), owner: val('owner'), memo: val('memo'), answer: val('answer'), sheet: onSheet, ver: [t.state, t.owner, t.memo, t.answer, t.sheet ? '1' : ''].join('|') }).then(function (r) {
     b.disabled = false;
     if (!r.ok) { box.querySelector('.msg').textContent = r.error; return; }
-    t.state = val('state'); t.owner = val('owner'); t.memo = val('memo'); t.at = '今'; t.by = (Portal.session() || {}).name || '';
+    t.state = val('state'); t.owner = val('owner'); t.memo = val('memo'); t.answer = val('answer'); t.sheet = onSheet; t.at = '今'; t.by = (Portal.session() || {}).name || '';
     box.querySelector('.msg').textContent = '保存しました';
     setTimeout(render, 600);
   }).catch(function () { b.disabled = false; box.querySelector('.msg').textContent = '通信に失敗しました'; });
@@ -161,6 +191,33 @@ g('tabs').addEventListener('click', function (e) {
   Array.prototype.forEach.call(g('tabs').children, function (x) { x.classList.toggle('on', x === b); });
   render();
 });
+
+// ===== アンサーシート(チェックした件の問いと会社からの回答を1枚に。名前は出さない) =====
+function showAnswerSheet() {
+  var list = D.tickets.filter(function (t) { return t.sheet && t.answer && (!F.store || t.store === F.store); })
+    .sort(function (a, b) { return a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.date < b.date ? -1 : 1; });
+  if (!list.length) { alert('「アンサーシートに載せる」にチェックして、会社からの回答を書いた件がありません'); return; }
+  var sn = F.store ? ((D.stores.filter(function (s) { return s.code === F.store; })[0] || {}).name || F.store) : '全店舗';
+  var yms = list.map(function (t) { return t.ym; }).sort(), span = yms[0] === yms[yms.length - 1] ? ymL(yms[0]) : ymL(yms[0]) + '〜' + ymL(yms[yms.length - 1]);
+  if (!g('asTitle').value) g('asTitle').value = 'スタッフアンケート アンサーシート(' + sn + '・' + span + 'の回答)';
+  var draw = function () {
+    var h = '<h1>' + esc(g('asTitle').value) + '</h1><div class="meta">いただいた声のうち、' + list.length + '件に会社から回答します。ありがとうございました。(' + new Date().toLocaleDateString('ja-JP') + ')</div>';
+    ['困りごと', '提案'].forEach(function (k) {
+      var items = list.filter(function (t) { return t.kind === k; });
+      if (!items.length) return;
+      h += '<h2>' + (k === '困りごと' ? '困っていること・改善してほしいこと' : 'ご意見・アイデア') + '(' + items.length + '件)</h2>';
+      items.forEach(function (t, i) {
+        h += '<div class="qa"><div class="q"><b>Q' + (i + 1) + '</b>' + esc(t.text) + '</div><div class="a"><b>回答</b>' + esc(t.answer) + '</div></div>';
+      });
+    });
+    g('asPage').innerHTML = h;
+  };
+  draw();
+  g('asTitle').oninput = draw;
+  g('sheetView').style.display = 'block';
+}
+g('asPrint').onclick = function () { window.print(); };
+g('asClose').onclick = function () { g('sheetView').style.display = 'none'; };
 if (P) load();
 </script>
 </body>

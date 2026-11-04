@@ -50,15 +50,17 @@
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-12-06a';
+var PAGE_VERSION = '2026-12-07a';
 var P = Portal.start({ tool: 'bugreport', title: '不具合の報告' });
 var g = Portal.$, esc = Portal.esc, PHOTO = '', LIST = null, F = 'open';
-var S = Portal.session() || {}, ADMIN = !!(S.apis && S.apis.bugreport_admin);
-function adminCall(a, x) { return fetch(S.apis.bugreport_admin, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ action: a, token: S.token }, x || {})) }).then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); }); }
+// 一覧(管理)を見られるかは、認証基盤が bug.mine の返事で教える(bugreport_admin はカードが無いので、ポータルの入口の一覧には来ないため)
+var S = Portal.session() || {}, ADMIN = false;
+function adminCall(a, x) { return fetch(S.apis.bugreport, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ action: a, token: S.token }, x || {})) }).then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); }); }
 
 function loadMine() {
   P.call('bug.mine', {}, { retry: true }).then(function (r) {
     if (!r.ok) { g('mine').textContent = r.error; return; }
+    if (r.isAdmin && !ADMIN) { ADMIN = true; g('tabs').style.display = 'flex'; }
     g('mine').innerHTML = r.rows.length ? r.rows.map(function (x) { return '<div class="rp"><div class="h"><span class="st">' + esc(x.state) + '</span><span>' + esc(x.at) + '</span><span>' + esc(x.screen) + '</span></div><div class="t">' + esc(x.result) + '</div></div>'; }).join('') : 'まだありません';
   });
 }
@@ -128,7 +130,6 @@ if (P) {
   // ほかの画面から「不具合を報告」で来たときは、その画面の名前を入れておく
   var m = location.search.match(/[?&]screen=([^&]+)/);
   if (m) { var sc = decodeURIComponent(m[1]); var o = Array.prototype.filter.call(g('screen').options, function (x) { return sc.indexOf(x.value.replace(/\(.*$/, '')) !== -1; })[0]; if (o) g('screen').value = o.value; }
-  if (ADMIN) g('tabs').style.display = 'flex';
   Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
   loadMine();
 }

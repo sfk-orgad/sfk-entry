@@ -93,6 +93,22 @@
     });
   }
 
+  // ===== ポータルでログインし直して、この画面に戻る(2026-12) =====
+  //   LINE WORKS のトークのリンクからツールを直接開いたとき、通行証がない・古い(期限切れ・取り消し)と開けなかった
+  //   → この画面の場所を覚えてポータルへ移り、ポータルがログインし終えたら、ここへ戻す(ポータルの index.html が portal_next を見る)
+  //   続けて何度も戻されないよう、1分以内の2回目はしない(そのときは今までどおり「ポータルから開き直して」)
+  Portal.relogin = function () {
+    try {
+      var last = Number(sessionStorage.getItem('portal_next_at') || 0);
+      if (Date.now() - last < 60000) return false;
+      sessionStorage.setItem('portal_next', location.href);
+      sessionStorage.setItem('portal_next_at', String(Date.now()));
+      sessionStorage.removeItem('portal_session');
+    } catch (e) { return false; }
+    location.replace(Portal.PORTAL_URL);
+    return true;
+  };
+
   // ===== ページの始まり：通行証の確認＋ヘッダー =====
   //   opt：{ tool: 'staff'(ツールID), title: '画面の名前', header: true(ヘッダーを出す) }
   //   戻り値：{ S, api, call(action, extra, opt) }。だめなら入口の画面に理由を出して null
@@ -102,7 +118,10 @@
     ensureGate();
     Portal.gate('準備しています…', { loading: true });
     var S = Portal.session();
-    if (!Portal.sessionOk(S)) { Portal.gate('ポータルから開き直してください。\n(ログインの期限が切れたか、直接開かれました)', { back: true }); return null; }
+    if (!Portal.sessionOk(S)) {
+      if (Portal.relogin()) { Portal.gate('ログインし直しています…', { loading: true }); return null; }
+      Portal.gate('ポータルから開き直してください。\n(ログインの期限が切れたか、直接開かれました)', { back: true }); return null;
+    }
     var api = S.apis ? S.apis[opt.tool] : '';
     if (!api) { Portal.gate((opt.title || 'このツール') + 'を開く権限がないか、ポータルの設定が足りません。\nポータルから開き直してください。', { back: true }); return null; }
     if (opt.header !== false) Portal.header(opt.title, S.name);
@@ -115,6 +134,11 @@
       var t0 = Date.now();
       return call(api, S.token, action, extra, o).then(function (r) {
         Portal.perfAdd(opt.tool, action, Date.now() - t0, r && r.ok !== false ? 'OK' : String(r && r.error || 'NG'));
+        // 通行証が古い(期限切れ・取り消し・ユーザーを作り直した など)：ポータルでログインし直して戻る。権限がないときは戻さない
+        if (r && r.error === 'AUTH' && r.reason !== 'no_permission' && Portal.relogin()) {
+          Portal.gate('ログインし直しています…', { loading: true });
+          return new Promise(function () {}); // 移るまで、この画面の続きは動かさない
+        }
         return r;
       }, function (e) {
         Portal.perfAdd(opt.tool, action, Date.now() - t0, '通信失敗');

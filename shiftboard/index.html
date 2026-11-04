@@ -207,7 +207,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-11-20a';
+var PAGE_VERSION = '2026-12-08a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -382,7 +382,7 @@ function renderDay() {
   };
   var uids = sm.reqU.slice();
   sm.cfU.forEach(function (u) { if (uids.indexOf(u) === -1) uids.push(u); });
-  uids.sort(function (a, b) { return first(a) - first(b); });
+  uids.sort(byStaff); // 決まった順(StaffID の順)。時間で並べ替えると、確定を直すたびに行が動いて直しにくいため(2026-12)
   (ADDED[key(STORE, DAY)] || []).forEach(function (u) { if (uids.indexOf(u) === -1) uids.push(u); }); // 「希望の外の人を入れる」で足した人
   if (g('showAll').checked) {
     Object.keys(B.staff).forEach(function (u) {
@@ -478,7 +478,7 @@ function renderPanel() {
   var bad = badLines();
   var all = reqOf(DAY);
   var first = function (u) { var l = personLines(u); return l.length ? mins(l[0].s) : 99999; };
-  var uids = peopleOfDay().sort(function (a, b) { return first(a) - first(b); });
+  var uids = peopleOfDay().sort(byStaff);
   if (!uids.length) { g('panelBody').innerHTML = '<div class="muted" style="padding:10px 14px;">この日の希望はありません(「希望のない人も表示」で全員を出せます)</div>'; return; }
   var h = '<table class="pn"><tr><th>氏名</th><th>グレード</th><th>希望</th><th>確定させる時間(チェック＝採用)</th></tr>';
   uids.forEach(function (u) {
@@ -1117,6 +1117,13 @@ g('addOutBtn').addEventListener('click', function () {
   renderDay();
   g('msg').textContent = p.name + 'さんの行を足しました。行の上をドラッグして時間を決めてください(オレンジ＝希望の外)';
 });
+
+// 人の並び：StaffID の順(社員 S… → アルバイト A… などの頭文字ごと、番号の順)。同じなら名前の順
+function byStaff(a, b) {
+  var pa = (B.staff || {})[a] || {}, pb = (B.staff || {})[b] || {};
+  var sa = String(pa.sid || '~' + a), sb = String(pb.sid || '~' + b);
+  return sa !== sb ? (sa < sb ? -1 : 1) : String(pa.name || '').localeCompare(String(pb.name || ''), 'ja');
+}
 </script>
 </body>
 </html>

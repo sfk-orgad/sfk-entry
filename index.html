@@ -122,7 +122,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-12-01a';
+const PAGE_VERSION = '2026-12-03a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -512,6 +512,17 @@ async function openPcCode() {
 
 // ===== ポータルの表示 =====
 let DATA = null, FETCHED_AT = 0;
+// ツールの画面から「ログインし直して戻る」で来たときは、ログインし終えたらその画面へ戻す(同じサイトの中だけ)
+function goNextIfAny() {
+  let nx = '';
+  try { nx = sessionStorage.getItem('portal_next') || ''; sessionStorage.removeItem('portal_next'); } catch (e) {}
+  if (!nx) return false;
+  const base = location.origin + location.pathname.replace(/[^/]*$/, '');
+  if (nx.indexOf(base) !== 0 || nx.split('#')[0].split('?')[0] === base || nx.split('#')[0].split('?')[0] === base + 'index.html') return false;
+  location.replace(nx);
+  return true;
+}
+
 function renderPortal(res, at) {
   DATA = res; FETCHED_AT = at || Date.now();
   if (!at) {
@@ -529,6 +540,7 @@ function renderPortal(res, at) {
       sessionStorage.setItem(SAVE_KEY, JSON.stringify({ at: FETCHED_AT, res: show }));
       if (!pcMode()) saveView(PROFILE_ID, show); // 閉じても消えない場所にも、この人の表示を覚える(スマホだけ)
     } catch (e) {}
+    if (goNextIfAny()) return; // ツールの画面からログインし直しに来たときは、その画面へ戻る
   }
   let inApp = false;
   try { inApp = typeof woff !== 'undefined' && typeof woff.isInClient === 'function' && woff.isInClient() === true; } catch (e) { inApp = false; }

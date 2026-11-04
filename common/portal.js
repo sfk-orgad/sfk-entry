@@ -50,7 +50,10 @@
     var app = Portal.$('app'); if (app) app.hidden = true;
     var sp = Portal.$('gspin'); if (sp) sp.style.display = opt.loading ? 'block' : 'none';
     Portal.$('gmsg').textContent = msg;
-    Portal.$('gact').innerHTML = opt.back ? '<a class="p-btn p-solid" href="' + Portal.PORTAL_URL + '">ポータルに戻る</a>' : '';
+    // 止まったときは「不具合を報告」も出す(報告の画面に、この画面の名前を渡す。2026-12)
+    var S1 = Portal.session() || {}, canBug = S1.apis && S1.apis.bugreport && !/\/bugreport\//.test(location.pathname);
+    Portal.$('gact').innerHTML = opt.back ? '<a class="p-btn p-solid" href="' + Portal.PORTAL_URL + '">ポータルに戻る</a>' +
+      (canBug ? ' <a class="p-btn" href="../bugreport/?screen=' + encodeURIComponent(document.title || '') + '">不具合を報告</a>' : '') : '';
     Portal.$('gdetail').textContent = opt.detail || '';
   };
   Portal.showApp = function () {

@@ -122,7 +122,7 @@
 
 <script>
 // ===== 版の番号(どの版のページが表示されているかを、ページの一番下に出す。更新したら書き換える) =====
-const PAGE_VERSION = '2026-12-03a';
+const PAGE_VERSION = '2026-12-04a';
 const T0 = Date.now();
 const TIMES = [];
 function showVer() {
@@ -715,8 +715,8 @@ function renderMine(items, res) {
     }
     const noticeTool = (items || []).find(it => it.tool === 'notice');
     const unread = ((res && res.notices) || []).filter(n => !n.read).length;
-    if (unread && noticeTool) { urgent++; todo.push('<div class="ti">📢 未読のお知らせが ' + unread + '件あります</div>'); }
-    // 最初は閉じておく(押すと開く)。急ぎ(締め切りまで1週間以内・未読)があれば見出しで分かるように
+    if (unread && noticeTool) todo.push('<div class="ti">📢 未読のお知らせが ' + unread + '件あります</div>'); // 未読のお知らせは「急ぎ」に数えない(2026-12-04)
+    // 最初は閉じておく(押すと開く)。急ぎ(シフト希望の締め切りが近い)があれば見出しで分かるように
     if (todo.length) h += '<details class="todo"><summary>やること ' + todo.length + '件' + (urgent ? '<span class="urg">急ぎ ' + urgent + '</span>' : '') + '</summary>' + todo.join('') + '</details>';
     $('mine').innerHTML = h;
   };

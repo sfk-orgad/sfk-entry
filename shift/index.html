@@ -5,7 +5,7 @@
 <title>シフト希望</title>
 <meta charset="UTF-8">
 <style>
-  :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; --sun: #B42318; --sat: #1D5BB8; }
+  :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; --sun: #B42318; --sat: #1D5BB8; --ok: #1F7A3D; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 17px; line-height: 1.5; }
   .wrap { max-width: 600px; margin: 0 auto; padding: 0 12px 130px; }
@@ -41,6 +41,12 @@
   .x { font-size: 18px; width: 40px; height: 40px; border: 1px solid #C9CFD6; border-radius: 10px; background: #fff; cursor: pointer; }
   .mini { font-size: 14px; padding: 6px 10px; border: 1px solid #C9CFD6; border-radius: 8px; background: #fff; cursor: pointer; font-family: inherit; color: var(--ink); margin-left: 4px; }
   .empty { font-size: 14px; color: var(--muted); }
+  /* 他店でもOK・日の備考(2026-12) */
+  .oth { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; color: var(--muted); margin: 4px 0 0 2px; cursor: pointer; }
+  .oth input { width: 20px; height: 20px; }
+  .oth.on { color: var(--ok); font-weight: 700; }
+  .dnote { width: 100%; font-size: 15px; padding: 8px; border: 1px dashed #C9CFD6; border-radius: 8px; margin-top: 8px; font-family: inherit; color: var(--ink); background: #FAFBFC; }
+  .dnote:focus { border-style: solid; background: #fff; }
   .bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line); padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
   .bar .inner { max-width: 600px; margin: 0 auto; }
   .progress { font-size: 14px; color: var(--muted); text-align: center; margin-bottom: 6px; }
@@ -60,6 +66,7 @@
 <!--
   シフト希望の画面(GitHub Pages の shift/index.html。ポータルと同じサイト)
   開き方：ポータルのカードから。通行証とデータの入口(BotのGASのURL)は、ポータルがブラウザの中に置いたものを使う。秘密は置かない
+  2026-12：日ごとの備考(ひとこと)と、時間帯ごとの「他店でもOK」を追加(Bot の ShiftWish.gs と Shift.gs の3か所)
 -->
 <div id="gate" style="min-height:70vh;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;">
   <div><div class="gspin" id="gspin"></div><div id="gmsg" style="font-size:18px;line-height:1.7;white-space:pre-wrap;">準備しています…</div>
@@ -83,12 +90,13 @@
     <div class="chips" id="wchips"></div>
     <div class="row brow" data-b="0"></div>
     <div class="row brow" data-b="1" style="margin-top:8px"></div>
+    <label class="oth" id="bOthWrap"><input type="checkbox" id="bOth"> 他店でもOK</label>
     <div class="row" style="margin-top:10px"><button class="btn solid" id="bulk">まとめて入れる</button><button class="btn" id="clearAll">全部消す</button></div>
   </div>
-  <div class="note" style="margin:14px 4px 0">出勤できない日は、空欄のままで大丈夫です。1日に時間帯は<span id="maxr"></span>つまで入れられます(例：9:00〜12:00と15:00〜18:00の分断勤務)。<span id="storeHint"></span></div>
+  <div class="note" style="margin:14px 4px 0">出勤できない日は、空欄のままで大丈夫です。1日に時間帯は<span id="maxr"></span>つまで入れられます(例：9:00〜12:00と15:00〜18:00の分断勤務)。<span id="storeHint"></span><br>「他店でもOK」にチェックすると、その時間はほかの店舗の手伝いにも入れます。日ごとのひとこと(例：18時までに上がりたい)も書けます。</div>
   <div id="days"></div>
   <div class="card">
-    <div class="card-title">備考</div>
+    <div class="card-title">備考(月全体)</div>
     <textarea id="note" placeholder="例：テスト期間なので土日中心で"></textarea>
   </div>
   <div id="error"></div>
@@ -110,7 +118,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-11-20a';
+var PAGE_VERSION = '2026-12-12a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -241,9 +249,11 @@ function startForm(D) {
     return;
   }
 
-  // ===== 入力の持ち方：days = { 日: [[開始, 終了, 店舗コード], …] }(時間帯ごとに店舗を持つ) =====
+  // ===== 入力の持ち方 =====
+  //   days  = { 日: [[開始, 終了, 店舗コード, 他店でもOK(true/false)], …] }(時間帯ごとに店舗と他店OKを持つ)
+  //   notes = { 日: ひとこと }
   var MULTI = D.stores.length > 1;           // 2店舗以上なら、時間帯ごとに店舗を選ぶ
-  var cur = { days: {}, note: '' };
+  var cur = { days: {}, notes: {}, note: '' };
   var dirty = false;
   var lastStore = D.stores[0].code;          // 新しい時間帯の店舗の初期値(最後に選んだ店舗)
   if (MULTI) $('storeHint').textContent = '時間帯ごとに、どちらの店舗で働けるかを選んでください。';
@@ -272,6 +282,7 @@ function startForm(D) {
     var b = e.target.closest('.chip'); if (!b) return;
     var k = b.getAttribute('data-w'); wsel[k] = !wsel[k]; b.classList.toggle('on', wsel[k]);
   });
+  $('bOth').addEventListener('change', function () { $('bOthWrap').classList.toggle('on', $('bOth').checked); });
   function renderBulk() {
     Array.prototype.forEach.call(document.querySelectorAll('.brow'), function (row) {
       var i = Number(row.getAttribute('data-b'));
@@ -285,7 +296,8 @@ function startForm(D) {
     if (k === 2) { var t = storeOf(s.value).times; if (t.indexOf(bulkR[i][0]) === -1) bulkR[i][0] = ''; if (t.indexOf(bulkR[i][1]) === -1) bulkR[i][1] = ''; renderBulk(); }
   });
   $('bulk').addEventListener('click', function () {
-    var rs = bulkR.filter(function (r) { return r[0] || r[1]; }).map(function (r) { return [r[0], r[1], MULTI ? r[2] : D.stores[0].code]; });
+    var oth = $('bOth').checked;
+    var rs = bulkR.filter(function (r) { return r[0] || r[1]; }).map(function (r) { return [r[0], r[1], MULTI ? r[2] : D.stores[0].code, oth]; });
     if (!rs.length) { alert('時間を選んでください'); return; }
     var msg = rangeProblem(rs);
     if (msg) { alert(msg); return; }
@@ -295,8 +307,8 @@ function startForm(D) {
     dirty = true; render();
   });
   $('clearAll').addEventListener('click', function () {
-    if (!confirm('入力した時間をすべて消しますか？')) return;
-    cur.days = {}; dirty = true; render();
+    if (!confirm('入力した時間とひとことを、すべて消しますか？')) return;
+    cur.days = {}; cur.notes = {}; dirty = true; render();
   });
 
   // ===== 日ごとの入力 =====
@@ -311,14 +323,22 @@ function startForm(D) {
       if (!rs.length) h += '<div class="empty">出勤できない(空欄)</div>';
       rs.forEach(function (r, i) {
         h += '<div class="rng">' + rangeHtml('data-d="' + x.d + '" data-i="' + i + '"', r) +
-          '<button type="button" class="x" data-act="del" data-d="' + x.d + '" data-i="' + i + '">×</button></div>';
+          '<button type="button" class="x" data-act="del" data-d="' + x.d + '" data-i="' + i + '">×</button></div>' +
+          '<label class="oth' + (r[3] ? ' on' : '') + '"><input type="checkbox" data-oth="1" data-d="' + x.d + '" data-i="' + i + '"' + (r[3] ? ' checked' : '') + '> 他店でもOK</label>';
       });
+      h += '<input class="dnote" data-note="' + x.d + '" maxlength="100" placeholder="ひとこと(任意。例：18時までに上がりたい)" value="' + esc(cur.notes[x.d] || '') + '">';
       return h + '</div>';
     }).join('');
     progress();
   }
   $('days').addEventListener('change', function (e) {
-    var s = e.target; if (s.tagName !== 'SELECT') return;
+    var s = e.target;
+    if (s.getAttribute('data-oth')) {
+      var rr = (cur.days[s.getAttribute('data-d')] || [])[Number(s.getAttribute('data-i'))];
+      if (rr) { rr[3] = s.checked; s.parentNode.classList.toggle('on', s.checked); dirty = true; }
+      return;
+    }
+    if (s.tagName !== 'SELECT') return;
     var d = s.getAttribute('data-d'), i = Number(s.getAttribute('data-i')), k = Number(s.getAttribute('data-k'));
     var r = cur.days[d][i];
     r[k] = s.value;
@@ -332,10 +352,16 @@ function startForm(D) {
     }
     dirty = true; markOk(d); progress();
   });
+  $('days').addEventListener('input', function (e) {
+    var s = e.target; if (!s.getAttribute('data-note')) return;
+    var d = s.getAttribute('data-note');
+    if (s.value.trim()) cur.notes[d] = s.value; else delete cur.notes[d];
+    dirty = true;
+  });
   $('days').addEventListener('click', function (e) {
     var b = e.target.closest('button'); if (!b) return;
     var act = b.getAttribute('data-act'), d = Number(b.getAttribute('data-d'));
-    if (act === 'add') { (cur.days[d] = cur.days[d] || []).push(['', '', MULTI ? lastStore : D.stores[0].code]); }
+    if (act === 'add') { (cur.days[d] = cur.days[d] || []).push(['', '', MULTI ? lastStore : D.stores[0].code, false]); }
     if (act === 'del') { cur.days[d].splice(Number(b.getAttribute('data-i')), 1); if (!cur.days[d].length) delete cur.days[d]; }
     if (act === 'copy') { if (cur.days[d - 1]) cur.days[d] = clone(cur.days[d - 1]); else delete cur.days[d]; }
     dirty = true; render();
@@ -377,11 +403,34 @@ function startForm(D) {
     });
     return out;
   }
+  // 他店でもOKの時間帯 { 日: ['10:00-13:00', …] }
+  function otherOk() {
+    var out = {};
+    Object.keys(cur.days).forEach(function (d) {
+      var xs = (cur.days[d] || []).filter(function (r) { return r[3] && r[0] && r[1]; }).map(function (r) { return r[0] + '-' + r[1]; });
+      if (xs.length) out[d] = xs;
+    });
+    return out;
+  }
+  function dayNotes() {
+    var out = {};
+    Object.keys(cur.notes).forEach(function (d) { var t = String(cur.notes[d] || '').trim(); if (t) out[d] = t; });
+    return out;
+  }
+  // 提出済みの内容に、他店OK・ひとことを重ねる(Bot が古い版で extra が無くても動く)
+  function applyExtra(days, extra) {
+    var oth = (extra && extra.other) || {};
+    Object.keys(days).forEach(function (d) {
+      (days[d] || []).forEach(function (r) { r[3] = (oth[d] || []).indexOf(r[0] + '-' + r[1]) !== -1; });
+    });
+    return days;
+  }
 
   // ===== 読み込み(提出済みの内容 → 下書きがあれば下書き) =====
   function load() {
     var ex = D.existing;
-    cur.days = ex ? clone(ex.days) : {};
+    cur.days = ex ? applyExtra(clone(ex.days), ex.extra) : {};
+    cur.notes = ex && ex.extra ? clone(ex.extra.notes) : {};
     cur.note = ex ? ex.note : '';
     dirty = false;
     var note = $('draftNote');
@@ -389,6 +438,7 @@ function startForm(D) {
     var dr = readDraft();
     if (dr) {
       cur.days = clone(dr.days);
+      cur.notes = clone(dr.notes || {});
       cur.note = dr.note || '';
       dirty = true;
       var t = new Date(dr.at);
@@ -424,10 +474,10 @@ function startForm(D) {
     if (!dirty) return;
     try {
       cur.note = $('note').value;
-      var json = JSON.stringify({ days: cur.days, note: cur.note });
+      var json = JSON.stringify({ days: cur.days, notes: cur.notes, note: cur.note });
       if (json === lastSaved) return;
       lastSaved = json;
-      localStorage.setItem(draftKey(), JSON.stringify({ at: Date.now(), days: cur.days, note: cur.note }));
+      localStorage.setItem(draftKey(), JSON.stringify({ at: Date.now(), days: cur.days, notes: cur.notes, note: cur.note }));
     } catch (e) {}
   }
   function clearDraft() { try { localStorage.removeItem(draftKey()); lastSaved = ''; } catch (e) {} }
@@ -459,11 +509,11 @@ function startForm(D) {
     }
     $('overlay').style.display = 'flex'; $('submitBtn').disabled = true;
     // 提出は二重送信を避けるため、自動のやり直しはしない
-    api('shift.submit', { month: D.month.key, days: cleaned(), note: $('note').value }, false)
+    api('shift.submit', { month: D.month.key, days: cleaned(), note: $('note').value, dayNotes: dayNotes(), otherOk: otherOk() }, false)
       .then(function (res) {
         if (!res.ok) throw new Error(res.error === 'AUTH' ? 'AUTH:' + (res.reason || '') : res.error);
         $('overlay').style.display = 'none'; $('submitBtn').disabled = false;
-        D.existing = { days: res.days, note: res.note, updatedAt: res.updatedAt };
+        D.existing = { days: res.days, note: res.note, updatedAt: res.updatedAt, extra: res.extra || { notes: dayNotes(), other: otherOk() } };
         clearDraft();
         try { sessionStorage.removeItem('mine_cache'); } catch (e) {} // ポータルの「やること」を読み直させる
         dirty = false;

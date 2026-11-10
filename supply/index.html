@@ -49,9 +49,12 @@ table.t { border-collapse: collapse; width: 100%; font-size: 14px; background: #
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-12-09a';
+var PAGE_VERSION = '2026-12-10a';
 var P = Portal.start({ tool: 'supply', title: '備品と予算' });
-var g = Portal.$, esc = Portal.esc, D = null, VIEW = 'req', MONTH = '', MD = null, Q = '', FROMREQ = null;
+var g = Portal.$, esc = Portal.esc, D = null, VIEW = 'req', MONTH = '', MD = null, Q = '', FROMREQ = null, IST = '';
+var OTHER = '__other__';
+// その店舗で使う備品(店舗が空の備品は全店舗)
+function itemsOf(store) { return D.items.filter(function (x) { return !x.stores || !x.stores.length || !store || x.stores.indexOf(store) !== -1; }); }
 function call(a, x, o) { return P.call(a, x, Object.assign({ app: 'supply' }, o || {})); }
 function yen(n) { return n == null ? '―' : '¥' + Math.round(n).toLocaleString('ja-JP'); }
 function ymNow() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2); }
@@ -80,8 +83,9 @@ g('tabs').addEventListener('click', function (e) { var b = e.target.closest('but
 // ===== 欲しいものを申告(全員) =====
 function renderReq() {
   var h = '<div class="p-card"><h2 style="margin-top:0;">欲しい備品を申告する</h2><div class="p-note">備品リストから選ぶか、品名を書いてください。社員が見て、買うかどうかを決めます。</div>' +
-    '<div class="grid2" style="margin-top:8px;"><div class="full"><label>品名</label><input id="rItem" list="itemList" placeholder="例：フェイスタオル"><datalist id="itemList">' + D.items.map(function (x) { return '<option value="' + esc(x.name) + '">'; }).join('') + '</datalist></div>' +
-    '<div><label>店舗</label><select id="rStore">' + opts(D.master.stores, '', '(選ぶ)') + '</select></div><div><label>数量</label><input id="rQty" placeholder="例：10枚"></div>' +
+    '<div class="grid2" style="margin-top:8px;"><div><label>店舗</label><select id="rStore">' + opts(D.master.stores, '', '(選ぶ)') + '</select></div><div><label>数量</label><input id="rQty" placeholder="例：10枚"></div>' +
+    '<div class="full"><label>品名</label><select id="rPick"></select></div>' +
+    '<div class="full" id="rFreeBox" style="display:none;"><label>品名(自由に書く)</label><input id="rItem" placeholder="例：ドライヤーのフィルター"></div>' +
     '<div class="full"><label>理由(あれば)</label><textarea id="rWhy" rows="2" placeholder="例：破れてきて数が足りない"></textarea></div></div>' +
     '<div id="rMsg"></div><button class="p-btn p-solid p-big" id="rSend" style="width:100%;margin-top:10px;">申告する</button></div>';
   h += '<div class="p-card"><h2 style="margin-top:0;">自分の申告</h2>' + (D.myReqs.length ? D.myReqs.map(function (x) {
@@ -90,9 +94,24 @@ function renderReq() {
       (x['状態'] === '未対応' ? '<button class="p-btn" data-cancel="' + esc(x.ID) + '">取り下げ</button>' : '') + '</div>' + (x['メモ'] ? '<div class="p-note">' + esc(x['メモ']) + '</div>' : '') + '</div>';
   }).join('') : '<div class="p-muted">まだありません</div>') + '</div>';
   g('view').innerHTML = h;
+  // 店舗を選ぶと、その店舗の備品だけを並べる。いちばん下に「その他(自由に書く)」
+  var fill = function () {
+    var st = g('rStore').value, list = itemsOf(st), cats = {};
+    list.forEach(function (x) { (cats[x.cat || 'そのほか'] = cats[x.cat || 'そのほか'] || []).push(x.name); });
+    g('rPick').innerHTML = '<option value="">' + (st ? '(選ぶ)' : '(先に店舗を選ぶ)') + '</option>' +
+      Object.keys(cats).map(function (c) { return '<optgroup label="' + esc(c) + '">' + cats[c].map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('') + '</optgroup>'; }).join('') +
+      '<option value="' + OTHER + '">その他(リストにない物を自由に書く)</option>';
+    g('rFreeBox').style.display = 'none';
+  };
+  fill();
+  g('rStore').onchange = fill;
+  g('rPick').onchange = function () { var free = g('rPick').value === OTHER; g('rFreeBox').style.display = free ? '' : 'none'; if (free) g('rItem').focus(); };
   g('rSend').onclick = function () {
+    var pick = g('rPick').value, item = pick === OTHER ? g('rItem').value : pick;
+    if (!g('rStore').value) { msg('rMsg', '店舗を選んでください'); return; }
+    if (!String(item || '').trim()) { msg('rMsg', pick === OTHER ? '品名を書いてください' : '品名を選んでください(リストにないときは「その他」)'); return; }
     var b = g('rSend'); b.disabled = true; msg('rMsg', '');
-    call('sp.req.add', { item: g('rItem').value, store: g('rStore').value, qty: g('rQty').value, reason: g('rWhy').value }).then(function (r) {
+    call('sp.req.add', { item: (pick === OTHER ? '【その他】' : '') + item, store: g('rStore').value, qty: g('rQty').value, reason: g('rWhy').value }).then(function (r) {
       b.disabled = false;
       if (!r.ok) { msg('rMsg', r.error); return; }
       load().then(function () { msg('rMsg', '申告しました。状態は下の「自分の申告」で見られます。', true); });
@@ -146,7 +165,7 @@ function renderBuy() {
     var pre = FROMREQ || {};
     var h = '<div class="p-card"><h2 style="margin-top:0;">購入を記録する</h2>' + (FROMREQ ? '<div class="p-note">申告「' + esc(pre['品名']) + '」から記録します。記録すると、申告は「購入済み」になります。</div>' : '') +
       '<div class="grid2" style="margin-top:6px;"><div><label>購入日</label><input type="date" id="b購入日" value="' + td + '"></div><div><label>店舗</label><select id="b店舗">' + opts(D.master.stores, pre['店舗'] || '', '(選ぶ)') + '</select></div>' +
-      '<div class="full"><label>品目</label><input id="b品目" list="itemList2" value="' + esc(pre['品名'] || '') + '"><datalist id="itemList2">' + D.items.map(function (x) { return '<option value="' + esc(x.name) + '">'; }).join('') + '</datalist></div>' +
+      '<div class="full"><label>品目</label><input id="b品目" list="itemList2" value="' + esc(pre['品名'] || '') + '"><datalist id="itemList2">' + itemsOf(pre['店舗'] || '').map(function (x) { return '<option value="' + esc(x.name) + '">'; }).join('') + '</datalist></div>' +
       '<div><label>カテゴリ</label><select id="bカテゴリ">' + opts(D.master.categories, '', '(選ぶ)') + '</select></div><div><label>数量</label><input id="b数量" inputmode="numeric"></div>' +
       '<div><label>金額(税込・合計)</label><input id="b金額(税込)" inputmode="numeric"></div><div><label>購入先</label><select id="b購入先">' + opts(D.master.vendors, '', '(選ぶ)') + '</select></div>' +
       '<div><label>支払方法</label><select id="b支払方法">' + opts(D.master.pays, '', '(選ぶ)') + '</select></div><div><label>購入者</label><input id="b購入者" value="' + esc(D.me) + '"></div>' +
@@ -178,15 +197,17 @@ function renderBuy() {
 
 // ===== 備品リスト =====
 function renderItems(edit) {
-  var list = D.items.filter(function (x) { return !Q || (x.name + x.cat + (x.kw || '')).indexOf(Q) !== -1; });
-  var h = '<div class="row" style="margin-bottom:8px;"><input id="q" placeholder="品名・項目で探す" value="' + esc(Q) + '" style="flex:1;"><button class="p-btn p-solid" id="newItem">＋ 備品を足す</button></div><div id="itemForm"></div>' +
+  var list = itemsOf(IST).filter(function (x) { return !Q || (x.name + x.cat + (x.kw || '')).indexOf(Q) !== -1; });
+  var h = '<div class="tabs" id="ist">' + [''].concat(D.master.stores).map(function (st) { return '<button data-ist="' + esc(st) + '" class="' + (st === IST ? 'on' : '') + '">' + esc(st || 'すべて') + '</button>'; }).join('') + '</div>' +
+    '<div class="row" style="margin-bottom:8px;"><input id="q" placeholder="品名・項目で探す" value="' + esc(Q) + '" style="flex:1;"><button class="p-btn p-solid" id="newItem">＋ 備品を足す</button></div><div id="itemForm"></div>' +
     list.map(function (x) {
-      return '<div class="it"><div class="h"><span class="tag">' + esc(x.cat || '―') + '</span><b>' + esc(x.name) + '</b><button class="p-btn" data-edit="' + x.row + '" style="padding:2px 10px;">直す</button></div>' +
+      return '<div class="it"><div class="h"><span class="tag">' + esc(x.cat || '―') + '</span><b>' + esc(x.name) + '</b><span class="p-note">' + esc(x.stores && x.stores.length ? x.stores.join('・') : '全店舗') + '</span><button class="p-btn" data-edit="' + x.row + '" style="padding:2px 10px;">直す</button></div>' +
         (x.links.length ? '<div>' + x.links.map(function (l, i) { return '<a href="' + esc(l) + '" target="_blank" rel="noopener">リンク' + (i + 1) + '</a>'; }).join('') + '</div>' : '') + '</div>';
     }).join('') + (list.length ? '' : '<div class="p-card p-muted">見つかりません</div>');
   g('view').innerHTML = h;
   g('q').oninput = function () { Q = this.value; var pos = this.selectionStart; renderItems(); var q = g('q'); q.focus(); q.setSelectionRange(pos, pos); };
   g('newItem').onclick = function () { itemForm(null); };
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ist]'), function (b) { b.onclick = function () { IST = b.getAttribute('data-ist'); renderItems(); }; });
   Array.prototype.forEach.call(document.querySelectorAll('[data-edit]'), function (b) { b.onclick = function () { itemForm(D.items.filter(function (x) { return x.row === Number(b.getAttribute('data-edit')); })[0]); }; });
 }
 function itemForm(x) {
@@ -194,12 +215,14 @@ function itemForm(x) {
   g('itemForm').innerHTML = '<div class="p-card"><h3 style="margin-top:0;">' + (x ? '備品を直す' : '備品を足す') + '</h3><div class="grid2">' +
     '<div><label>項目</label><input id="i項目" list="catList" value="' + esc(x ? x.cat : '') + '"><datalist id="catList">' + cats.map(function (c) { return '<option value="' + esc(c) + '">'; }).join('') + '</datalist></div>' +
     '<div><label>品名</label><input id="i品名" value="' + esc(x ? x.name : '') + '"></div><div class="full"><label>キーワード(探すとき用)</label><input id="iキーワード" value="' + esc(x ? x.kw : '') + '"></div>' +
+    '<div class="full"><label>使う店舗(どれも選ばなければ全店舗)</label>' + D.master.stores.map(function (st) { var on = x ? (x.stores || []).indexOf(st) !== -1 : (IST === st); return '<label style="display:inline-block;margin-right:12px;color:inherit;font-size:15px;"><input type="checkbox" class="iSt" value="' + esc(st) + '"' + (on ? ' checked' : '') + '> ' + esc(st) + '</label>'; }).join('') + '</div>' +
     [0, 1, 2].map(function (i) { return '<div class="full"><label>リンク' + (i + 1) + '</label><input id="iL' + i + '" value="' + esc(x && x.links[i] ? x.links[i] : '') + '" placeholder="https://"></div>'; }).join('') +
     '</div><div id="iMsg"></div><div class="row" style="margin-top:8px;"><button class="p-btn p-solid" id="iSave">保存</button><button class="p-btn" id="iCancel">やめる</button>' + (x ? '<button class="p-btn" id="iDel" style="margin-left:auto;color:var(--p-err);">削除</button>' : '') + '</div></div>';
   g('itemForm').scrollIntoView({ behavior: 'smooth' });
   g('iCancel').onclick = function () { g('itemForm').innerHTML = ''; };
   g('iSave').onclick = function () {
-    call('sp.item.save', { row: x ? x.row : null, ver: x ? x.ver : '', values: { '項目': g('i項目').value, '品名': g('i品名').value, 'キーワード': g('iキーワード').value, links: [g('iL0').value, g('iL1').value, g('iL2').value] } })
+    call('sp.item.save', { row: x ? x.row : null, ver: x ? x.ver : '', values: { '項目': g('i項目').value, '品名': g('i品名').value, 'キーワード': g('iキーワード').value, links: [g('iL0').value, g('iL1').value, g('iL2').value],
+      stores: Array.prototype.filter.call(document.querySelectorAll('.iSt'), function (c) { return c.checked; }).map(function (c) { return c.value; }) } })
       .then(function (r) { if (!r.ok) { msg('iMsg', r.error); return; } load(); });
   };
   if (x) g('iDel').onclick = function () {

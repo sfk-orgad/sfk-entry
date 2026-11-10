@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>備品と予算</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  備品と予算(GitHub Pages の supply/index.html。2026-12)
+  全員(ツール supply)：欲しい備品を申告する・自分の申告の状態
+  社員(ツール supply_admin。認証基盤が isAdmin で教える)：予算の状況(月×店舗の予算・使った額・残り・カテゴリ別)、購入の記録、備品リストの更新、申告の対応
+  データは Bot(Supply.gs、app=supply)
+-->
+<style>
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.tabs button { padding: 8px 14px; border: 1px solid #B9C0C8; border-radius: 999px; background: #fff; cursor: pointer; font-family: inherit; font-size: 15px; }
+.tabs button.on { background: var(--p-c); color: #fff; border-color: var(--p-c); }
+.bud { background: #fff; border: 1px solid var(--p-line); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+.bud .hd { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+.bud .big { font-size: 22px; font-weight: 700; }
+.bar { height: 14px; border-radius: 7px; background: #EEF0F2; overflow: hidden; margin: 8px 0; }
+.bar i { display: block; height: 100%; }
+.cats { font-size: 13px; color: var(--p-muted); }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row input, .row select { font-size: 15px; padding: 7px; border: 1px solid #B9C0C8; border-radius: 8px; font-family: inherit; }
+table.t { border-collapse: collapse; width: 100%; font-size: 14px; background: #fff; }
+.t th, .t td { border-bottom: 1px solid #EEF0F2; padding: 6px; text-align: left; vertical-align: top; }
+.t td.n { text-align: right; white-space: nowrap; }
+.it { background: #fff; border: 1px solid var(--p-line); border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; }
+.it .h { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.it .h b { flex: 1; font-size: 15px; }
+.it a { font-size: 13px; margin-right: 10px; }
+.tag { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: #E8EEF0; }
+.st { font-size: 12px; padding: 1px 8px; border-radius: 999px; font-weight: 700; }
+.st.s0 { background: #FDECEA; color: #B42318; } .st.s1 { background: #FFF6E5; color: #8A5A00; } .st.s2 { background: #E3F4E8; color: #1F7A3D; } .st.s3 { background: #EEF0F2; color: #5F6670; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } .grid2 .full { grid-column: 1 / -1; }
+.grid2 label { font-size: 13px; color: var(--p-muted); display: block; } .grid2 input, .grid2 select, .grid2 textarea { width: 100%; box-sizing: border-box; font-size: 15px; padding: 7px; border: 1px solid #B9C0C8; border-radius: 8px; font-family: inherit; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap" style="max-width:1000px;">
+    <div class="tabs" id="tabs"></div>
+    <div id="view"></div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-12-09a';
+var P = Portal.start({ tool: 'supply', title: '備品と予算' });
+var g = Portal.$, esc = Portal.esc, D = null, VIEW = 'req', MONTH = '', MD = null, Q = '', FROMREQ = null;
+function call(a, x, o) { return P.call(a, x, Object.assign({ app: 'supply' }, o || {})); }
+function yen(n) { return n == null ? '―' : '¥' + Math.round(n).toLocaleString('ja-JP'); }
+function ymNow() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2); }
+function opts(list, cur, blank) { return (blank ? '<option value="">' + esc(blank) + '</option>' : '') + list.map(function (x) { return '<option' + (x === cur ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join(''); }
+function msg(id, t, ok) { var e = g(id); if (e) e.innerHTML = t ? '<div class="' + (ok ? '' : 'p-err') + '" style="margin-top:6px;' + (ok ? 'color:var(--p-ok);font-weight:700;' : '') + '">' + esc(t) + '</div>' : ''; }
+
+function load() {
+  return call('sp.init', {}, { retry: true }).then(function (r) {
+    if (!r.ok) { Portal.gate(r.error === 'AUTH' ? Portal.authMessage(r, '備品と予算') : '開けませんでした：' + r.error, { back: true }); return; }
+    D = r; if (!MONTH) MONTH = ymNow();
+    var tabs = [['req', '欲しいものを申告']];
+    if (D.isAdmin) tabs = [['budget', '予算の状況'], ['buy', '購入を記録'], ['items', '備品リスト'], ['reqs', '申告の対応(' + D.reqs.filter(function (x) { return x['状態'] === '未対応'; }).length + ')']].concat(tabs);
+    if (D.isAdmin && VIEW === 'req' && !load.done) VIEW = 'budget';
+    load.done = true;
+    g('tabs').innerHTML = tabs.map(function (t) { return '<button data-v="' + t[0] + '" class="' + (t[0] === VIEW ? 'on' : '') + '">' + esc(t[1]) + '</button>'; }).join('');
+    Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
+    render();
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n開き直してください。', { back: true, detail: e.message }); });
+}
+function render() {
+  Array.prototype.forEach.call(g('tabs').children, function (b) { b.classList.toggle('on', b.getAttribute('data-v') === VIEW); });
+  if (VIEW === 'req') renderReq(); else if (VIEW === 'budget') renderBudget(); else if (VIEW === 'buy') renderBuy(); else if (VIEW === 'items') renderItems(); else renderReqs();
+}
+g('tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; VIEW = b.getAttribute('data-v'); FROMREQ = null; render(); });
+
+// ===== 欲しいものを申告(全員) =====
+function renderReq() {
+  var h = '<div class="p-card"><h2 style="margin-top:0;">欲しい備品を申告する</h2><div class="p-note">備品リストから選ぶか、品名を書いてください。社員が見て、買うかどうかを決めます。</div>' +
+    '<div class="grid2" style="margin-top:8px;"><div class="full"><label>品名</label><input id="rItem" list="itemList" placeholder="例：フェイスタオル"><datalist id="itemList">' + D.items.map(function (x) { return '<option value="' + esc(x.name) + '">'; }).join('') + '</datalist></div>' +
+    '<div><label>店舗</label><select id="rStore">' + opts(D.master.stores, '', '(選ぶ)') + '</select></div><div><label>数量</label><input id="rQty" placeholder="例：10枚"></div>' +
+    '<div class="full"><label>理由(あれば)</label><textarea id="rWhy" rows="2" placeholder="例：破れてきて数が足りない"></textarea></div></div>' +
+    '<div id="rMsg"></div><button class="p-btn p-solid p-big" id="rSend" style="width:100%;margin-top:10px;">申告する</button></div>';
+  h += '<div class="p-card"><h2 style="margin-top:0;">自分の申告</h2>' + (D.myReqs.length ? D.myReqs.map(function (x) {
+    var si = D.states.indexOf(x['状態']);
+    return '<div class="it"><div class="h"><span class="st s' + si + '">' + esc(x['状態']) + '</span><b>' + esc(x['品名']) + (x['数量'] ? ' ×' + esc(x['数量']) : '') + '</b><span class="p-note">' + esc(x['日時']) + '</span>' +
+      (x['状態'] === '未対応' ? '<button class="p-btn" data-cancel="' + esc(x.ID) + '">取り下げ</button>' : '') + '</div>' + (x['メモ'] ? '<div class="p-note">' + esc(x['メモ']) + '</div>' : '') + '</div>';
+  }).join('') : '<div class="p-muted">まだありません</div>') + '</div>';
+  g('view').innerHTML = h;
+  g('rSend').onclick = function () {
+    var b = g('rSend'); b.disabled = true; msg('rMsg', '');
+    call('sp.req.add', { item: g('rItem').value, store: g('rStore').value, qty: g('rQty').value, reason: g('rWhy').value }).then(function (r) {
+      b.disabled = false;
+      if (!r.ok) { msg('rMsg', r.error); return; }
+      load().then(function () { msg('rMsg', '申告しました。状態は下の「自分の申告」で見られます。', true); });
+    }).catch(function () { b.disabled = false; msg('rMsg', '通信に失敗しました。もう一度押してください'); });
+  };
+}
+g('view').addEventListener('click', function (e) {
+  var c = e.target.closest('[data-cancel]');
+  if (c && confirm('この申告を取り下げます。よろしいですか？')) call('sp.req.cancel', { id: c.getAttribute('data-cancel') }).then(function (r) { if (!r.ok) alert(r.error); load(); });
+});
+
+// ===== 予算の状況 =====
+function monthBar() {
+  return '<div class="row" style="margin-bottom:10px;"><input type="month" id="mon" value="' + MONTH + '"><button class="p-btn" id="monGo">表示</button></div>';
+}
+function bindMonth(fn) { g('monGo').onclick = function () { MONTH = g('mon').value || ymNow(); MD = null; fn(); }; }
+function loadMonth(fn) {
+  if (MD && MD.month === MONTH) { fn(); return; }
+  call('sp.month', { month: MONTH }, { retry: true }).then(function (r) { if (!r.ok) { g('view').innerHTML = '<div class="p-card p-err">' + esc(r.error) + '</div>'; return; } MD = r; fn(); });
+}
+function renderBudget() {
+  g('view').innerHTML = '<div class="p-card p-muted">読み込んでいます…</div>';
+  loadMonth(function () {
+    var tb = 0, tu = 0;
+    var h = monthBar() + MD.stores.map(function (s) {
+      tu += s.used; if (s.budget != null) tb += s.budget;
+      var rate = s.budget ? s.used / s.budget : null, col = rate == null ? '#9AA3AD' : rate >= 1 ? '#B42318' : rate >= 0.8 ? '#C8743A' : '#1F7A3D';
+      var cats = Object.keys(s.cats).sort(function (a, b) { return s.cats[b] - s.cats[a]; }).map(function (k) { return esc(k) + ' ' + yen(s.cats[k]); }).join('・');
+      return '<div class="bud"><div class="hd"><b style="font-size:17px;">' + esc(s.store) + '</b><span>予算 <input data-bud="' + esc(s.store) + '" value="' + (s.budget == null ? '' : s.budget) + '" placeholder="未設定" style="width:110px;font-size:15px;padding:4px;border:1px solid #B9C0C8;border-radius:6px;"> 円 <button class="p-btn" data-budsave="' + esc(s.store) + '" style="padding:3px 10px;">保存</button></span></div>' +
+        '<div class="row" style="gap:18px;margin-top:6px;"><span>使った額 <span class="big">' + yen(s.used) + '</span></span>' + (s.budget != null ? '<span>残り <span class="big" style="color:' + col + ';">' + (s.budget - s.used < 0 ? yen(s.used - s.budget) + ' 超過' : yen(s.budget - s.used)) + '</span></span><span>' + Math.round(rate * 100) + '%</span>' : '<span class="p-muted">予算が未設定</span>') + '</div>' +
+        (s.budget ? '<div class="bar"><i style="width:' + Math.min(100, rate * 100) + '%;background:' + col + ';"></i></div>' : '') + (cats ? '<div class="cats">' + cats + '</div>' : '') + '</div>';
+    }).join('');
+    h += '<div class="p-note">全体：予算 ' + yen(tb) + '・使った額 ' + yen(tu) + '。80%を超えると橙、100%を超えると赤。</div>';
+    g('view').innerHTML = h;
+    bindMonth(renderBudget);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-budsave]'), function (b) {
+      b.onclick = function () {
+        var st = b.getAttribute('data-budsave'), v = document.querySelector('[data-bud="' + st + '"]').value;
+        b.disabled = true;
+        call('sp.budget.set', { month: MONTH, store: st, amount: v }).then(function (r) { b.disabled = false; if (!r.ok) { alert(r.error); return; } MD = null; renderBudget(); });
+      };
+    });
+  });
+}
+
+// ===== 購入を記録 =====
+function renderBuy() {
+  g('view').innerHTML = '<div class="p-card p-muted">読み込んでいます…</div>';
+  loadMonth(function () {
+    var today = new Date(), td = today.getFullYear() + '-' + ('0' + (today.getMonth() + 1)).slice(-2) + '-' + ('0' + today.getDate()).slice(-2);
+    var pre = FROMREQ || {};
+    var h = '<div class="p-card"><h2 style="margin-top:0;">購入を記録する</h2>' + (FROMREQ ? '<div class="p-note">申告「' + esc(pre['品名']) + '」から記録します。記録すると、申告は「購入済み」になります。</div>' : '') +
+      '<div class="grid2" style="margin-top:6px;"><div><label>購入日</label><input type="date" id="b購入日" value="' + td + '"></div><div><label>店舗</label><select id="b店舗">' + opts(D.master.stores, pre['店舗'] || '', '(選ぶ)') + '</select></div>' +
+      '<div class="full"><label>品目</label><input id="b品目" list="itemList2" value="' + esc(pre['品名'] || '') + '"><datalist id="itemList2">' + D.items.map(function (x) { return '<option value="' + esc(x.name) + '">'; }).join('') + '</datalist></div>' +
+      '<div><label>カテゴリ</label><select id="bカテゴリ">' + opts(D.master.categories, '', '(選ぶ)') + '</select></div><div><label>数量</label><input id="b数量" inputmode="numeric"></div>' +
+      '<div><label>金額(税込・合計)</label><input id="b金額(税込)" inputmode="numeric"></div><div><label>購入先</label><select id="b購入先">' + opts(D.master.vendors, '', '(選ぶ)') + '</select></div>' +
+      '<div><label>支払方法</label><select id="b支払方法">' + opts(D.master.pays, '', '(選ぶ)') + '</select></div><div><label>購入者</label><input id="b購入者" value="' + esc(D.me) + '"></div>' +
+      '<div><label>注文番号(Amazonなど)</label><input id="b注文番号"></div><div><label>備考</label><input id="b備考"></div></div>' +
+      '<div id="bMsg"></div><button class="p-btn p-solid p-big" id="bSave" style="width:100%;margin-top:10px;">記録する</button></div>';
+    h += '<div class="p-card"><h2 style="margin-top:0;">この月の購入</h2>' + monthBar() + (MD.list.length ? '<table class="t"><tr><th>日</th><th>店舗</th><th>品目</th><th>金額</th><th></th></tr>' + MD.list.map(function (x) {
+      return '<tr><td>' + esc(x['購入日'].slice(5)) + '</td><td>' + esc(x['店舗']) + '</td><td>' + esc(x['品目']) + '<div class="p-note">' + esc([x['カテゴリ'], x['購入先'], x['購入者']].filter(Boolean).join('・')) + '</div></td><td class="n">' + yen(Number(x['金額(税込)'])) + '</td><td><button class="p-btn" data-del="' + x.row + '" data-ver="' + esc(x.ver) + '" style="padding:2px 8px;">消す</button></td></tr>';
+    }).join('') + '</table>' : '<div class="p-muted">この月の購入はありません</div>') + '</div>';
+    g('view').innerHTML = h;
+    bindMonth(renderBuy);
+    g('bSave').onclick = function () {
+      var v = {}; ['購入日', '店舗', '品目', 'カテゴリ', '数量', '金額(税込)', '購入先', '支払方法', '購入者', '注文番号', '備考'].forEach(function (k) { v[k] = g('b' + k).value; });
+      var b = g('bSave'); b.disabled = true; msg('bMsg', '');
+      call('sp.buy.add', { values: v, reqId: FROMREQ ? FROMREQ.ID : '' }).then(function (r) {
+        b.disabled = false;
+        if (!r.ok) { msg('bMsg', r.error); return; }
+        FROMREQ = null; MD = null; MONTH = v['購入日'].slice(0, 7);
+        load().then(function () { VIEW = 'buy'; render(); setTimeout(function () { msg('bMsg', '記録しました', true); }, 500); });
+      }).catch(function () { b.disabled = false; msg('bMsg', '通信に失敗しました。記録できたか、下の一覧で確かめてください'); });
+    };
+    Array.prototype.forEach.call(document.querySelectorAll('[data-del]'), function (b) {
+      b.onclick = function () {
+        if (!confirm('この購入の記録を消します。よろしいですか？')) return;
+        call('sp.buy.delete', { row: b.getAttribute('data-del'), ver: b.getAttribute('data-ver') }).then(function (r) { if (!r.ok) { alert(r.error); return; } MD = null; renderBuy(); });
+      };
+    });
+  });
+}
+
+// ===== 備品リスト =====
+function renderItems(edit) {
+  var list = D.items.filter(function (x) { return !Q || (x.name + x.cat + (x.kw || '')).indexOf(Q) !== -1; });
+  var h = '<div class="row" style="margin-bottom:8px;"><input id="q" placeholder="品名・項目で探す" value="' + esc(Q) + '" style="flex:1;"><button class="p-btn p-solid" id="newItem">＋ 備品を足す</button></div><div id="itemForm"></div>' +
+    list.map(function (x) {
+      return '<div class="it"><div class="h"><span class="tag">' + esc(x.cat || '―') + '</span><b>' + esc(x.name) + '</b><button class="p-btn" data-edit="' + x.row + '" style="padding:2px 10px;">直す</button></div>' +
+        (x.links.length ? '<div>' + x.links.map(function (l, i) { return '<a href="' + esc(l) + '" target="_blank" rel="noopener">リンク' + (i + 1) + '</a>'; }).join('') + '</div>' : '') + '</div>';
+    }).join('') + (list.length ? '' : '<div class="p-card p-muted">見つかりません</div>');
+  g('view').innerHTML = h;
+  g('q').oninput = function () { Q = this.value; var pos = this.selectionStart; renderItems(); var q = g('q'); q.focus(); q.setSelectionRange(pos, pos); };
+  g('newItem').onclick = function () { itemForm(null); };
+  Array.prototype.forEach.call(document.querySelectorAll('[data-edit]'), function (b) { b.onclick = function () { itemForm(D.items.filter(function (x) { return x.row === Number(b.getAttribute('data-edit')); })[0]); }; });
+}
+function itemForm(x) {
+  var cats = []; D.items.forEach(function (i) { if (i.cat && cats.indexOf(i.cat) === -1) cats.push(i.cat); });
+  g('itemForm').innerHTML = '<div class="p-card"><h3 style="margin-top:0;">' + (x ? '備品を直す' : '備品を足す') + '</h3><div class="grid2">' +
+    '<div><label>項目</label><input id="i項目" list="catList" value="' + esc(x ? x.cat : '') + '"><datalist id="catList">' + cats.map(function (c) { return '<option value="' + esc(c) + '">'; }).join('') + '</datalist></div>' +
+    '<div><label>品名</label><input id="i品名" value="' + esc(x ? x.name : '') + '"></div><div class="full"><label>キーワード(探すとき用)</label><input id="iキーワード" value="' + esc(x ? x.kw : '') + '"></div>' +
+    [0, 1, 2].map(function (i) { return '<div class="full"><label>リンク' + (i + 1) + '</label><input id="iL' + i + '" value="' + esc(x && x.links[i] ? x.links[i] : '') + '" placeholder="https://"></div>'; }).join('') +
+    '</div><div id="iMsg"></div><div class="row" style="margin-top:8px;"><button class="p-btn p-solid" id="iSave">保存</button><button class="p-btn" id="iCancel">やめる</button>' + (x ? '<button class="p-btn" id="iDel" style="margin-left:auto;color:var(--p-err);">削除</button>' : '') + '</div></div>';
+  g('itemForm').scrollIntoView({ behavior: 'smooth' });
+  g('iCancel').onclick = function () { g('itemForm').innerHTML = ''; };
+  g('iSave').onclick = function () {
+    call('sp.item.save', { row: x ? x.row : null, ver: x ? x.ver : '', values: { '項目': g('i項目').value, '品名': g('i品名').value, 'キーワード': g('iキーワード').value, links: [g('iL0').value, g('iL1').value, g('iL2').value] } })
+      .then(function (r) { if (!r.ok) { msg('iMsg', r.error); return; } load(); });
+  };
+  if (x) g('iDel').onclick = function () {
+    if (!confirm('「' + x.name + '」を備品リストから消します。よろしいですか？')) return;
+    call('sp.item.delete', { row: x.row, ver: x.ver }).then(function (r) { if (!r.ok) { msg('iMsg', r.error); return; } load(); });
+  };
+}
+
+// ===== 申告の対応 =====
+function renderReqs() {
+  g('view').innerHTML = D.reqs.length ? D.reqs.map(function (x) {
+    var si = D.states.indexOf(x['状態']);
+    return '<div class="it" data-id="' + esc(x.ID) + '"><div class="h"><span class="st s' + si + '">' + esc(x['状態']) + '</span><b>' + esc(x['品名']) + (x['数量'] ? ' ×' + esc(x['数量']) : '') + '</b><span class="tag">' + esc(x['店舗']) + '</span></div>' +
+      '<div class="p-note">' + esc(x['日時']) + '・' + esc(x['申告した人']) + (x['理由'] ? '・理由：' + esc(x['理由']) : '') + (x['対応した人'] ? '・対応 ' + esc(x['対応した人']) : '') + '</div>' +
+      '<div class="row" style="margin-top:6px;"><select data-k="state">' + opts(D.states, x['状態']) + '</select><input data-k="memo" placeholder="メモ(申告した人にも見える)" value="' + esc(x['メモ']) + '" style="flex:1;min-width:160px;">' +
+      '<button class="p-btn" data-rsave>保存</button><button class="p-btn p-solid" data-buy>買ったので記録する</button></div></div>';
+  }).join('') : '<div class="p-card p-muted">申告はまだありません</div>';
+  Array.prototype.forEach.call(document.querySelectorAll('[data-rsave]'), function (b) {
+    b.onclick = function () {
+      var box = b.closest('.it'), x = D.reqs.filter(function (r) { return r.ID === box.getAttribute('data-id'); })[0];
+      b.disabled = true;
+      call('sp.req.update', { id: x.ID, ver: x.ver, state: box.querySelector('[data-k="state"]').value, memo: box.querySelector('[data-k="memo"]').value }).then(function (r) { b.disabled = false; if (!r.ok) { alert(r.error); return; } load(); });
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-buy]'), function (b) {
+    b.onclick = function () { FROMREQ = D.reqs.filter(function (r) { return r.ID === b.closest('.it').getAttribute('data-id'); })[0]; VIEW = 'buy'; render(); };
+  });
+}
+if (P) load();
+</script>
+</body>
+</html>

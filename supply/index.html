@@ -49,7 +49,7 @@ table.t { border-collapse: collapse; width: 100%; font-size: 14px; background: #
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-12-10a';
+var PAGE_VERSION = '2026-12-11a';
 var P = Portal.start({ tool: 'supply', title: '備品と予算' });
 var g = Portal.$, esc = Portal.esc, D = null, VIEW = 'req', MONTH = '', MD = null, Q = '', FROMREQ = null, IST = '';
 var OTHER = '__other__';
@@ -142,9 +142,11 @@ function renderBudget() {
       var cats = Object.keys(s.cats).sort(function (a, b) { return s.cats[b] - s.cats[a]; }).map(function (k) { return esc(k) + ' ' + yen(s.cats[k]); }).join('・');
       return '<div class="bud"><div class="hd"><b style="font-size:17px;">' + esc(s.store) + '</b><span>予算 <input data-bud="' + esc(s.store) + '" value="' + (s.budget == null ? '' : s.budget) + '" placeholder="未設定" style="width:110px;font-size:15px;padding:4px;border:1px solid #B9C0C8;border-radius:6px;"> 円 <button class="p-btn" data-budsave="' + esc(s.store) + '" style="padding:3px 10px;">保存</button></span></div>' +
         '<div class="row" style="gap:18px;margin-top:6px;"><span>使った額 <span class="big">' + yen(s.used) + '</span></span>' + (s.budget != null ? '<span>残り <span class="big" style="color:' + col + ';">' + (s.budget - s.used < 0 ? yen(s.used - s.budget) + ' 超過' : yen(s.budget - s.used)) + '</span></span><span>' + Math.round(rate * 100) + '%</span>' : '<span class="p-muted">予算が未設定</span>') + '</div>' +
-        (s.budget ? '<div class="bar"><i style="width:' + Math.min(100, rate * 100) + '%;background:' + col + ';"></i></div>' : '') + (cats ? '<div class="cats">' + cats + '</div>' : '') + '</div>';
+        (s.budget ? '<div class="bar"><i style="width:' + Math.min(100, rate * 100) + '%;background:' + col + ';"></i></div>' : '') + (cats ? '<div class="cats">' + cats + '</div>' : '') +
+        (s.stock ? '<div class="cats" style="margin-top:4px;">仕入れ(予算の対象外)：' + yen(s.stock) + '</div>' : '') + '</div>';
     }).join('');
-    h += '<div class="p-note">全体：予算 ' + yen(tb) + '・使った額 ' + yen(tu) + '。80%を超えると橙、100%を超えると赤。</div>';
+    var ts = MD.stores.reduce(function (a, s) { return a + (s.stock || 0); }, 0);
+    h += '<div class="p-note">全体：予算 ' + yen(tb) + '・使った額 ' + yen(tu) + (ts ? '・仕入れ(予算の対象外) ' + yen(ts) : '') + '。80%を超えると橙、100%を超えると赤。仕入れ(備品リストで「予算の対象外」にした品名など)は、使った額に入れません。</div>';
     g('view').innerHTML = h;
     bindMonth(renderBudget);
     Array.prototype.forEach.call(document.querySelectorAll('[data-budsave]'), function (b) {
@@ -169,15 +171,20 @@ function renderBuy() {
       '<div><label>カテゴリ</label><select id="bカテゴリ">' + opts(D.master.categories, '', '(選ぶ)') + '</select></div><div><label>数量</label><input id="b数量" inputmode="numeric"></div>' +
       '<div><label>金額(税込・合計)</label><input id="b金額(税込)" inputmode="numeric"></div><div><label>購入先</label><select id="b購入先">' + opts(D.master.vendors, '', '(選ぶ)') + '</select></div>' +
       '<div><label>支払方法</label><select id="b支払方法">' + opts(D.master.pays, '', '(選ぶ)') + '</select></div><div><label>購入者</label><input id="b購入者" value="' + esc(D.me) + '"></div>' +
-      '<div><label>注文番号(Amazonなど)</label><input id="b注文番号"></div><div><label>備考</label><input id="b備考"></div></div>' +
+      '<div><label>注文番号(Amazonなど)</label><input id="b注文番号"></div><div><label>備考</label><input id="b備考"></div>' +
+      '<div class="full"><label style="color:inherit;font-size:15px;"><input type="checkbox" id="bEx"> 仕入れ(予算に入れない)<span class="p-note">　備品リストで「予算の対象外」の品名は自動でチェック</span></label></div></div>' +
       '<div id="bMsg"></div><button class="p-btn p-solid p-big" id="bSave" style="width:100%;margin-top:10px;">記録する</button></div>';
     h += '<div class="p-card"><h2 style="margin-top:0;">この月の購入</h2>' + monthBar() + (MD.list.length ? '<table class="t"><tr><th>日</th><th>店舗</th><th>品目</th><th>金額</th><th></th></tr>' + MD.list.map(function (x) {
-      return '<tr><td>' + esc(x['購入日'].slice(5)) + '</td><td>' + esc(x['店舗']) + '</td><td>' + esc(x['品目']) + '<div class="p-note">' + esc([x['カテゴリ'], x['購入先'], x['購入者']].filter(Boolean).join('・')) + '</div></td><td class="n">' + yen(Number(x['金額(税込)'])) + '</td><td><button class="p-btn" data-del="' + x.row + '" data-ver="' + esc(x.ver) + '" style="padding:2px 8px;">消す</button></td></tr>';
+      return '<tr><td>' + esc(x['購入日'].slice(5)) + '</td><td>' + esc(x['店舗']) + '</td><td>' + esc(x['品目']) + (x.ex ? ' <span class="tag">仕入れ</span>' : '') + '<div class="p-note">' + esc([x['カテゴリ'], x['購入先'], x['購入者']].filter(Boolean).join('・')) + '</div></td><td class="n">' + yen(Number(x['金額(税込)'])) + '</td><td><button class="p-btn" data-del="' + x.row + '" data-ver="' + esc(x.ver) + '" style="padding:2px 8px;">消す</button></td></tr>';
     }).join('') + '</table>' : '<div class="p-muted">この月の購入はありません</div>') + '</div>';
     g('view').innerHTML = h;
     bindMonth(renderBuy);
+    var exOf = function (n) { return D.items.some(function (x) { return x.name === String(n || '').trim() && x.ex; }); };
+    g('bEx').checked = exOf(g('b品目').value);
+    g('b品目').addEventListener('input', function () { g('bEx').checked = exOf(g('b品目').value); });
     g('bSave').onclick = function () {
       var v = {}; ['購入日', '店舗', '品目', 'カテゴリ', '数量', '金額(税込)', '購入先', '支払方法', '購入者', '注文番号', '備考'].forEach(function (k) { v[k] = g('b' + k).value; });
+      v.ex = g('bEx').checked;
       var b = g('bSave'); b.disabled = true; msg('bMsg', '');
       call('sp.buy.add', { values: v, reqId: FROMREQ ? FROMREQ.ID : '' }).then(function (r) {
         b.disabled = false;
@@ -201,7 +208,7 @@ function renderItems(edit) {
   var h = '<div class="tabs" id="ist">' + [''].concat(D.master.stores).map(function (st) { return '<button data-ist="' + esc(st) + '" class="' + (st === IST ? 'on' : '') + '">' + esc(st || 'すべて') + '</button>'; }).join('') + '</div>' +
     '<div class="row" style="margin-bottom:8px;"><input id="q" placeholder="品名・項目で探す" value="' + esc(Q) + '" style="flex:1;"><button class="p-btn p-solid" id="newItem">＋ 備品を足す</button></div><div id="itemForm"></div>' +
     list.map(function (x) {
-      return '<div class="it"><div class="h"><span class="tag">' + esc(x.cat || '―') + '</span><b>' + esc(x.name) + '</b><span class="p-note">' + esc(x.stores && x.stores.length ? x.stores.join('・') : '全店舗') + '</span><button class="p-btn" data-edit="' + x.row + '" style="padding:2px 10px;">直す</button></div>' +
+      return '<div class="it"><div class="h"><span class="tag">' + esc(x.cat || '―') + '</span><b>' + esc(x.name) + '</b><span class="p-note">' + esc(x.stores && x.stores.length ? x.stores.join('・') : '全店舗') + '</span>' + (x.ex ? '<span class="tag">仕入れ</span>' : '') + '<button class="p-btn" data-edit="' + x.row + '" style="padding:2px 10px;">直す</button></div>' +
         (x.links.length ? '<div>' + x.links.map(function (l, i) { return '<a href="' + esc(l) + '" target="_blank" rel="noopener">リンク' + (i + 1) + '</a>'; }).join('') + '</div>' : '') + '</div>';
     }).join('') + (list.length ? '' : '<div class="p-card p-muted">見つかりません</div>');
   g('view').innerHTML = h;
@@ -215,6 +222,7 @@ function itemForm(x) {
   g('itemForm').innerHTML = '<div class="p-card"><h3 style="margin-top:0;">' + (x ? '備品を直す' : '備品を足す') + '</h3><div class="grid2">' +
     '<div><label>項目</label><input id="i項目" list="catList" value="' + esc(x ? x.cat : '') + '"><datalist id="catList">' + cats.map(function (c) { return '<option value="' + esc(c) + '">'; }).join('') + '</datalist></div>' +
     '<div><label>品名</label><input id="i品名" value="' + esc(x ? x.name : '') + '"></div><div class="full"><label>キーワード(探すとき用)</label><input id="iキーワード" value="' + esc(x ? x.kw : '') + '"></div>' +
+    '<div class="full"><label style="color:inherit;font-size:15px;"><input type="checkbox" id="iEx"' + (x && x.ex ? ' checked' : '') + '> 仕入れ(予算の対象外。ドリンクなど)</label></div>' +
     '<div class="full"><label>使う店舗(どれも選ばなければ全店舗)</label>' + D.master.stores.map(function (st) { var on = x ? (x.stores || []).indexOf(st) !== -1 : (IST === st); return '<label style="display:inline-block;margin-right:12px;color:inherit;font-size:15px;"><input type="checkbox" class="iSt" value="' + esc(st) + '"' + (on ? ' checked' : '') + '> ' + esc(st) + '</label>'; }).join('') + '</div>' +
     [0, 1, 2].map(function (i) { return '<div class="full"><label>リンク' + (i + 1) + '</label><input id="iL' + i + '" value="' + esc(x && x.links[i] ? x.links[i] : '') + '" placeholder="https://"></div>'; }).join('') +
     '</div><div id="iMsg"></div><div class="row" style="margin-top:8px;"><button class="p-btn p-solid" id="iSave">保存</button><button class="p-btn" id="iCancel">やめる</button>' + (x ? '<button class="p-btn" id="iDel" style="margin-left:auto;color:var(--p-err);">削除</button>' : '') + '</div></div>';
@@ -222,7 +230,7 @@ function itemForm(x) {
   g('iCancel').onclick = function () { g('itemForm').innerHTML = ''; };
   g('iSave').onclick = function () {
     call('sp.item.save', { row: x ? x.row : null, ver: x ? x.ver : '', values: { '項目': g('i項目').value, '品名': g('i品名').value, 'キーワード': g('iキーワード').value, links: [g('iL0').value, g('iL1').value, g('iL2').value],
-      stores: Array.prototype.filter.call(document.querySelectorAll('.iSt'), function (c) { return c.checked; }).map(function (c) { return c.value; }) } })
+      stores: Array.prototype.filter.call(document.querySelectorAll('.iSt'), function (c) { return c.checked; }).map(function (c) { return c.value; }), ex: g('iEx').checked } })
       .then(function (r) { if (!r.ok) { msg('iMsg', r.error); return; } load(); });
   };
   if (x) g('iDel').onclick = function () {

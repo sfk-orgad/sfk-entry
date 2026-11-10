@@ -10,11 +10,12 @@
   打刻の端末(GitHub Pages の clock/index.html。2026-11)。店舗のタブレットで開いたままにして使う。LINE WORKS のログインは使わない
   ・最初に1回：店舗を選び、端末用の暗証番号(管理者がポータルの勤怠の画面で決める)を入れて登録 → この端末のブラウザに鍵が入る
   ・打刻：名前を押して「出勤」「退勤」。休憩は決まりで自動で引く。打ち間違いは管理者が直す
+  ・応援(2026-12)：ほかの店舗から手伝いに来た人は、下の「ほかの店舗から来た人(応援)」から名前を探して打刻する
   ・鍵は、ブラウザのデータを消す・別のブラウザで開くと無くなる(もう一度登録する)。管理者は端末一覧で使えなくできる
   ⚠ 下の BOT_API に Bot の Webアプリの URL(…/exec)を書く(差し替えのたびに書き戻す)
 -->
 <style>
-  :root { --c: #16323A; --in: #1F7A3D; --out: #B4531F; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; }
+  :root { --c: #16323A; --in: #1F7A3D; --out: #B4531F; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --help: #6B4FA0; }
   * { box-sizing: border-box; }
   body { margin: 0; background: #F2F4F5; color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; }
   header { background: var(--c); color: #fff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }
@@ -27,7 +28,11 @@
   .p .b { display: inline-block; margin-top: 8px; font-size: 13px; padding: 2px 10px; border-radius: 999px; background: #EEF0F2; }
   .p.on { border-color: var(--in); } .p.on .b { background: #E3F4E8; color: var(--in); font-weight: 700; }
   .p.off .b { background: #FBEDE4; color: var(--out); }
+  .p .hp { display: inline-block; margin: 8px 0 0 4px; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #EFEAF7; color: var(--help); font-weight: 700; }
   .sec { font-size: 14px; color: var(--muted); margin: 18px 4px 8px; }
+  .helpbtn { width: 100%; margin-top: 22px; font-size: 18px; padding: 14px; border: 2px dashed #B9A9DA; border-radius: 14px; background: #FAF8FD; color: var(--help); font-weight: 700; cursor: pointer; font-family: inherit; }
+  #helpBox { display: none; margin-top: 10px; }
+  #helpBox input { width: 100%; font-size: 20px; padding: 12px; border: 1px solid #B9C0C8; border-radius: 10px; font-family: inherit; margin-bottom: 10px; }
   .box { background: #fff; border-radius: 16px; padding: 22px; max-width: 480px; margin: 30px auto; }
   .box h2 { margin: 0 0 8px; } .box label { display: block; font-weight: 700; margin: 14px 0 4px; }
   .box input, .box select { width: 100%; font-size: 20px; padding: 12px; border: 1px solid #B9C0C8; border-radius: 10px; font-family: inherit; }
@@ -51,9 +56,9 @@
 <div id="done"><div class="in"><div class="k" id="doneK"></div><div class="t" id="doneT"></div></div></div>
 <script>
 var BOT_API = 'https://script.google.com/macros/s/AKfycbwhwNoFjOKK2MGr9qDDDZEolVc8IQrUS3Kcec1IIyf-t73_MGQFTYHdKaXi7R83Z6z2Iw/exec';
-var PAGE_VERSION = '2026-11-22a';
+var PAGE_VERSION = '2026-12-12a';
 var KEY_NAME = 'att_key';
-var W = '日月火水木金土', B = null, CUR = null, BUSY = false;
+var W = '日月火水木金土', B = null, CUR = null, BUSY = false, HELP_OPEN = false, HELP_Q = '';
 function $(id) { return document.getElementById(id); }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function key() { try { return localStorage.getItem(KEY_NAME) || ''; } catch (e) { return ''; } }
@@ -90,23 +95,39 @@ function load() {
   if (!key()) { showRegister(); return; }
   return call('att.board', { key: key() }).then(function (r) {
     if (!r.ok) { if (r.error === 'TERMINAL') { try { localStorage.removeItem(KEY_NAME); } catch (e) {} showRegister(r.message); } else $('main').innerHTML = '<div class="box err">' + esc(r.error) + '</div>'; return; }
-    B = r; render();
+    B = r; B.helpers = B.helpers || []; render();
   }).catch(function () { if (!B) $('main').innerHTML = '<div class="box err">通信に失敗しました。電波を確かめて、画面を読み込み直してください。</div>'; });
+}
+function card(x) {
+  return '<button class="p ' + (x.state === '出勤中' ? 'on' : x.state === '退勤済' ? 'off' : '') + '" data-u="' + esc(x.uid) + '"><div class="n">' + esc(x.name) + '</div>' +
+    '<div class="s">' + (x.shift ? '今日のシフト ' + esc(x.shift) : (x.from ? '所属：' + esc(x.from) : '　')) + '</div><span class="b">' + esc(x.state || '未出勤') + (x.last ? '(' + esc(x.last) + ')' : '') + '</span>' +
+    (x.help ? '<span class="hp">応援</span>' : '') + '</button>';
 }
 function render() {
   $('st').textContent = B.store.name; $('term').textContent = B.terminal + '・打刻';
   var withShift = B.staff.filter(function (x) { return x.shift || x.state !== '未出勤'; }), others = B.staff.filter(function (x) { return !(x.shift || x.state !== '未出勤'); });
-  var card = function (x) {
-    return '<button class="p ' + (x.state === '出勤中' ? 'on' : x.state === '退勤済' ? 'off' : '') + '" data-u="' + esc(x.uid) + '"><div class="n">' + esc(x.name) + '</div>' +
-      '<div class="s">' + (x.shift ? '今日のシフト ' + esc(x.shift) : '　') + '</div><span class="b">' + esc(x.state) + (x.last ? '(' + esc(x.last) + ')' : '') + '</span></button>';
-  };
   $('main').innerHTML = '<div class="sec">今日のシフト・出勤中の人</div><div class="grid">' + (withShift.map(card).join('') || '<div style="color:var(--muted);">いません</div>') + '</div>' +
-    '<div class="sec">ほかのスタッフ</div><div class="grid">' + others.map(card).join('') + '</div><div class="foot">ver ' + PAGE_VERSION + '</div>';
+    '<div class="sec">ほかのスタッフ</div><div class="grid">' + others.map(card).join('') + '</div>' +
+    (B.helpers.length ? '<button class="helpbtn" id="helpBtn">' + (HELP_OPEN ? '▲ 閉じる' : '＋ ほかの店舗から来た人(応援)') + '</button>' +
+      '<div id="helpBox"' + (HELP_OPEN ? ' style="display:block;"' : '') + '><input id="helpQ" placeholder="名前で探す" value="' + esc(HELP_Q) + '"><div class="grid" id="helpGrid"></div></div>' : '') +
+    '<div class="foot">ver ' + PAGE_VERSION + '</div>';
+  if (B.helpers.length) {
+    renderHelp();
+    $('helpBtn').onclick = function () { HELP_OPEN = !HELP_OPEN; render(); if (HELP_OPEN) $('helpQ').focus(); };
+    $('helpQ').oninput = function () { HELP_Q = this.value; renderHelp(); };
+  }
+}
+function renderHelp() {
+  var q = String(HELP_Q || '').replace(/\s/g, '');
+  var list = B.helpers.filter(function (x) { return !q || String(x.name).replace(/\s/g, '').indexOf(q) !== -1; });
+  $('helpGrid').innerHTML = list.length ? list.map(function (x) { return card({ uid: x.uid, name: x.name, from: x.from, state: '未出勤', help: true }); }).join('') : '<div style="color:var(--muted);">見つかりません</div>';
 }
 $('main').addEventListener('click', function (e) {
   var b = e.target.closest('.p[data-u]'); if (!b || !B) return;
-  CUR = B.staff.filter(function (x) { return x.uid === b.getAttribute('data-u'); })[0];
-  $('askName').textContent = CUR.name + ' さん'; $('askState').textContent = CUR.state + (CUR.last ? '(' + CUR.last + ')' : ''); $('askErr').textContent = '';
+  var u = b.getAttribute('data-u');
+  CUR = B.staff.filter(function (x) { return x.uid === u; })[0] || B.helpers.filter(function (x) { return x.uid === u; }).map(function (x) { return { uid: x.uid, name: x.name, state: '未出勤', last: '', help: true, from: x.from }; })[0];
+  if (!CUR) return;
+  $('askName').textContent = CUR.name + ' さん'; $('askState').textContent = (CUR.help ? '応援(所属：' + (CUR.from || '') + ')・' : '') + CUR.state + (CUR.last ? '(' + CUR.last + ')' : ''); $('askErr').textContent = '';
   $('ask').style.display = 'flex';
 });
 $('askCancel').onclick = function () { $('ask').style.display = 'none'; };
@@ -120,15 +141,16 @@ function punch(kind) {
     if (!r.ok) { $('askErr').textContent = r.error === 'TERMINAL' ? r.message : r.error; return; }
     $('ask').style.display = 'none';
     $('doneK').textContent = r.kind; $('doneK').style.color = r.kind === '出勤' ? 'var(--in)' : 'var(--out)';
-    $('doneT').textContent = r.name + ' さん　' + r.time;
+    $('doneT').textContent = r.name + ' さん　' + r.time + (r.help ? '(応援)' : '');
     $('done').style.display = 'flex';
     setTimeout(function () { $('done').style.display = 'none'; }, 2500);
+    HELP_OPEN = false; HELP_Q = '';
     load();
   }).catch(function () { BUSY = false; $('askErr').textContent = '通信に失敗しました。もう一度押してください(二重にはなりません)'; });
 }
 $('doIn').onclick = function () { punch('出勤'); };
 $('doOut').onclick = function () { punch('退勤'); };
-setInterval(function () { if ($('ask').style.display !== 'flex') load(); }, 60000); // 1分ごとに状態を読み直す
+setInterval(function () { if ($('ask').style.display !== 'flex' && !HELP_OPEN) load(); }, 60000); // 1分ごとに状態を読み直す(応援の一覧を開いている間は止める)
 load();
 </script>
 </body>

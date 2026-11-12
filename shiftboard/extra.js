@@ -250,3 +250,116 @@
 
   if (B) loadSx(true);
 })();
+
+// =====================================================================
+// 店舗ごとの表示と、店舗をまたぐ確定の注意(2026-12-14)
+//   ・「この日の調整」は、この店舗を希望した人・この店舗に確定がある人・足した人だけを出す(ほかの店舗だけを希望した人は出さない)
+//   ・ほかの店舗を希望した人で「他店でもOK」の人は、下の「別店舗からの候補」に分けて出し、「この店舗の候補に入れる」で足せる
+//   ・同じ日に2つの店舗に確定がある人：調整の欄と表に「⚠ 2店舗」、移動が30分未満なら「移動の時間が短い」。月の一覧とチェック・公開前の確認にも出る
+// =====================================================================
+(function () {
+  if (typeof peopleOfDay !== 'function') return;
+  var MOVE_MIN = 30; // 店舗をまたぐときに空けたい時間(分)
+  function exOf(uid, d) { return ((B && B.extra) || {})[uid] ? (B.extra[uid][d] || null) : null; }
+  function otherOkRanges(uid, d) { var x = exOf(uid, d); return x ? (x.other || []).map(function (o) { var a = String(o).split('@'), t = a[0].split('-'); return { s: t[0], e: t[1], store: a[1] || '' }; }) : []; }
+
+  // この店舗の人だけ
+  peopleOfDay = function () {
+    var u = [];
+    reqOf(DAY, STORE).forEach(function (r) { if (u.indexOf(r[4]) === -1) u.push(r[4]); });
+    confOf(STORE, DAY).forEach(function (c) { if (u.indexOf(c[0]) === -1) u.push(c[0]); });
+    (ADDED[key(STORE, DAY)] || []).forEach(function (x) { if (u.indexOf(x) === -1) u.push(x); });
+    if (g('showAll').checked) Object.keys(B.staff).forEach(function (x) {
+      var p = B.staff[x]; if (u.indexOf(x) === -1 && (p.stores.indexOf('*') !== -1 || p.stores.indexOf(STORE) !== -1)) u.push(x);
+    });
+    return u;
+  };
+
+  // 同じ日に、店舗をまたいで確定がある人 { uid: [{store, s, e}] }(2店舗以上)と、移動の時間が短い組
+  function crossOf(d) {
+    var by = {};
+    B.stores.forEach(function (st) { confOf(st.code, d).forEach(function (c) { (by[c[0]] = by[c[0]] || []).push({ store: st.code, s: c[1], e: c[2] }); }); });
+    var out = {};
+    Object.keys(by).forEach(function (u) {
+      var list = by[u].sort(function (a, b) { return mins(a.s) - mins(b.s); });
+      var stores = list.map(function (x) { return x.store; }).filter(function (x, i, a) { return a.indexOf(x) === i; });
+      if (stores.length < 2) return;
+      var tight = false;
+      for (var i = 1; i < list.length; i++) if (list[i].store !== list[i - 1].store && mins(list[i].s) - mins(list[i - 1].e) < MOVE_MIN) tight = true;
+      out[u] = { list: list, tight: tight };
+    });
+    return out;
+  }
+  function sname(code) { var st = storeOf(code); return st ? st.name : code; }
+  function crossText(x) { return x.list.map(function (s) { return sname(s.store) + ' ' + s.s + '-' + s.e; }).join(' → '); }
+
+  // 調整の欄：注意の印＋別店舗からの候補
+  var origPanel = renderPanel;
+  renderPanel = function () {
+    origPanel.apply(this, arguments);
+    var cross = crossOf(DAY);
+    Array.prototype.forEach.call(document.querySelectorAll('#panelBody tr[data-u]'), function (tr) {
+      var x = cross[tr.getAttribute('data-u')], nm = tr.querySelector('td.nm');
+      if (x && nm) nm.insertAdjacentHTML('beforeend', '<div style="font-size:11px;font-weight:700;color:' + (x.tight ? '#B42318' : '#8A5A00') + ';">⚠ 2店舗' + (x.tight ? '・移動の時間が短い' : '') + '</div>');
+    });
+    var shown = {}; peopleOfDay().forEach(function (u) { shown[u] = 1; });
+    var cand = Object.keys((B && B.extra) || {}).filter(function (u) {
+      return !shown[u] && otherOkRanges(u, DAY).some(function (r) { return r.store !== STORE; });
+    }).sort(byStaff);
+    if (!cand.length) return;
+    var h = '<div style="padding:10px 14px;border-top:2px solid var(--soft);"><div style="font-weight:700;">別店舗からの候補(この日「他店でもOK」の人)</div><div class="muted">ほかの店舗を希望していて、他店でもOKにしている人です。足すと、この店舗の表に入り、ドラッグで時間を決められます。</div>' +
+      cand.map(function (u) {
+        var p = B.staff[u] || { name: u };
+        return '<div class="ln" style="margin-top:6px;"><b style="min-width:7em;">' + esc(p.name) + '</b><span class="muted">' + esc(otherOkRanges(u, DAY).map(function (r) { return sname(r.store) + ' ' + r.s + '-' + r.e; }).join(' / ')) + '</span>' +
+          (B.readonly ? '' : '<button class="mini2" data-cand="' + esc(u) + '">この店舗の候補に入れる</button>') + '</div>';
+      }).join('') + '</div>';
+    g('panelBody').insertAdjacentHTML('beforeend', h);
+  };
+  g('panelBody').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-cand]'); if (!b) return;
+    var u = b.getAttribute('data-cand'), k = key(STORE, DAY);
+    (ADDED[k] = ADDED[k] || []).push(u);
+    OUTOK[u + '|' + k] = true;
+    renderDay();
+    g('msg').textContent = (B.staff[u] || { name: u }).name + 'さんを、この店舗の候補に入れました。表の行をドラッグして時間を決めてください';
+  });
+
+  // タイムラインの名前の下にも
+  var origDay3 = renderDay;
+  renderDay = function () {
+    origDay3.apply(this, arguments);
+    try {
+      var cross = crossOf(DAY);
+      Array.prototype.forEach.call(document.querySelectorAll('#grid tr.staff[data-u]'), function (tr) {
+        var x = cross[tr.getAttribute('data-u')], c0 = tr.querySelector('td.c0');
+        if (x && c0 && !c0.querySelector('.xstag')) c0.insertAdjacentHTML('beforeend', '<div class="xstag" style="font-size:11px;font-weight:700;color:' + (x.tight ? '#B42318' : '#8A5A00') + ';">⚠ 2店舗' + (x.tight ? '・移動短い' : '') + '</div>');
+      });
+    } catch (e) {}
+  };
+
+  // 確定を変えたとき：店舗をまたぐ確定が新しくできたら、上に知らせる
+  var origChanged = changedKeys;
+  changedKeys = function (stores) {
+    var before = crossOf(DAY);
+    origChanged.apply(this, arguments);
+    var after = crossOf(DAY), news = Object.keys(after).filter(function (u) { return !before[u] || (after[u].tight && !before[u].tight); });
+    if (news.length) g('msg').innerHTML = '<span style="color:#B42318;font-weight:700;">⚠ 店舗をまたぐ確定：' + news.map(function (u) { return esc(nameOfU(u)) + '(' + esc(crossText(after[u])) + (after[u].tight ? '・移動が' + MOVE_MIN + '分未満' : '') + ')'; }).join('、') + '</span>';
+  };
+
+  // 月の一覧とチェック・公開前の確認：店舗をまたぐ日を注意に足す(この店舗に確定がある人)
+  var origChecks = checks;
+  checks = function () {
+    var out = origChecks.apply(this, arguments);
+    if (!B) return out;
+    B.days.forEach(function (x) {
+      var cross = crossOf(x.d);
+      Object.keys(cross).forEach(function (u) {
+        if (!cross[u].list.some(function (s) { return s.store === STORE; })) return;
+        out.push(nameOfU(u) + '：' + x.d + '日に2店舗(' + crossText(cross[u]) + ')' + (cross[u].tight ? '。移動の時間が' + MOVE_MIN + '分未満' : ''));
+      });
+    });
+    return out;
+  };
+
+  if (B) { renderDay(); renderChecks(); }
+})();

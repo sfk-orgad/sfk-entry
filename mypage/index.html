@@ -11,6 +11,7 @@
   マイページ(GitHub Pages の mypage/index.html。2026-11-20)
   自分の情報(氏名・StaffID・雇用区分・所属・グレード・上長・呼び名)を見る。呼び名だけ本人が直せる
   特徴キーワード・メモ・権限などは出さない。データは認証基盤(ツール一覧の mypage の行の API＝認証基盤のURL)
+  2026-12-13：社員だけ「有給と稼働」(有給の残り・次の付与・年5日・今月の稼働と残業(予定・実績))。データは Bot(ShiftExtra.gs、app=sx)
 -->
 <style>
 .me-row { display: flex; padding: 9px 0; border-top: 1px solid #EEF0F2; font-size: 16px; }
@@ -20,12 +21,18 @@
 .links a:first-child { border-top: none; }
 .tdg { font-weight: 700; margin: 14px 0 4px; font-size: 15px; }
 .tdr { font-size: 14px; padding: 6px 0; border-top: 1px solid #EEF0F2; }
+.lv-big { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; margin: 8px 0; }
+.lv-big div { background: #F4F6F5; border-radius: 10px; padding: 8px 4px; }
+.lv-big b { display: block; font-size: 24px; } .lv-big span { font-size: 12px; color: var(--p-muted); }
+.lv-t { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 6px; }
+.lv-t th, .lv-t td { padding: 6px 4px; border-top: 1px solid #EEF0F2; text-align: right; } .lv-t th:first-child, .lv-t td:first-child { text-align: left; color: var(--p-muted); font-weight: 400; }
 </style>
 </head>
 <body>
 <div id="app" hidden>
   <div class="p-wrap">
     <div class="p-card" id="info"></div>
+    <div class="p-card" id="lv" hidden></div>
     <div class="p-card">
       <h2 style="margin-top:0;">呼び名</h2>
       <div class="p-note">お客様のアンケートなどに出る名前です(名字・ニックネームなど)。空にすると、アンケートには出ません。</div>
@@ -40,7 +47,7 @@
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-24a';
+var PAGE_VERSION = '2026-12-13a';
 var P = Portal.start({ tool: 'mypage', title: 'マイページ' });
 var g = Portal.$, esc = Portal.esc;
 function row(k, v) { return '<div class="me-row"><span class="k">' + esc(k) + '</span><span>' + (v ? esc(v) : '<span class="p-muted">―</span>') + '</span></div>'; }
@@ -57,6 +64,7 @@ function load() {
       .filter(function (x) { return urls[x[0]]; }).map(function (x) { return '<a href="' + esc(urls[x[0]]) + '">' + esc(x[1]) + ' ›</a>'; });
     g('links').innerHTML = links.length ? links.join('') : '<div class="p-muted">―</div>';
     Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
+    if (m.emp === '社員') loadLeave();
   }).catch(function (e) { Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
 }
 g('save').addEventListener('click', function () {
@@ -67,6 +75,35 @@ g('save').addEventListener('click', function () {
     g('msg').innerHTML = '<div style="color:var(--p-ok);font-weight:700;">' + (r.unchanged ? '変わったところはありません' : '保存しました(アンケートには1時間ほどで反映されます)') + '</div>';
   }).catch(function () { b.disabled = false; b.textContent = '保存する'; g('msg').innerHTML = '<div class="p-err">通信に失敗しました。もう一度押してください</div>'; });
 });
+
+// ===== 有給と稼働(社員だけ。2026-12-13) =====
+//   データは Bot(シフトのツールと同じ入口)。ポータルが持っている Bot の入口(シフトカレンダー・シフト希望・シフト作成のどれか)を使う
+function botUrl() { var S = Portal.session() || {}, a = S.apis || {}; return a.calendar || a.shift || a.shiftboard || ''; }
+function hrs(m) { return (Math.round((m || 0) / 6) / 10).toFixed(1); }
+function md(ymd) { var p = String(ymd || '').split('-'); return p.length === 3 ? Number(p[1]) + '/' + Number(p[2]) : ''; }
+function loadLeave() {
+  var url = botUrl(), S = Portal.session() || {};
+  if (!url) return;
+  fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ app: 'sx', action: 'leave.mine', token: S.token }) })
+    .then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); }).then(function (r) {
+      if (!r.ok || !r.applicable) return;
+      var b = r.balance, h = '<h2 style="margin-top:0;">有給と稼働</h2>';
+      if (b.noHire) h += '<div class="p-err">入社日が登録されていないため、有給の日数を数えられません。管理者に伝えてください。</div>';
+      h += '<div class="lv-big"><div><b>' + b.left + '</b><span>有給の残り(日)</span></div><div><b>' + (b.next ? b.next.days : '―') + '</b><span>次の付与' + (b.next ? '(' + md(b.next.date) + ')' : '') + '</span></div>' +
+        '<div><b>' + (b.yearUsed == null ? '―' : b.yearUsed) + '<small style="font-size:13px;">/5</small></b><span>この1年の取得</span></div></div>';
+      if (b.plannedDays) h += '<div class="p-note">これから取る予定の有給 ' + b.plannedDays + '日(引くと残り ' + b.afterPlan + '日)</div>';
+      (b.expiring || []).forEach(function (x) { h += '<div class="p-note" style="color:#8A5A00;">⚠ ' + x.days + '日分が ' + md(x.exp) + ' に消えます</div>'; });
+      if (b.yearUsed != null && b.yearUsed < 5) h += '<div class="p-note">有給は1年に5日以上取る決まりがあります(' + md(b.yearFrom) + 'からの1年)。</div>';
+      h += '<div class="tdg">' + esc(r.month) + 'の稼働</div><table class="lv-t"><tr><th></th><th>予定</th><th>実績</th></tr>' +
+        '<tr><td>稼働日</td><td>' + r.plan.days + '日</td><td>' + r.actual.days + '日</td></tr>' +
+        '<tr><td>実働</td><td>' + hrs(r.plan.work) + '時間</td><td>' + hrs(r.actual.work) + '時間</td></tr>' +
+        '<tr><td>残業</td><td>' + hrs(r.plan.overtime) + '時間</td><td>' + hrs(r.actual.overtime) + '時間</td></tr>' +
+        '<tr><td>有給</td><td colspan="2">' + r.plan.leaveDays + '日</td></tr></table>' +
+        '<div class="p-note" style="margin-top:6px;">予定＝公開されたシフト、実績＝打刻。残業は1日8時間・週40時間を超えた分。有給の日は実働に入れません。</div>';
+      if (r.leaves.length) h += '<div class="tdg">有給の記録(この1年)</div>' + r.leaves.map(function (x) { return '<div class="tdr">' + md(x.date) + '　' + esc(x.kind) + '(' + x.days + '日)</div>'; }).join('');
+      g('lv').innerHTML = h; g('lv').hidden = false;
+    }).catch(function () {});
+}
 
 // ===== 届け出(住所・連絡先・口座。2026-11-24) =====
 var TD = null, GROUPS = { address: '住所', tel: '電話', emergency: '緊急連絡先', bank: '振込口座' };

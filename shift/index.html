@@ -32,7 +32,9 @@
   .date { font-size: 18px; font-weight: 700; }
   .date.sun { color: var(--sun); } .date.sat { color: var(--sat); }
   .hol { font-size: 13px; color: var(--sun); margin-left: 6px; font-weight: 400; }
-  .rng { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .rng { display: flex; align-items: center; gap: 6px; margin-top: 6px; border-left: 6px solid transparent; border-radius: 8px; padding: 4px 4px 4px 6px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; font-size: 14px; }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; margin-right: 4px; vertical-align: -2px; }
   .rng select { flex: 1; min-width: 0; }
   .rng select.st { flex: 0 0 auto; max-width: 34%; font-size: 15px; padding: 10px 4px; }
   .brow select { flex: 1; min-width: 0; }
@@ -118,7 +120,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-12-12a';
+var PAGE_VERSION = '2026-12-13a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -256,7 +258,13 @@ function startForm(D) {
   var cur = { days: {}, notes: {}, note: '' };
   var dirty = false;
   var lastStore = D.stores[0].code;          // 新しい時間帯の店舗の初期値(最後に選んだ店舗)
-  if (MULTI) $('storeHint').textContent = '時間帯ごとに、どちらの店舗で働けるかを選んでください。';
+  // 店舗ごとの色(選んだ店舗で、時間帯の行に色を付ける。2026-12-13)
+  var COLORS = [['#1D6F86', '#E3F1F5'], ['#C8743A', '#FBEEE4'], ['#6B4FA0', '#EFEAF7'], ['#2E7D32', '#E6F3E7']];
+  function colorOf(code) { var i = Math.max(0, D.stores.map(function (s) { return s.code; }).indexOf(code)); return COLORS[i % COLORS.length]; }
+  if (MULTI) {
+    $('storeHint').innerHTML = '時間帯ごとに、どちらの店舗で働けるかを選んでください。<span class="legend">' +
+      D.stores.map(function (s) { return '<span><i style="background:' + colorOf(s.code)[0] + '"></i>' + esc(s.name) + '</span>'; }).join('') + '</span>';
+  }
   function storeOf(code) { return D.stores.filter(function (s) { return s.code === code; })[0] || D.stores[0]; }
   function opts(list, sel, ph) {
     return '<option value="">' + ph + '</option>' + list.map(function (t) { return '<option' + (t === sel ? ' selected' : '') + '>' + t + '</option>'; }).join('');
@@ -268,7 +276,8 @@ function startForm(D) {
   function rangeHtml(attrs, r) {
     var st = r[2] || lastStore;
     var times = storeOf(st).times;
-    return (MULTI ? '<select class="st" ' + attrs + ' data-k="2">' + storeOpts(st) + '</select>' : '') +
+    var cc = colorOf(st);
+    return (MULTI ? '<select class="st" ' + attrs + ' data-k="2" style="border-color:' + cc[0] + ';background:' + cc[1] + ';color:' + cc[0] + ';font-weight:700;">' + storeOpts(st) + '</select>' : '') +
       '<select ' + attrs + ' data-k="0">' + opts(times, r[0], '開始') + '</select>〜' +
       '<select ' + attrs + ' data-k="1">' + opts(times, r[1], '終了') + '</select>';
   }
@@ -322,7 +331,8 @@ function startForm(D) {
         (rs.length < D.maxRanges ? '<button type="button" class="mini" data-act="add" data-d="' + x.d + '">＋時間帯</button>' : '') + '</div></div>';
       if (!rs.length) h += '<div class="empty">出勤できない(空欄)</div>';
       rs.forEach(function (r, i) {
-        h += '<div class="rng">' + rangeHtml('data-d="' + x.d + '" data-i="' + i + '"', r) +
+        var rc = colorOf(r[2] || lastStore);
+        h += '<div class="rng"' + (MULTI ? ' style="border-left-color:' + rc[0] + ';background:' + rc[1] + ';"' : '') + '>' + rangeHtml('data-d="' + x.d + '" data-i="' + i + '"', r) +
           '<button type="button" class="x" data-act="del" data-d="' + x.d + '" data-i="' + i + '">×</button></div>' +
           '<label class="oth' + (r[3] ? ' on' : '') + '"><input type="checkbox" data-oth="1" data-d="' + x.d + '" data-i="' + i + '"' + (r[3] ? ' checked' : '') + '> 他店でもOK</label>';
       });

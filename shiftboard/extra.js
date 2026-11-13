@@ -202,7 +202,7 @@
     if (!emps.length) { box.innerHTML = h + '<div class="muted" style="margin-top:6px;">この店舗の社員がいません</div>'; return; }
     h += '<div class="grid-wrap" style="margin-top:6px;"><table class="mt"><tr><th>氏名</th>' + B.days.map(function (x) {
       return '<th class="' + (x.hol || x.w === 0 ? 'sun' : x.w === 6 ? 'sat' : '') + '">' + x.d + '<br>' + W.charAt(x.w) + '</th>';
-    }).join('') + '<th>稼働日<br>予定</th><th>実働<br>予定</th><th>残業<br>予定</th><th>実働<br>実績</th><th>残業<br>実績</th><th>有給<br>この月</th><th>有給の<br>残り</th><th>年5日</th></tr>';
+    }).join('') + '<th>稼働日<br>予定</th><th>実働<br>予定</th><th>残業<br>予定</th><th>実働<br>実績</th><th>残業<br>実績</th><th>有給<br>この月</th><th>有給の<br>残り</th><th>取得義務<br>(年5日)</th></tr>';
     emps.forEach(function (u) {
       var plan = {}, act = (SXD.actual || {})[u] || {}, lvSum = 0;
       for (var d = 1; d <= last; d++) { var w = dayWork(u, d).work; if (w > 0) plan[d] = w; }
@@ -218,7 +218,7 @@
         '<td class="sum">' + lvSum + '</td><td class="sum"' + (b.left < 3 ? ' style="color:#B42318;"' : '') + '>' + (b.noHire ? '入社日なし' : (b.left == null ? '' : b.left)) + '</td>' +
         '<td class="sum"' + (b.yearUsed != null && b.yearUsed < 5 ? ' style="color:#8A5A00;"' : '') + '>' + (b.yearUsed == null ? '―' : b.yearUsed + '/5') + '</td></tr>';
     });
-    box.innerHTML = h + '</table></div><div class="muted" style="margin-top:4px;">●＝確定シフトのある日。時間は「時間」(例 8.5)。有給の残り＝今日の時点(予定の有給はまだ引いていない)。年5日＝付与日から1年の取得(予定を含む)。</div>';
+    box.innerHTML = h + '</table></div><div class="muted" style="margin-top:4px;">●＝確定シフトのある日。時間は「時間」(例 8.5)。有給の残り＝今日の時点(予定の有給はまだ引いていない)。取得義務＝労働基準法の「10日以上の付与があった人は、付与日から1年以内に5日以上取る」決まりに対して、いま何日取ったか(予定を含む。5日の付与ではない)。</div>';
   };
   // 有給を入れる小さなメニュー
   var menu = document.createElement('div');

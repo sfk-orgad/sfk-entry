@@ -47,7 +47,7 @@
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-12-13a';
+var PAGE_VERSION = '2026-12-14a';
 var P = Portal.start({ tool: 'mypage', title: 'マイページ' });
 var g = Portal.$, esc = Portal.esc;
 function row(k, v) { return '<div class="me-row"><span class="k">' + esc(k) + '</span><span>' + (v ? esc(v) : '<span class="p-muted">―</span>') + '</span></div>'; }
@@ -90,10 +90,10 @@ function loadLeave() {
       var b = r.balance, h = '<h2 style="margin-top:0;">有給と稼働</h2>';
       if (b.noHire) h += '<div class="p-err">入社日が登録されていないため、有給の日数を数えられません。管理者に伝えてください。</div>';
       h += '<div class="lv-big"><div><b>' + b.left + '</b><span>有給の残り(日)</span></div><div><b>' + (b.next ? b.next.days : '―') + '</b><span>次の付与' + (b.next ? '(' + md(b.next.date) + ')' : '') + '</span></div>' +
-        '<div><b>' + (b.yearUsed == null ? '―' : b.yearUsed) + '<small style="font-size:13px;">/5</small></b><span>この1年の取得</span></div></div>';
+        '<div><b>' + (b.yearUsed == null ? '―' : b.yearUsed) + '<small style="font-size:13px;">/5</small></b><span>取得義務(年5日)</span></div></div>';
       if (b.plannedDays) h += '<div class="p-note">これから取る予定の有給 ' + b.plannedDays + '日(引くと残り ' + b.afterPlan + '日)</div>';
       (b.expiring || []).forEach(function (x) { h += '<div class="p-note" style="color:#8A5A00;">⚠ ' + x.days + '日分が ' + md(x.exp) + ' に消えます</div>'; });
-      if (b.yearUsed != null && b.yearUsed < 5) h += '<div class="p-note">有給は1年に5日以上取る決まりがあります(' + md(b.yearFrom) + 'からの1年)。</div>';
+      if (b.yearUsed != null && b.yearUsed < 5) h += '<div class="p-note">有給を10日以上もらった人は、もらった日(' + md(b.yearFrom) + ')から1年のうちに5日以上取る決まりがあります(法律の取得義務)。あと ' + (5 - b.yearUsed) + '日です。</div>';
       h += '<div class="tdg">' + esc(r.month) + 'の稼働</div><table class="lv-t"><tr><th></th><th>予定</th><th>実績</th></tr>' +
         '<tr><td>稼働日</td><td>' + r.plan.days + '日</td><td>' + r.actual.days + '日</td></tr>' +
         '<tr><td>実働</td><td>' + hrs(r.plan.work) + '時間</td><td>' + hrs(r.actual.work) + '時間</td></tr>' +

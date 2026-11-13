@@ -10,6 +10,7 @@
   ・店舗×日ごとに、縦にスタッフ・横に時刻(シフト設定の「タイムラインの刻み(分)」)で、希望の時間帯を黄色で塗る
   ・下に人数とグレード集計(最低人数を下回る時間は赤)。上に日ごとの帯(希望人数・不足のある日に印)
   ・「スプシに書き出す」で、シフト希望ファイルに「タイムライン_店舗_年月」シートを作る
+  ・2026-12：追加の機能は extra.js(一番下で読む)：日のひとこと・他店でもOK・有給(社員)・残業・提出の解禁・店舗ごとの表示・2店舗の注意
 -->
 <style>
   :root { --c: #16323A; --soft: #E8EEF0; --ink: #1F2328; --muted: #5F6670; --line: #D5DAE0; --bg: #F5F6F8; --err: #B42318; --req: #FFE94D; --sat: #1D5BB8; }
@@ -207,7 +208,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-12-08a';
+var PAGE_VERSION = '2026-12-14a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -1125,5 +1126,7 @@ function byStaff(a, b) {
   return sa !== sb ? (sa < sb ? -1 : 1) : String(pa.name || '').localeCompare(String(pb.name || ''), 'ja');
 }
 </script>
+<!-- 追加の機能(2026-12)：日のひとこと・他店でもOK・有給(社員)・残業・提出の解禁・店舗ごとの表示・2店舗の注意 -->
+<script src="extra.js?v=3"></script>
 </body>
 </html>

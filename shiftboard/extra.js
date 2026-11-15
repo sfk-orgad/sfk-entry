@@ -363,3 +363,77 @@
 
   if (B) { renderDay(); renderChecks(); }
 })();
+
+// =====================================================================
+// 希望の外の人を足す(2026-12-14)：本人と個別にやりとりして入れる人のため
+//   ・足せる人を、この店舗の所属だけでなく、ほかの店舗の人(応援)まで広げる(選ぶ欄は「この店舗」「ほかの店舗」に分ける)
+//   ・「この日の調整」の一番下にも、足す欄を置く(上の道具の欄と同じ動き)
+//   ・足した人は行に「希望の外」の印。足したあとは、表の行をドラッグするか「＋時間帯」で時間を決める(確定にすると残る)
+// =====================================================================
+(function () {
+  if (typeof fillAddOut !== 'function') return;
+  function candidates() {
+    var shown = {};
+    peopleOfDay().forEach(function (u) { shown[u] = 1; });
+    Array.prototype.forEach.call(document.querySelectorAll('#grid tr[data-u]'), function (tr) { shown[tr.getAttribute('data-u')] = 1; });
+    var mine = [], others = [];
+    Object.keys(B.staff).filter(function (u) { return !shown[u]; }).sort(function (a, b) { return String(B.staff[a].name).localeCompare(String(B.staff[b].name), 'ja'); })
+      .forEach(function (u) { var p = B.staff[u]; ((p.stores || []).some(function (c) { return c === '*' || c === STORE; }) ? mine : others).push(u); });
+    return { mine: mine, others: others };
+  }
+  function optionsHtml() {
+    var c = candidates(), o = function (u) { return '<option value="' + esc(u) + '">' + esc(B.staff[u].name) + (B.staff[u].grade ? '(' + esc(B.staff[u].grade) + ')' : '') + '</option>'; };
+    return { n: c.mine.length + c.others.length, html: '<option value="">(選ぶ)</option>' +
+      (c.mine.length ? '<optgroup label="この店舗の人">' + c.mine.map(o).join('') + '</optgroup>' : '') +
+      (c.others.length ? '<optgroup label="ほかの店舗の人(応援)">' + c.others.map(o).join('') + '</optgroup>' : '') };
+  }
+  fillAddOut = function () {
+    if (!B || !g('addOut')) return;
+    var x = optionsHtml();
+    g('addOut').innerHTML = x.html;
+    g('addOutBtn').disabled = !x.n || !!B.readonly;
+  };
+  function addPerson(u) {
+    if (!u) { alert('足す人を選んでください'); return; }
+    var p = B.staff[u] || { name: u, stores: [] };
+    var other = !(p.stores || []).some(function (c) { return c === '*' || c === STORE; });
+    if (!confirm(p.name + 'さんは、この日' + (other ? 'この店舗の所属ではなく、' : '') + 'この店舗の希望がありません。\n本人と確認しましたか？\n［OK］確認した → 行を足す')) return;
+    var k = key(STORE, DAY);
+    (ADDED[k] = ADDED[k] || []).push(u);
+    OUTOK[u + '|' + k] = true;
+    renderDay();
+    g('msg').textContent = p.name + 'さんを足しました。表の行をドラッグするか、調整の欄の「＋時間帯」で時間を決めてください(確定にすると残ります)';
+  }
+  // 上の道具の欄のボタン：前の動きを置き換える(ほかの店舗の人にも同じ確認)
+  var oldBtn = g('addOutBtn'), btn = oldBtn.cloneNode(true);
+  oldBtn.parentNode.replaceChild(btn, oldBtn);
+  btn.addEventListener('click', function () { addPerson(g('addOut').value); });
+
+  // 調整の欄の一番下にも
+  var origPanel2 = renderPanel;
+  renderPanel = function () {
+    origPanel2.apply(this, arguments);
+    var k = key(STORE, DAY);
+    // 足した人に「希望の外」の印
+    (ADDED[k] || []).forEach(function (u) {
+      var nm = g('panelBody').querySelector('tr[data-u="' + u + '"] td.nm');
+      if (nm && !nm.querySelector('.addtag')) nm.insertAdjacentHTML('beforeend', '<div class="addtag"><span class="tag2 t-out">希望の外</span></div>');
+    });
+    if (B.readonly) return;
+    var x = optionsHtml();
+    g('panelBody').insertAdjacentHTML('beforeend', '<div style="padding:10px 14px;border-top:2px solid var(--soft);" class="ln"><b>希望の外の人を足す</b>' +
+      '<select id="addOut2">' + x.html + '</select><button class="mini2" id="addOut2Btn"' + (x.n ? '' : ' disabled') + '>足す</button>' +
+      '<span class="muted">本人と個別に決めた人を入れるとき。ほかの店舗の人も選べます</span></div>');
+  };
+  g('panelBody').addEventListener('click', function (e) { if (e.target.id === 'addOut2Btn') addPerson(g('addOut2').value); });
+
+  if (B) renderDay();
+})();
+// 「＋時間帯」は、いま開いている店舗に足す(ほかの店舗の人を足したときに、その人の所属の店舗に入ってしまわないように。2026-12-14)
+g('panelBody').addEventListener('click', function (e) {
+  var b = e.target.closest('button[data-act="add"]'); if (!b || !B || B.readonly) return;
+  e.stopPropagation();
+  var uid = b.closest('tr[data-u]').getAttribute('data-u'), ts = timesOf(STORE);
+  (CONF[key(STORE, DAY)] = CONF[key(STORE, DAY)] || []).push([uid, ts[0], ts[Math.min(ts.length - 1, 60 / B.slot * 4)]]);
+  changedKeys([STORE]);
+}, true);

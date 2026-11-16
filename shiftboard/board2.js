@@ -1,13 +1,15 @@
 // shiftboard/board2.js
-// シフト作成の新しい画面(2026-12-15)：「シフト組みボード」の見た目に近づけた
+// シフト作成の新しい画面(2026-12-15〜)：「シフト組みボード」の見た目に近づけた
 //   ・タブ「シフトを組む」(最初に開く)：左にカレンダー(日ごとの充足・不足・帯)と今月の稼働、右にその日のボード
 //       ボード：必要人数・希望者数・配置人数の帯 → 人ごとの行(希望＝点線の帯、押すと採用／確定＝濃い帯)・右で時刻を調整・外す
-//       下に、他店でもOKの人・希望なし・未提出、希望の外の人を入れる欄
-//   ・タブ「希望一覧」：スタッフ×日付で、この店舗の希望を一覧(スマレジの表の形)。Excel 用にコピー
-//   ・今までの「日ごと(タイムライン)」は「細かく調整」として残す(同じデータ。どちらで直してもよい)
-//   index.html の一番下で extra.js のあとに読む：<script src="board2.js?v=1"></script>
+//       「他店でもOK」の人は、ほかの店舗の区切りにも行として出る(緑の点線の帯。押すとその店舗に採用)
+//   ・店舗のタブの「全店舗」：全店舗の区切りを上下に並べて、1つの画面で全店舗を組む(カレンダーも店舗ごとの充足を出す)
+//   ・タブ「希望一覧」：スタッフ×日付で希望を一覧(スマレジの表の形)。Excel 用にコピー
+//   ・前の版の「日ごと(タイムライン)」は隠している(SHOW_OLD_TIMELINE を true にすると戻る)
+//   index.html の一番下で extra.js のあとに読む：<script src="board2.js?v=2"></script>
 (function () {
   if (typeof renderAll !== 'function' || !g('vtabs')) return;
+  var SHOW_OLD_TIMELINE = false; // 前の版の「細かく調整(タイムライン)」のタブを出すか(戻すときは true)
 
   // ===== 見た目 =====
   var css = document.createElement('style');
@@ -73,21 +75,32 @@
     '#vWish .bar3{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}'
   ].join('\n');
   document.head.appendChild(css);
+  var css2 = document.createElement('style');
+  css2.textContent = [
+    '.b2 .secst{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#16323A;color:#fff;font-weight:700;font-size:15px}',
+    '.b2 .secst small{font-weight:400;opacity:.85}',
+    '.b2 .bar.okb{border-color:#3E7B4F;background:#E3F2E6}',
+    '.b2 .r.okr .who{color:#2E5E3B}',
+    '.b2 .day .sl{display:flex;align-items:center;gap:2px;width:100%;font-size:10px;line-height:1.3;white-space:nowrap;overflow:hidden}',
+    '.b2 .day .sl b{font-weight:700;min-width:1.6em;text-align:left}',
+    '.b2 .day .sl .stp{flex:1;height:5px;margin:0}',
+    '#tabs .tab.allst{border-style:dashed}'
+  ].join('\n');
+  document.head.appendChild(css2);
 
   // ===== タブと入れ物 =====
   var tabs = g('vtabs');
   var oldDayTab = tabs.querySelector('[data-v="vDay"]');
-  if (oldDayTab) oldDayTab.textContent = '細かく調整(タイムライン)';
+  if (oldDayTab) { oldDayTab.textContent = '細かく調整(タイムライン)'; if (!SHOW_OLD_TIMELINE) oldDayTab.style.display = 'none'; }
   tabs.insertAdjacentHTML('afterbegin', '<button class="vtab" data-v="vBuild">シフトを組む</button><button class="vtab" data-v="vWish">希望一覧</button>');
   g('vDay').insertAdjacentHTML('beforebegin', '<div id="vBuild"></div><div id="vWish" hidden></div>');
   var MINE = ['vBuild', 'vWish'], ALL = ['vBuild', 'vWish', 'vDay', 'vMonth', 'vAi', 'vRec'];
+  function oldOnly() { return [g('showAll') && g('showAll').closest('label'), g('addOut') && g('addOut').previousElementSibling, g('addOut'), g('addOutBtn')]; }
   function show(v) {
     VIEWNOW = v;
     Array.prototype.forEach.call(tabs.querySelectorAll('.vtab'), function (x) { x.classList.toggle('on', x.getAttribute('data-v') === v); });
     ALL.forEach(function (id) { if (g(id)) g(id).hidden = id !== v; });
-    // 上の道具の欄のうち、「細かく調整」だけで使うものは、新しいタブでは隠す(同じ機能はボードの下にある)
-    var oldOnly = [g('showAll') && g('showAll').closest('label'), g('addOut') && g('addOut').previousElementSibling, g('addOut'), g('addOutBtn')];
-    oldOnly.forEach(function (el) { if (el) el.style.display = MINE.indexOf(v) !== -1 ? 'none' : ''; });
+    oldOnly().forEach(function (el) { if (el) el.style.display = (MINE.indexOf(v) !== -1 || !SHOW_OLD_TIMELINE) ? 'none' : ''; });
     if (v === 'vBuild') renderBuild();
     if (v === 'vWish') renderWish();
   }
@@ -95,16 +108,30 @@
   tabs.addEventListener('click', function (e) {
     var b = e.target.closest('.vtab'); if (!b) return;
     var v = b.getAttribute('data-v');
-    if (MINE.indexOf(v) === -1) { MINE.forEach(function (id) { g(id).hidden = true; }); [g('showAll') && g('showAll').closest('label'), g('addOut') && g('addOut').previousElementSibling, g('addOut'), g('addOutBtn')].forEach(function (el) { if (el) el.style.display = ''; }); return; } // ほかのタブは index.html が切り替える
+    if (MINE.indexOf(v) === -1) { MINE.forEach(function (id) { g(id).hidden = true; }); if (SHOW_OLD_TIMELINE) oldOnly().forEach(function (el) { if (el) el.style.display = ''; }); return; }
     e.stopImmediatePropagation();
     leaveDay().then(function () { show(v); });
   }, true);
-  // 最初は「シフトを組む」
   show('vBuild');
 
-  // 組み直しの合図：データが変わったら、開いている画面を描き直す
+  // ===== 店舗のタブに「全店舗」 =====
+  var ALLST = false;
+  function multi() { return visibleStores().length > 1; }
+  function paintStoreTabs() {
+    if (!B || !g('tabs')) return;
+    if (multi() && !g('tabs').querySelector('[data-allst]')) g('tabs').insertAdjacentHTML('afterbegin', '<button class="tab allst" data-allst="1">全店舗</button> ');
+    var a = g('tabs').querySelector('[data-allst]'); if (a) a.classList.toggle('on', ALLST);
+    if (ALLST) Array.prototype.forEach.call(g('tabs').querySelectorAll('.tab[data-s]'), function (x) { x.classList.remove('on'); });
+  }
+  g('tabs').addEventListener('click', function (e) {
+    var a = e.target.closest('[data-allst]');
+    if (a) { e.stopImmediatePropagation(); leaveDay().then(function () { ALLST = true; paintStoreTabs(); renderBuild(); renderWish(); }); return; }
+    if (e.target.closest('.tab[data-s]')) ALLST = false; // 店舗を選んだら、その店舗だけ(index.html が切り替える)
+  }, true);
+
+  // データが変わったら、開いている画面を描き直す
   var origAll = renderAll;
-  renderAll = function () { origAll.apply(this, arguments); if (VIEWNOW === 'vBuild') renderBuild(); if (VIEWNOW === 'vWish') renderWish(); };
+  renderAll = function () { origAll.apply(this, arguments); paintStoreTabs(); if (VIEWNOW === 'vBuild') renderBuild(); if (VIEWNOW === 'vWish') renderWish(); };
   var origCK = changedKeys;
   changedKeys = function () { origCK.apply(this, arguments); if (VIEWNOW === 'vBuild') renderBuild(); };
   var origSet = setState;
@@ -116,50 +143,63 @@
   function okRanges(x) { return (x && x.other || []).map(function (o) { var a = String(o).split('@'), t = a[0].split('-'); return { s: t[0], e: t[1], store: a[1] || '' }; }); }
   function sname(c) { var st = storeOf(c); return st ? st.name : c; }
   function hm2(m) { return Math.floor(m / 60) + ':' + ('0' + (m % 60)).slice(-2); }
-  function inStore(u) { var p = B.staff[u] || {}; return (p.stores || []).some(function (c) { return c === '*' || c === STORE; }); }
-  // その日の判定(カレンダーとボードで使う)
+  function inStore(u, code) { var p = B.staff[u] || {}; return (p.stores || []).some(function (c) { return c === '*' || c === (code || STORE); }); }
+  function storesNow() { return ALLST && multi() ? visibleStores().map(function (s) { return s.code; }) : [STORE]; }
+  // 店舗を一時的に切り替えて動かす(sums・peopleOfDay などは「いまの店舗」で動くため)
+  function withStore(code, fn) { var keep = STORE; STORE = code; try { return fn(); } finally { STORE = keep; } }
   function dayInfo(d) {
-    var sm = sums(d), slot = B.slot, short = 0, lack = 0, over = 0;
+    var sm = sums(d), slot = B.slot, short = 0, lack = 0;
     sm.cols.forEach(function (t, i) {
       if (sm.need[i] > 0 && sm.count[i] < sm.need[i]) short += slot;
       if (sm.need[i] > 0 && sm.reqCount[i] < sm.need[i]) lack += slot;
     });
     return { sm: sm, short: short, lack: lack, placed: sm.cfU.length, hasNeed: sm.need.some(function (n) { return n > 0; }) };
   }
-  function crossOn(d) { // 2店舗に確定がある人(この店舗に確定がある人だけ)
+  function crossOn(d) { // 2店舗以上に確定がある人
     var by = {}; B.stores.forEach(function (st) { confOf(st.code, d).forEach(function (c) { (by[c[0]] = by[c[0]] || {})[st.code] = 1; }); });
-    return Object.keys(by).filter(function (u) { return Object.keys(by[u]).length > 1 && by[u][STORE]; });
+    return Object.keys(by).filter(function (u) { return Object.keys(by[u]).length > 1; });
+  }
+  function stripHtml(c) {
+    var s = '';
+    c.sm.cols.forEach(function (t, i) { if (t % 30) return; var n = c.sm.need[i], v = c.sm.count[i]; s += '<i class="' + (!n || !c.placed ? 'empty' : v < n ? 'short' : v > n ? 'over' : 'ok') + '"></i>'; });
+    return '<span class="stp">' + s + '</span>';
   }
 
-  // ===== シフトを組む =====
+  // ===== カレンダーと今月の稼働 =====
   function calendarHtml() {
     var y = Number(B.month.slice(0, 4)), m = Number(B.month.slice(5, 7)), first = new Date(y, m - 1, 1).getDay();
+    var codes = storesNow(), many = codes.length > 1;
     var cells = '';
     for (var i = 0; i < first; i++) cells += '<div class="day blank"></div>';
     var placedDays = 0;
     B.days.forEach(function (x) {
-      var c = dayInfo(x.d);
-      if (c.placed) placedDays++;
-      var st = !c.placed ? '<span class="st none">未配置</span>' : (c.hasNeed ? (c.short ? '<span class="st short">不足' + (Math.ceil(c.short / 30) / 2) + 'h</span>' : '<span class="st ok">充足</span>') : '<span class="st ok">' + c.placed + '人</span>');
-      var lack = c.lack && c.hasNeed ? '<span class="lack">希望不足</span>' : '';
-      var wn = crossOn(x.d).length; var warn = wn ? '<span class="wc">2店舗' + wn + '</span>' : '';
-      var strip = '';
-      c.sm.cols.forEach(function (t, i) {
-        if (t % 30) return;
-        var n = c.sm.need[i], v = c.sm.count[i];
-        strip += '<i class="' + (!n || !c.placed ? 'empty' : v < n ? 'short' : v > n ? 'over' : 'ok') + '"></i>';
-      });
+      var infos = codes.map(function (code) { return { code: code, c: withStore(code, function () { return dayInfo(x.d); }) }; });
+      if (infos.some(function (z) { return z.c.placed; })) placedDays++;
+      var body = '';
+      if (many) {
+        body = infos.map(function (z) {
+          var c = z.c, cls = !c.placed ? 'none' : c.hasNeed && c.short ? 'short' : 'ok';
+          return '<span class="sl"><b class="st ' + cls + '" style="padding:0 2px;">' + esc(sname(z.code).replace(/^(SAUNA |Sauna Base )/i, '').slice(0, 3)) + '</b>' + stripHtml(c) + '</span>';
+        }).join('');
+      } else {
+        var c = infos[0].c;
+        body = (!c.placed ? '<span class="st none">未配置</span>' : (c.hasNeed ? (c.short ? '<span class="st short">不足' + (Math.ceil(c.short / 30) / 2) + 'h</span>' : '<span class="st ok">充足</span>') : '<span class="st ok">' + c.placed + '人</span>')) +
+          (c.lack && c.hasNeed ? '<span class="lack">希望不足</span>' : '') + stripHtml(c);
+      }
+      var wn = crossOn(x.d).length;
       cells += '<button class="day' + (x.hol || x.w === 0 ? ' hol' : x.w === 6 ? ' sat' : '') + (x.d === DAY ? ' on' : '') + '" data-bd="' + x.d + '" title="' + x.d + '日' + (x.hol ? ' ' + esc(x.hol) : '') + '">' +
-        '<span class="n">' + x.d + '</span>' + st + warn + lack + '<span class="stp">' + strip + '</span></button>';
+        '<span class="n">' + x.d + '</span>' + (wn ? '<span class="wc">2店舗' + wn + '</span>' : '') + body + '</button>';
     });
     return '<div class="cal"><div class="prog"><span>配置した日 <b>' + placedDays + '</b>／' + B.days.length + '日</span><span class="pbar"><i style="width:' + (placedDays / B.days.length * 100).toFixed(1) + '%"></i></span></div>' +
       '<div class="wk">' + W.split('').map(function (w, i) { return '<div class="wh' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '') + '">' + w + '</div>'; }).join('') + cells + '</div>' +
-      '<div class="lg2"><span><i style="background:var(--ok-soft);border:1px solid var(--ok)"></i>必要人数を満たす</span><span><i style="background:var(--short-soft);border:1px solid var(--short)"></i>不足あり</span><span>日付の下の帯＝時間ごとの充足</span><span style="color:var(--short)">希望不足＝希望者を全員入れても足りない日</span></div></div>';
+      '<div class="lg2"><span><i style="background:var(--ok-soft);border:1px solid var(--ok)"></i>必要人数を満たす</span><span><i style="background:var(--short-soft);border:1px solid var(--short)"></i>不足あり</span><span>帯＝時間ごとの充足</span>' +
+      (many ? '<span>店舗ごとに1段</span>' : '<span style="color:var(--short)">希望不足＝希望者を全員入れても足りない日</span>') + '</div></div>';
   }
   function monthHtml() {
-    var ids = confUids(STORE);
+    var many = storesNow().length > 1;
+    var ids = many ? confUids() : confUids(STORE);
     if (!ids.length) return '';
-    var today = {}; confOf(STORE, DAY).forEach(function (c) { today[c[0]] = 1; });
+    var today = {}; storesNow().forEach(function (code) { confOf(code, DAY).forEach(function (c) { today[c[0]] = 1; }); });
     ids.sort(byStaff);
     var T = { n: 0, work: 0, br: 0 };
     var rows = ids.map(function (u) {
@@ -172,6 +212,8 @@
       '<tfoot><tr><td class="nm"><b>合計</b></td><td>' + T.n + '日</td><td><b>' + hm2(T.work) + '</b></td><td>' + hm2(T.br) + '</td></tr></tfoot></table>' +
       '<div class="muted" style="margin-top:4px;">色つきの行＝選んでいる日に入っている人。休憩はシフト設定の「休憩の決まり」で自動計算。</div></div>';
   }
+
+  // ===== シフトを組む =====
   function renderBuild() {
     if (!B || VIEWNOW !== 'vBuild') return;
     var keepY = window.scrollY;
@@ -180,14 +222,29 @@
     window.scrollTo(0, keepY);
   }
   function renderBoard() {
-    var st = storeOf(STORE), x = B.days[DAY - 1], c = dayInfo(DAY), sm = c.sm, ro = !!B.readonly;
+    var x = B.days[DAY - 1], ro = !!B.readonly, codes = storesNow(), many = codes.length > 1;
+    var head = '<div class="dh"><h2>' + Number(B.month.slice(5, 7)) + '月' + DAY + '日(' + W.charAt(x.w) + ')</h2>' + (x.hol ? '<span class="type">' + esc(x.hol) + '</span>' : '') +
+      (many ? '<span class="type">全店舗</span>' : '') +
+      '<span id="b2state" class="' + g('saveState').className + '" style="font-size:13px;padding:3px 10px;border-radius:99px;background:#E9EFEC;">' + esc(g('saveState').textContent) + '</span>' +
+      (ro ? '' : '<button class="btn" id="b2fill">全員を希望どおりに採用</button>') +
+      '<div class="nav"><button class="btn" id="b2prev"' + (DAY <= 1 ? ' disabled' : '') + '>‹ 前の日</button><button class="btn" id="b2next"' + (DAY >= B.days.length ? ' disabled' : '') + '>次の日 ›</button></div></div>';
+    var body = codes.map(function (code) { return withStore(code, function () { return sectionHtml(code, many); }); }).join('<div style="height:14px"></div>');
+    var badN = Object.keys(badLines()).length;
+    var cross = crossOn(DAY);
+    g('b2day').innerHTML = head + body +
+      (badN ? '<p class="wl">注意：時間帯が重なっている人がいます(同じ人の確定が重なる・開始が終了より後)。直すと保存します</p>' : '') +
+      cross.map(function (u) { return '<p class="wl">注意：' + esc(nameOfU(u)) + 'さんは、この日2つの店舗に入っています</p>'; }).join('');
+    bindBoard();
+  }
+  // 1店舗分の区切り(呼ぶ側で STORE をその店舗にしてある)
+  function sectionHtml(code, many) {
+    var st = storeOf(code), c = dayInfo(DAY), sm = c.sm, ro = !!B.readonly;
     var lo = st.start, hi = st.end;
     var pct = function (m) { return ((m - lo) / (hi - lo) * 100).toFixed(3) + '%'; };
     var wid = function (a, b) { return ((b - a) / (hi - lo) * 100).toFixed(3) + '%'; };
     var gl = ''; for (var h = Math.ceil(lo / 60) * 60; h <= hi; h += 60) gl += '<span style="left:' + pct(h) + '"></span>';
     gl = '<div class="gl">' + gl + '</div>';
     var axis = ''; for (var h2 = Math.ceil(lo / 60) * 60; h2 <= hi; h2 += 60) axis += '<span class="tick" style="left:' + pct(h2) + '">' + Math.floor(h2 / 60) + '</span>';
-    // 同じ値が続く区間を1つにまとめた帯
     var runs = function (fn) {
       var out = [];
       sm.cols.forEach(function (t, i) { var v = fn(i), last = out[out.length - 1]; if (last && last.v === v.v && last.cls === v.cls) last.b = t + B.slot; else out.push({ a: t, b: t + B.slot, v: v.v, cls: v.cls }); });
@@ -202,146 +259,162 @@
     var availR = runs(function (i) { var n = sm.need[i], v = sm.reqCount[i]; return !n ? { v: v || '', cls: 'closed' } : { v: v, cls: v < n ? 'short' : 'need' }; });
     var pickR = runs(function (i) { var n = sm.need[i], v = sm.count[i]; return !n ? { v: v || '', cls: v ? 'over' : 'closed' } : { v: v, cls: v < n ? 'short' : v > n ? 'over' : 'ok' }; });
 
-    // 人の分け方：この店舗に希望 or 確定 or 足した人 ＝ 行 ／ ほかは下の一覧
     var rowsU = peopleOfDay().slice().sort(byStaff);
+    var shown = {}; rowsU.forEach(function (u) { shown[u] = 1; });
+    // 他店でもOK：ほかの店舗に希望を出していて、その時間を「他店でもOK」にした人(この店舗の区切りにも行として出す)
+    var okU = Object.keys(B.extra || {}).filter(function (u) { return !shown[u] && okRanges(exOf(u, DAY)).some(function (r) { return r.store !== code; }); }).sort(byStaff);
+    okU.forEach(function (u) { shown[u] = 1; });
     var cross = crossOn(DAY);
     var stepOpts = function (sel, from, to) { var o = ''; for (var t = from; t <= to; t += B.slot) o += '<option value="' + hm(t) + '"' + (hm(t) === sel ? ' selected' : '') + '>' + sh(hm(t)) + '</option>'; return o; };
-    var rows = rowsU.map(function (u) {
+    var rowHtml = function (u, isOk) {
       var p = B.staff[u] || { name: u, grade: '' };
-      var mine = reqOf(DAY, STORE).filter(function (r) { return r[4] === u; });
-      var cf = confOf(STORE, DAY).map(function (cc, i) { return { c: cc, i: i }; }).filter(function (z) { return z.c[0] === u; });
-      var others = []; B.stores.forEach(function (s2) { if (s2.code !== STORE) confOf(s2.code, DAY).forEach(function (cc) { if (cc[0] === u) others.push({ store: s2.code, s: cc[1], e: cc[2] }); }); });
-      var ex = exOf(u, DAY), oks = okRanges(ex);
+      var mine = isOk ? [] : reqOf(DAY, code).filter(function (r) { return r[4] === u; });
+      var okr = isOk ? okRanges(exOf(u, DAY)).filter(function (r) { return r.store !== code && mins(r.s) < hi && mins(r.e) > lo; }) : [];
+      var cf = confOf(code, DAY).map(function (cc, i) { return { c: cc, i: i }; }).filter(function (z) { return z.c[0] === u; });
+      var others = []; B.stores.forEach(function (s2) { if (s2.code !== code) confOf(s2.code, DAY).forEach(function (cc) { if (cc[0] === u) others.push({ store: s2.code, s: cc[1], e: cc[2] }); }); });
+      var ex = exOf(u, DAY);
+      var okAll = okRanges(ex).filter(function (r) { return r.store !== code; }); // ほかの店舗に出した希望のうち「他店でもOK」の時間
       var w = dayWork(u, DAY);
       var mon = { n: 0, work: 0 }; B.days.forEach(function (y2) { var ww = dayWork(u, y2.d); if (ww.span) { mon.n++; mon.work += ww.work; } });
+      var ownReq = isOk ? reqOf(DAY).filter(function (r) { return r[4] === u; }) : [];
       var tags = (p.grade ? '<span class="tg ft">' + esc(p.grade) + '</span>' : '') + (empOf(u) === '社員' ? '<span class="tg ft">社員</span>' : '') +
-        (!mine.length ? '<span class="tg">' + (inStore(u) ? '希望なし' : '応援') + '</span>' : '') + (oks.length ? '<span class="tg" style="border-color:var(--ok);color:var(--ok);">他店OK</span>' : '');
+        (isOk ? '<span class="tg" style="border-color:var(--ok);color:var(--ok);">他店でもOK</span>' : (!mine.length ? (okAll.length ? '<span class="tg" style="border-color:var(--ok);color:var(--ok);">他店でもOK</span>' : '<span class="tg">' + (inStore(u, code) ? '希望なし' : '応援') + '</span>') : '')) +
+        (!isOk && mine.length && okRanges(ex).length ? '<span class="tg" style="border-color:var(--ok);color:var(--ok);">他店OK</span>' : '');
       var who = '<div class="who">' + esc(p.name) + tags +
-        '<small>' + (cf.length ? '実働 <b>' + hm2(w.work) + '</b>' + (w.br ? '(休憩' + w.br + '分)' : '') + '・' : '') + '月 ' + hm2(mon.work) + '・' + mon.n + '日</small>' +
-        (others.length ? '<span class="warn">他店で確定：' + esc(others.map(function (o) { return sname(o.store) + ' ' + sh(o.s) + '-' + sh(o.e); }).join(' / ')) + '</span>' : '') +
+        '<small>' + (w.span ? '実働 <b>' + hm2(w.work) + '</b>' + (w.br ? '(休憩' + w.br + '分)' : '') + '・' : '') + '月 ' + hm2(mon.work) + '・' + mon.n + '日</small>' +
+        (isOk && ownReq.length ? '<small style="color:var(--ok)">希望：' + esc(ownReq.map(function (r) { return sname(r[1]) + ' ' + sh(r[2]) + '-' + sh(r[3]); }).join(' / ')) + '</small>' : '') +
+        (others.length ? '<span class="warn">' + (isOk ? '' : '他店で') + '確定：' + esc(others.map(function (o) { return sname(o.store) + ' ' + sh(o.s) + '-' + sh(o.e); }).join(' / ')) + '</span>' : '') +
         (cross.indexOf(u) !== -1 ? '<span class="warn">⚠ 2店舗に入っています</span>' : '') +
         (ex && ex.note ? '<span class="memo">📝 ' + esc(ex.note) + '</span>' : '') + '</div>';
-      var bars = mine.map(function (r) {
-        var a = mins(r[2]), b = mins(r[3]);
+      var reqBars = (isOk ? okr.map(function (r) { return [r.s, r.e, 'okb']; }) : mine.map(function (r) { return [r[2], r[3], '']; })).map(function (r) {
+        var a = Math.max(lo, mins(r[0])), b = Math.min(hi, mins(r[1]));
         var taken = cf.some(function (z) { return mins(z.c[1]) < b && a < mins(z.c[2]); });
-        return '<button class="bar" data-rq="' + esc(u) + '|' + r[2] + '|' + r[3] + '" style="left:' + pct(a) + ';width:' + wid(a, b) + '" title="押すと' + (taken ? '外す' : '採用') + '"' + (ro ? ' disabled' : '') + '>' + (taken ? '' : sh(r[2]) + '-' + sh(r[3])) + '</button>';
-      }).join('') + others.map(function (o) {
+        return '<button class="bar ' + r[2] + '" data-rq="' + esc(u) + '|' + hm(a) + '|' + hm(b) + '" style="left:' + pct(a) + ';width:' + wid(a, b) + '" title="押すと' + (taken ? '外す' : 'この店舗に採用') + '"' + (ro ? ' disabled' : '') + '>' + (taken ? '' : sh(hm(a)) + '-' + sh(hm(b)) + (isOk ? ' 他店OK' : '')) + '</button>';
+      }).join('');
+      var othBars = others.map(function (o) {
         var a = Math.max(lo, mins(o.s)), b = Math.min(hi, mins(o.e)); if (a >= b) return '';
         return '<div class="bar oth" style="left:' + pct(a) + ';width:' + wid(a, b) + '">' + esc(sname(o.store)) + '</div>';
-      }).join('') + cf.map(function (z) {
+      }).join('');
+      var pickBars = cf.map(function (z) {
         var a = mins(z.c[1]), b = mins(z.c[2]);
-        var inReq = mine.some(function (r) { return mins(r[2]) <= a && b <= mins(r[3]); });
+        var inReq = mine.some(function (r) { return mins(r[2]) <= a && b <= mins(r[3]); }) || okAll.some(function (r) { return mins(r.s) <= a && b <= mins(r.e); });
         return '<div class="bar pick' + (inReq ? '' : ' out') + '" style="left:' + pct(a) + ';width:' + wid(a, b) + '">' + sh(z.c[1]) + '-' + sh(z.c[2]) + (inReq ? '' : ' 希望外') + '</div>';
       }).join('');
       var act = cf.length ? cf.map(function (z) {
         return '<div class="ln2"><select data-cs="' + z.i + '"' + (ro ? ' disabled' : '') + '>' + stepOpts(z.c[1], lo, hi - B.slot) + '</select>〜<select data-ce="' + z.i + '"' + (ro ? ' disabled' : '') + '>' + stepOpts(z.c[2], lo + B.slot, hi) + '</select>' +
           (ro ? '' : '<button class="mini2" data-cdel="' + z.i + '">外す</button>') + '</div>';
       }).join('') + (ro ? '' : '<div class="ln2"><button class="mini2" data-cadd="' + esc(u) + '">＋時間帯</button></div>')
-        : (ro ? '' : '<div class="ln2">' + (mine.length ? '<button class="btn" data-adopt="' + esc(u) + '" style="padding:4px 12px;">採用</button>' : '<button class="mini2" data-cadd="' + esc(u) + '">＋時間帯</button>') + '</div>');
-      return '<div class="r" data-u="' + esc(u) + '">' + who + '<div class="track">' + gl + bars + '</div><div class="act">' + act + '</div></div>';
-    }).join('');
+        : (ro ? '' : '<div class="ln2">' + (mine.length || okr.length ? '<button class="btn" data-adopt="' + esc(u) + '" style="padding:4px 12px;">採用</button>' : '<button class="mini2" data-cadd="' + esc(u) + '">＋時間帯</button>') + '</div>');
+      return '<div class="r' + (isOk ? ' okr' : '') + '" data-u="' + esc(u) + '">' + who + '<div class="track">' + gl + reqBars + othBars + pickBars + '</div><div class="act">' + act + '</div></div>';
+    };
+    var rows = rowsU.map(function (u) { return rowHtml(u, false); }).join('');
+    var okRows = okU.map(function (u) { return rowHtml(u, true); }).join('');
 
-    // 下の一覧：他店でもOK・希望なし(この店舗)・未提出
-    var shown = {}; rowsU.forEach(function (u) { shown[u] = 1; });
-    var okList = Object.keys(B.extra || {}).filter(function (u) { return !shown[u] && okRanges(exOf(u, DAY)).some(function (r) { return r.store !== STORE; }); });
-    var uns = (B.unsubmitted[STORE] || []).filter(function (u) { return !shown[u]; });
-    var none = Object.keys(B.staff).filter(function (u) { return !shown[u] && inStore(u) && uns.indexOf(u) === -1 && okList.indexOf(u) === -1; }).sort(byStaff);
-    var nm = function (list, btn) { return list.length ? list.map(function (u) { var e = exOf(u, DAY); return esc(nameOfU(u)) + (btn && !ro ? ' <button class="mini2" data-addp="' + esc(u) + '">入れる</button>' : '') + (e && e.note ? '<span style="color:var(--short)">(' + esc(e.note) + ')</span>' : ''); }).join('、') : 'なし'; };
-    var okHtml = okList.length ? okList.map(function (u) { return esc(nameOfU(u)) + '<span class="muted">(' + esc(okRanges(exOf(u, DAY)).map(function (r) { return sname(r.store) + ' ' + sh(r.s) + '-' + sh(r.e); }).join(' / ')) + ')</span>' + (ro ? '' : ' <button class="mini2" data-addp="' + esc(u) + '">入れる</button>'); }).join('、') : 'なし';
+    var uns = (B.unsubmitted[code] || []).filter(function (u) { return !shown[u]; });
+    var none = Object.keys(B.staff).filter(function (u) { return !shown[u] && inStore(u, code) && uns.indexOf(u) === -1; }).sort(byStaff);
+    var nm = function (list) { return list.length ? list.map(function (u) { var e = exOf(u, DAY); return esc(nameOfU(u)) + (ro ? '' : ' <button class="mini2" data-addp="' + esc(u) + '">入れる</button>') + (e && e.note ? '<span style="color:var(--short)">(' + esc(e.note) + ')</span>' : ''); }).join('、') : 'なし'; };
     var cand = Object.keys(B.staff).filter(function (u) { return !shown[u]; }).sort(function (a, b) { return String(nameOfU(a)).localeCompare(String(nameOfU(b)), 'ja'); });
-    var mineC = cand.filter(inStore), othC = cand.filter(function (u) { return !inStore(u); });
+    var mineC = cand.filter(function (u) { return inStore(u, code); }), othC = cand.filter(function (u) { return !inStore(u, code); });
     var opt = function (u) { return '<option value="' + esc(u) + '">' + esc(nameOfU(u)) + '</option>'; };
-
     var summary = !c.placed ? '<span class="muted" style="font-size:14px;">まだ誰も入れていません。希望の帯(点線)を押すと採用されます。</span>'
       : !c.hasNeed ? '<span class="muted" style="font-size:14px;">この日の必要人数がシフト設定にありません(必要人数・曜日・期間のシート)</span>'
       : c.short ? '<span class="short">人が足りない時間帯が計 ' + hm2(c.short) + ' あります</span>(赤い区間)'
       : '<span class="ok">すべての時間帯で必要人数を満たしています</span>';
-    var lackNote = c.lack && c.hasNeed ? '<br><span class="short">希望者を全員入れても ' + hm2(c.lack) + ' 分足りません。募集文タブか、個別の依頼が必要です。</span>' : '';
-    var badN = Object.keys(badLines()).length;
-
-    g('b2day').innerHTML =
-      '<div class="dh"><h2>' + Number(B.month.slice(5, 7)) + '月' + DAY + '日(' + W.charAt(x.w) + ')</h2>' + (x.hol ? '<span class="type">' + esc(x.hol) + '</span>' : '') +
-      (sm.pattern ? '<span class="type">必要人数：' + esc(sm.pattern) + '</span>' : '') + '<span id="b2state" class="' + g('saveState').className + '" style="font-size:13px;padding:3px 10px;border-radius:99px;background:#E9EFEC;">' + esc(g('saveState').textContent) + '</span>' +
-      (ro ? '' : '<button class="btn" id="b2fill">全員を希望どおりに採用</button>') +
-      '<div class="nav"><button class="btn" id="b2prev"' + (DAY <= 1 ? ' disabled' : '') + '>‹ 前の日</button><button class="btn" id="b2next"' + (DAY >= B.days.length ? ' disabled' : '') + '>次の日 ›</button></div></div>' +
+    var lackNote = c.lack && c.hasNeed ? '<br><span class="short">希望者(他店でもOKを除く)を全員入れても ' + hm2(c.lack) + ' 分足りません。' + (okU.length ? '緑の点線の「他店でもOK」の人も使えます。' : '募集文タブか、個別の依頼が必要です。') + '</span>' : '';
+    return '<div data-st="' + esc(code) + '">' +
       '<div class="board"><div class="bi">' +
+      (many ? '<div class="secst">' + esc(st.name) + (sm.pattern ? '<small>必要人数：' + esc(sm.pattern) + '</small>' : '') + '</div>' : (sm.pattern ? '<div class="r sec"><div class="who">必要人数：' + esc(sm.pattern) + '</div></div>' : '')) +
       '<div class="r axis"><div class="who"></div><div class="track">' + axis + '</div><div class="act"></div></div>' +
       segRow('必要人数', needR) + segRow('希望者数', availR) + segRow('配置人数', pickR) +
       '<div class="r sec"><div class="who">この店舗の希望 ' + rowsU.length + '名 ― 点線の帯を押すと採用／右で時間を調整(2秒後に自動で保存)</div></div>' +
       (rows || '<div class="r"><div class="who muted" style="grid-column:1/-1;font-weight:400;">この日、この店舗の希望はありません</div></div>') +
-      '<div class="others"><div><b>他店でもOK</b>' + okHtml + '</div><div><b>希望なし</b>' + nm(none, true) + '</div><div><b>未提出</b>' + nm(uns, true) + '</div></div>' +
-      (ro || !cand.length ? '' : '<div class="addrow">希望の外の人を入れる：<select id="b2who"><option value="">(選ぶ)</option>' +
+      (okRows ? '<div class="r sec"><div class="who" style="color:var(--ok);">他店でもOKの人 ' + okU.length + '名 ― ほかの店舗に希望を出していて、この時間はこの店舗でもよい人(緑の点線を押すとこの店舗に採用)</div></div>' + okRows : '') +
+      '<div class="others"><div><b>希望なし</b>' + nm(none) + '</div><div><b>未提出</b>' + nm(uns) + '</div></div>' +
+      (ro || !cand.length ? '' : '<div class="addrow">希望の外の人を入れる：<select class="b2who"><option value="">(選ぶ)</option>' +
         (mineC.length ? '<optgroup label="この店舗の人">' + mineC.map(opt).join('') + '</optgroup>' : '') + (othC.length ? '<optgroup label="ほかの店舗の人(応援)">' + othC.map(opt).join('') + '</optgroup>' : '') +
-        '</select><button class="btn" id="b2add" style="padding:4px 12px;">追加</button><span class="muted">本人と確認してから入れてください</span></div>') +
-      '</div></div>' +
-      '<p class="sum2">' + summary + lackNote + '</p>' +
-      (badN ? '<p class="wl">注意：時間帯が重なっている人がいます(同じ人の確定が重なる・開始が終了より後)。直すと保存します</p>' : '') +
-      cross.map(function (u) { return '<p class="wl">注意：' + esc(nameOfU(u)) + 'さんは、この日ほかの店舗にも入っています</p>'; }).join('');
-    bindBoard(lo, hi);
+        '</select><button class="btn b2add" style="padding:4px 12px;">追加</button><span class="muted">本人と確認してから入れてください</span></div>') +
+      '</div></div><p class="sum2">' + (many ? '<b>' + esc(st.name) + '</b>：' : '') + summary + lackNote + '</p></div>';
   }
-  function bindBoard(lo, hi) {
+  function bindBoard() {
     var box = g('b2day');
-    var bdKey = key(STORE, DAY);
     var go = function (d) { leaveDay().then(function () { DAY = d; closeEditor(); renderStrip(); renderDay(); renderBuild(); }); };
     g('b2prev').onclick = function () { if (DAY > 1) go(DAY - 1); };
     g('b2next').onclick = function () { if (DAY < B.days.length) go(DAY + 1); };
     if (g('b2fill')) g('b2fill').onclick = function () { g('fillAll').click(); };
-    box.onclick = function (e) {
-      var t = e.target;
-      var rq = t.closest('[data-rq]');
-      if (rq) {
-        var p = rq.getAttribute('data-rq').split('|'), u = p[0], a = mins(p[1]), b = mins(p[2]);
-        var list = CONF[bdKey] || [];
-        var hit = list.filter(function (c) { return c[0] === u && mins(c[1]) < b && a < mins(c[2]); });
-        if (hit.length) CONF[bdKey] = list.filter(function (c) { return hit.indexOf(c) === -1; }); // 採用済み → 外す
-        else addConfTo(STORE, u, p[1], p[2]);
-        changedKeys([STORE]); return;
-      }
-      var ad = t.closest('[data-adopt]');
-      if (ad) { var u2 = ad.getAttribute('data-adopt'); reqOf(DAY, STORE).filter(function (r) { return r[4] === u2; }).forEach(function (r) { addConfTo(STORE, u2, r[2], r[3]); }); changedKeys([STORE]); return; }
-      var del = t.closest('[data-cdel]');
-      if (del) { (CONF[bdKey] || []).splice(Number(del.getAttribute('data-cdel')), 1); changedKeys([STORE]); return; }
-      var ca = t.closest('[data-cadd]');
-      if (ca) { addDefault(ca.getAttribute('data-cadd'), lo, hi); return; }
-      var ap = t.closest('[data-addp]');
-      if (ap) { addPerson(ap.getAttribute('data-addp'), lo, hi); return; }
-      if (t.id === 'b2add') { addPerson(g('b2who').value, lo, hi); return; }
-      var dd = t.closest('[data-bd]');
-      if (dd) { go(Number(dd.getAttribute('data-bd'))); }
-    };
-    // カレンダーはボードの外にあるので、別に
     Array.prototype.forEach.call(g('vBuild').querySelectorAll('[data-bd]'), function (b) { b.onclick = function () { go(Number(b.getAttribute('data-bd'))); }; });
+    box.onclick = function (e) {
+      var t = e.target, sec = t.closest('[data-st]'); if (!sec) return;
+      var code = sec.getAttribute('data-st');
+      withStore(code, function () { act(t, code); });
+    };
     box.onchange = function (e) {
-      var t = e.target, list = CONF[bdKey] || [];
-      if (t.hasAttribute('data-cs')) { list[Number(t.getAttribute('data-cs'))][1] = t.value; changedKeys([STORE]); }
-      if (t.hasAttribute('data-ce')) { list[Number(t.getAttribute('data-ce'))][2] = t.value; changedKeys([STORE]); }
+      var t = e.target, sec = t.closest('[data-st]'); if (!sec) return;
+      var code = sec.getAttribute('data-st'), list = CONF[key(code, DAY)] || [];
+      if (t.hasAttribute('data-cs')) { list[Number(t.getAttribute('data-cs'))][1] = t.value; changedKeys([code]); }
+      if (t.hasAttribute('data-ce')) { list[Number(t.getAttribute('data-ce'))][2] = t.value; changedKeys([code]); }
     };
   }
-  // 時間帯を1つ足す(営業開始から4時間。あとで右の時刻で直す)
-  function addDefault(u, lo, hi) {
-    var k = key(STORE, DAY), s = lo, e = Math.min(hi, lo + 240);
-    (CONF[k] = CONF[k] || []).push([u, hm(s), hm(e)]);
-    changedKeys([STORE]);
+  // ほかの店舗の確定と重なるか(重なれば店舗名を返す)
+  function clash(u, code, s, e) {
+    var hit = '';
+    B.stores.forEach(function (st) { if (st.code !== code) confOf(st.code, DAY).forEach(function (c) { if (c[0] === u && mins(c[1]) < mins(e) && mins(s) < mins(c[2])) hit = st.name; }); });
+    return hit;
   }
-  function addPerson(u, lo, hi) {
+  function act(t, code) {
+    var k = key(code, DAY), st = storeOf(code), lo = st.start, hi = st.end;
+    var rq = t.closest('[data-rq]');
+    if (rq) {
+      var p = rq.getAttribute('data-rq').split('|'), u = p[0], a = mins(p[1]), b = mins(p[2]);
+      var list = CONF[k] || [];
+      var hit = list.filter(function (c) { return c[0] === u && mins(c[1]) < b && a < mins(c[2]); });
+      if (hit.length) CONF[k] = list.filter(function (c) { return hit.indexOf(c) === -1; }); // 採用済み → 外す
+      else {
+        var cl = clash(u, code, p[1], p[2]);
+        if (cl) { alert(nameOfU(u) + 'さんは、この時間は ' + cl + ' に入っています。先にそちらを外してください'); return; }
+        addConfTo(code, u, p[1], p[2]);
+      }
+      changedKeys([code]); return;
+    }
+    var ad = t.closest('[data-adopt]');
+    if (ad) {
+      var u2 = ad.getAttribute('data-adopt');
+      var rs = reqOf(DAY, code).filter(function (r) { return r[4] === u2; }).map(function (r) { return [r[2], r[3]]; });
+      if (!rs.length) rs = okRanges(exOf(u2, DAY)).filter(function (r) { return r.store !== code && mins(r.s) >= lo && mins(r.e) <= hi; }).map(function (r) { return [r.s, r.e]; });
+      var skipped = [];
+      rs.forEach(function (r) { var cl = clash(u2, code, r[0], r[1]); if (cl) skipped.push(cl); else addConfTo(code, u2, r[0], r[1]); });
+      if (skipped.length) alert(nameOfU(u2) + 'さんは、ほかの店舗(' + skipped.join('・') + ')と時間が重なる分は入れていません');
+      changedKeys([code]); return;
+    }
+    var del = t.closest('[data-cdel]');
+    if (del) { (CONF[k] || []).splice(Number(del.getAttribute('data-cdel')), 1); changedKeys([code]); return; }
+    var ca = t.closest('[data-cadd]');
+    if (ca) { addDefault(ca.getAttribute('data-cadd'), code, lo, hi); return; }
+    var ap = t.closest('[data-addp]');
+    if (ap) { addPerson(ap.getAttribute('data-addp'), code, lo, hi); return; }
+    if (t.closest('.b2add')) { var sel = t.closest('[data-st]').querySelector('.b2who'); addPerson(sel ? sel.value : '', code, lo, hi); return; }
+  }
+  function addDefault(u, code, lo, hi) {
+    var k = key(code, DAY), s = lo, e = Math.min(hi, lo + 240);
+    (CONF[k] = CONF[k] || []).push([u, hm(s), hm(e)]);
+    changedKeys([code]);
+  }
+  function addPerson(u, code, lo, hi) {
     if (!u) { alert('入れる人を選んでください'); return; }
     var p = B.staff[u] || { name: u };
-    var k = key(STORE, DAY);
+    var k = key(code, DAY);
     if (!OUTOK[u + '|' + k] && !confirm(p.name + 'さんは、この日この店舗の希望がありません。\n本人と確認しましたか？\n［OK］確認した → 入れる(時間は右で直す)')) return;
     OUTOK[u + '|' + k] = true;
     (ADDED[k] = ADDED[k] || []).push(u);
-    // 他店でもOKの時間があれば、その時間で入れる
-    var oks = okRanges(exOf(u, DAY)).filter(function (r) { return mins(r.s) >= lo && mins(r.e) <= hi; });
-    if (oks.length) { oks.forEach(function (r) { addConfTo(STORE, u, r.s, r.e); }); changedKeys([STORE]); }
-    else addDefault(u, lo, hi);
+    addDefault(u, code, lo, hi);
   }
 
   // ===== 希望一覧(スマレジの表の形) =====
   var WALL = false;
   function renderWish() {
     if (!B || VIEWNOW !== 'vWish') return;
+    if (ALLST && multi()) WALL = true;
     var st = storeOf(STORE);
-    var people = Object.keys(B.staff).filter(function (u) { return WALL || inStore(u) || B.req.some(function (r) { return r[4] === u && r[1] === STORE; }); });
+    var people = Object.keys(B.staff).filter(function (u) { return WALL || inStore(u, STORE) || B.req.some(function (r) { return r[4] === u && r[1] === STORE; }); });
     var uns = B.unsubmitted[STORE] || [];
     people.sort(function (a, b) { var ua = uns.indexOf(a) !== -1, ub = uns.indexOf(b) !== -1; return ua !== ub ? (ua ? 1 : -1) : byStaff(a, b); });
     var head = B.days.map(function (x) { return '<th class="' + (x.hol || x.w === 0 ? 'hol' : x.w === 6 ? 'sat' : '') + '">' + x.d + '<br>' + W.charAt(x.w) + '</th>'; }).join('');
@@ -378,5 +451,5 @@
     };
   }
 
-  if (B) renderBuild();
+  if (B) { paintStoreTabs(); renderBuild(); }
 })();

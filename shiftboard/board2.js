@@ -231,7 +231,8 @@
     var body = codes.map(function (code) { return withStore(code, function () { return sectionHtml(code, many); }); }).join('<div style="height:14px"></div>');
     var badN = Object.keys(badLines()).length;
     var cross = crossOn(DAY);
-    g('b2day').innerHTML = head + body +
+    var noExtra = B.extra === undefined ? '<p class="wl" style="background:#FFF6F5;border:1px solid #F2B8B5;border-radius:8px;padding:8px 10px;">「他店でもOK」と「日のひとこと」のデータが Bot から届いていません。Bot の Shift.gs に、2026-12-12 の「直す3か所」(shMine_・shSubmit_・shBoardData_)が入っているか確かめてください。</p>' : '';
+    g('b2day').innerHTML = head + noExtra + body +
       (badN ? '<p class="wl">注意：時間帯が重なっている人がいます(同じ人の確定が重なる・開始が終了より後)。直すと保存します</p>' : '') +
       cross.map(function (u) { return '<p class="wl">注意：' + esc(nameOfU(u)) + 'さんは、この日2つの店舗に入っています</p>'; }).join('');
     bindBoard();
@@ -286,10 +287,11 @@
         (others.length ? '<span class="warn">' + (isOk ? '' : '他店で') + '確定：' + esc(others.map(function (o) { return sname(o.store) + ' ' + sh(o.s) + '-' + sh(o.e); }).join(' / ')) + '</span>' : '') +
         (cross.indexOf(u) !== -1 ? '<span class="warn">⚠ 2店舗に入っています</span>' : '') +
         (ex && ex.note ? '<span class="memo">📝 ' + esc(ex.note) + '</span>' : '') + '</div>';
-      var reqBars = (isOk ? okr.map(function (r) { return [r.s, r.e, 'okb']; }) : mine.map(function (r) { return [r[2], r[3], '']; })).map(function (r) {
+      var okHere = okRanges(ex).filter(function (r) { return r.store === code; });
+      var reqBars = (isOk ? okr.map(function (r) { return [r.s, r.e, 'okb', 1]; }) : mine.map(function (r) { var ok = okHere.some(function (o) { return o.s === r[2] && o.e === r[3]; }); return [r[2], r[3], ok ? 'okb' : '', ok ? 1 : 0]; })).map(function (r) {
         var a = Math.max(lo, mins(r[0])), b = Math.min(hi, mins(r[1]));
         var taken = cf.some(function (z) { return mins(z.c[1]) < b && a < mins(z.c[2]); });
-        return '<button class="bar ' + r[2] + '" data-rq="' + esc(u) + '|' + hm(a) + '|' + hm(b) + '" style="left:' + pct(a) + ';width:' + wid(a, b) + '" title="押すと' + (taken ? '外す' : 'この店舗に採用') + '"' + (ro ? ' disabled' : '') + '>' + (taken ? '' : sh(hm(a)) + '-' + sh(hm(b)) + (isOk ? ' 他店OK' : '')) + '</button>';
+        return '<button class="bar ' + r[2] + '" data-rq="' + esc(u) + '|' + hm(a) + '|' + hm(b) + '" style="left:' + pct(a) + ';width:' + wid(a, b) + '" title="押すと' + (taken ? '外す' : 'この店舗に採用') + '"' + (ro ? ' disabled' : '') + '>' + (taken ? '' : sh(hm(a)) + '-' + sh(hm(b)) + (r[3] ? ' 他店OK' : '')) + '</button>';
       }).join('');
       var othBars = others.map(function (o) {
         var a = Math.max(lo, mins(o.s)), b = Math.min(hi, mins(o.e)); if (a >= b) return '';
@@ -298,7 +300,8 @@
       var pickBars = cf.map(function (z) {
         var a = mins(z.c[1]), b = mins(z.c[2]);
         var inReq = mine.some(function (r) { return mins(r[2]) <= a && b <= mins(r[3]); }) || okAll.some(function (r) { return mins(r.s) <= a && b <= mins(r.e); });
-        return '<div class="bar pick' + (inReq ? '' : ' out') + '" style="left:' + pct(a) + ';width:' + wid(a, b) + '">' + sh(z.c[1]) + '-' + sh(z.c[2]) + (inReq ? '' : ' 希望外') + '</div>';
+        var okMark = okHere.some(function (o) { return mins(o.s) <= a && b <= mins(o.e); }) || okAll.some(function (o) { return mins(o.s) <= a && b <= mins(o.e); });
+        return '<div class="bar pick' + (inReq ? '' : ' out') + '" style="left:' + pct(a) + ';width:' + wid(a, b) + (okMark ? ';box-shadow:inset 0 -4px 0 #7CC48C' : '') + '">' + sh(z.c[1]) + '-' + sh(z.c[2]) + (inReq ? (okMark ? ' 他店OK' : '') : ' 希望外') + '</div>';
       }).join('');
       var act = cf.length ? cf.map(function (z) {
         return '<div class="ln2"><select data-cs="' + z.i + '"' + (ro ? ' disabled' : '') + '>' + stepOpts(z.c[1], lo, hi - B.slot) + '</select>〜<select data-ce="' + z.i + '"' + (ro ? ' disabled' : '') + '>' + stepOpts(z.c[2], lo + B.slot, hi) + '</select>' +
@@ -326,7 +329,7 @@
       (many ? '<div class="secst">' + esc(st.name) + (sm.pattern ? '<small>必要人数：' + esc(sm.pattern) + '</small>' : '') + '</div>' : (sm.pattern ? '<div class="r sec"><div class="who">必要人数：' + esc(sm.pattern) + '</div></div>' : '')) +
       '<div class="r axis"><div class="who"></div><div class="track">' + axis + '</div><div class="act"></div></div>' +
       segRow('必要人数', needR) + segRow('希望者数', availR) + segRow('配置人数', pickR) +
-      '<div class="r sec"><div class="who">この店舗の希望 ' + rowsU.length + '名 ― 点線の帯を押すと採用／右で時間を調整(2秒後に自動で保存)</div></div>' +
+      '<div class="r sec"><div class="who">この店舗の希望 ' + rowsU.length + '名 ― 点線の帯を押すと採用／右で時間を調整(2秒後に自動で保存)。<span style="color:var(--ok)">緑の帯＝「他店でもOK」にした時間</span></div></div>' +
       (rows || '<div class="r"><div class="who muted" style="grid-column:1/-1;font-weight:400;">この日、この店舗の希望はありません</div></div>') +
       (okRows ? '<div class="r sec"><div class="who" style="color:var(--ok);">他店でもOKの人 ' + okU.length + '名 ― ほかの店舗に希望を出していて、この時間はこの店舗でもよい人(緑の点線を押すとこの店舗に採用)</div></div>' + okRows : '') +
       '<div class="others"><div><b>希望なし</b>' + nm(none) + '</div><div><b>未提出</b>' + nm(uns) + '</div></div>' +

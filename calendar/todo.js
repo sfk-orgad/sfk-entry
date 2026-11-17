@@ -1,10 +1,30 @@
 // calendar/todo.js
 // 2026-12-17：営業の情報(休業・料金区分・祝日・トピック/イベント。締めチェック管理簿のカレンダー)も重ねて出す(営業カレンダーの画面の役割をシフトカレンダーに寄せる)
 // シフトカレンダーに、共有のTODOリストの期限を出す(2026-12-16)。未完了のタスクを、期限の日のマスと、日を押したときの下に出す
-//   index.html の一番下で読む：<script src="todo.js?v=2"></script>。TODOリストを使う権限がない人には何も出ない
+//   index.html の一番下で読む：<script src="todo.js?v=3"></script>。TODOリストを使う権限がない人には何も出ない
 (function () {
   if (typeof renderCal !== 'function') return;
   var TODO = {}, LOADED = '', BIZ = {};
+  var BZSHOW = (function () { try { return localStorage.getItem('cal_bz_show') || ''; } catch (e) { return ''; } })(); // 営業の表示：''＝全店舗 ／ 店舗コード＝その店舗だけ(2026-12-17)
+  function shortName(n) { return String(n).replace(/^(Sauna Base |SAUNA )/i, '').slice(0, 8); }
+  function bzStores(bz) { return bz.stores.filter(function (s2) { return !BZSHOW || s2.code === BZSHOW; }); }
+  function tint(code) { var c = typeof colorOf === 'function' ? colorOf(code) : '#5F6670'; return 'background:' + c + '1A !important;color:' + c + ';border:1px solid ' + c + '66'; }
+  // 営業の表示の切り替え(凡例の下)
+  function paintSwitch() {
+    var bz = C && BIZ[C.month], box = document.getElementById('bzSw');
+    if (!bz || bz.stores.length < 2) { if (box) box.remove(); return; }
+    if (!box) { document.getElementById('cal').insertAdjacentHTML('beforebegin', '<div id="bzSw" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 8px;font-size:13px;"></div>'); box = document.getElementById('bzSw'); }
+    box.innerHTML = '<span style="color:var(--muted);">営業・イベントの表示：</span>' + [{ code: '', name: '全店舗' }].concat(bz.stores).map(function (s2) {
+      var on = BZSHOW === s2.code;
+      return '<button data-bzs="' + esc(s2.code) + '" style="padding:4px 12px;border-radius:999px;font-size:13px;cursor:pointer;font-family:inherit;border:1px solid ' + (s2.code ? colorOf(s2.code) : '#B9C0C8') + ';' +
+        (on ? 'background:' + (s2.code ? colorOf(s2.code) : '#16323A') + ';color:#fff;font-weight:700;' : 'background:#fff;color:' + (s2.code ? colorOf(s2.code) : 'var(--ink)') + ';') + '">' + esc(s2.code ? shortName(s2.name) : s2.name) + '</button>';
+    }).join('');
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-bzs]'); if (!b) return;
+    BZSHOW = b.getAttribute('data-bzs'); try { localStorage.setItem('cal_bz_show', BZSHOW); } catch (x) {}
+    origCal(); origDetail();
+  });
   var css = document.createElement('style');
   css.textContent = '.chip.todo{background:#EFEAF7 !important;color:#4B3480;border:1px solid #CBBFE6}.chip.todo.late{background:#FDECEA !important;color:#B42318;border-color:#F2B8B5}' +
     '.chip.biz{background:#EEF0F2 !important;color:#5F6670;border:1px solid #D5DAE0}.chip.biz.tp{background:#FFF4DA !important;color:#8A5A00;border-color:#F2D58A}.day.closed{background:#F1F3F5 !important}' +
@@ -29,15 +49,19 @@
   var origCal0 = renderCal, origDetail0 = renderDetail;
   function origCal() {
     origCal0();
+    paintSwitch();
     var t = today(), bz = BIZ[C.month];
     Array.prototype.forEach.call(document.querySelectorAll('#cal .day[data-d]'), function (el) {
       if (bz) {
-        var d = Number(el.getAttribute('data-d')), ss = bz.stores.map(function (s2) { return { s: s2, x: (bz.days[s2.code] || {})[d] }; }).filter(function (z) { return z.x; });
+        var d = Number(el.getAttribute('data-d')), ss = bzStores(bz).map(function (s2) { return { s: s2, x: (bz.days[s2.code] || {})[d] }; }).filter(function (z) { return z.x; });
         var closed = ss.filter(function (z) { return z.x.closed; });
         if (ss.length && closed.length === ss.length) { el.classList.add('closed'); el.insertAdjacentHTML('beforeend', '<span class="chip biz">休業</span>'); }
-        else if (closed.length) el.insertAdjacentHTML('beforeend', '<span class="chip biz">休：' + esc(closed.map(function (z) { return z.s.name.replace(/^(SAUNA |Sauna Base )/i, '').slice(0, 4); }).join('・')) + '</span>');
-        var tp = []; ss.forEach(function (z) { z.x.topics.forEach(function (x) { if (tp.indexOf(x) === -1) tp.push(x); }); });
-        if (tp.length) el.insertAdjacentHTML('beforeend', '<span class="chip biz tp">★ ' + esc(tp[0]) + (tp.length > 1 ? ' 他' + (tp.length - 1) : '') + '</span>');
+        else if (closed.length) el.insertAdjacentHTML('beforeend', '<span class="chip biz">休：' + esc(closed.map(function (z) { return shortName(z.s.name).slice(0, 4); }).join('・')) + '</span>');
+        // トピック・イベントは店舗ごとに1つずつ、店舗の色で(全店舗のときは頭に店舗の略称)
+        ss.forEach(function (z) {
+          if (!z.x.topics.length) return;
+          el.insertAdjacentHTML('beforeend', '<span class="chip biz" style="' + tint(z.s.code) + '">' + (BZSHOW ? '★ ' : esc(shortName(z.s.name)).slice(0, 3) + '★') + esc(z.x.topics[0]) + (z.x.topics.length > 1 ? ' 他' + (z.x.topics.length - 1) : '') + '</span>');
+        });
       }
       list(Number(el.getAttribute('data-d'))).forEach(function (x) {
         el.insertAdjacentHTML('beforeend', '<span class="chip todo' + (x.due < t ? ' late' : '') + '">☐ ' + esc(x.title) + '</span>');
@@ -48,9 +72,9 @@
     origDetail0();
     var bz = C && BIZ[C.month];
     if (bz && DAY && g('detail')) {
-      var rows = bz.stores.map(function (s2) {
+      var rows = bzStores(bz).map(function (s2) {
         var x = (bz.days[s2.code] || {})[DAY]; if (!x) return '';
-        return '<div class="bz1"><b>' + esc(s2.name) + '</b>　' + (x.closed ? '<span class="cl">休業</span>' : '営業・' + esc(x.price)) + (x.hol ? '　' + esc(x.hol) : '') +
+        return '<div class="bz1" style="border-left:4px solid ' + colorOf(s2.code) + ';padding-left:8px;"><b style="color:' + colorOf(s2.code) + '">' + esc(s2.name) + '</b>　' + (x.closed ? '<span class="cl">休業</span>' : '営業・' + esc(x.price)) + (x.hol ? '　' + esc(x.hol) : '') +
           (x.topics.length ? '<ul>' + x.topics.map(function (tp) { return '<li>' + esc(tp) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
       }).join('');
       if (rows) g('detail').insertAdjacentHTML('beforeend', '<div class="bzs"><div style="font-weight:700;font-size:14px;">営業</div>' + rows + '</div>');

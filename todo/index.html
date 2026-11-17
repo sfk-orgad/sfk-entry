@@ -50,7 +50,7 @@
 <div class="t-toast" id="toast" hidden></div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-12-16a';
+var PAGE_VERSION = '2026-12-17a';
 var P = Portal.start({ tool: 'todo', title: 'TODOリスト' });
 var g = Portal.$, esc = Portal.esc;
 var D = null, SHOW = 'open', SCOPE = 'all', EDIT = null;
@@ -76,7 +76,7 @@ function render() {
   var list = D.items.filter(function (x) { return (SHOW === 'open' ? !x.done : x.done) && (SCOPE === 'all' || x.scope === SCOPE); });
   var openN = D.items.filter(function (x) { return !x.done; }).length;
   var h = '<div class="t-bar"><button class="t-chip' + (SHOW === 'open' ? ' on' : '') + '" data-show="open">未完了 ' + openN + '</button><button class="t-chip' + (SHOW === 'done' ? ' on' : '') + '" data-show="done">完了</button>' +
-    (D.staff ? '<span style="width:8px"></span>' + [['all', 'すべて'], ['全員', '全員向け'], ['社員のみ', '社員のみ']].map(function (c) { return '<button class="t-chip' + (SCOPE === c[0] ? ' on' : '') + '" data-scope="' + c[0] + '">' + c[1] + '</button>'; }).join('') : '') + '</div>' +
+    (D.staff ? '<button class="t-chip" id="rulesBtn">🔁 決まり</button><span style="width:8px"></span>' + [['all', 'すべて'], ['全員', '全員向け'], ['社員のみ', '社員のみ']].map(function (c) { return '<button class="t-chip' + (SCOPE === c[0] ? ' on' : '') + '" data-scope="' + c[0] + '">' + c[1] + '</button>'; }).join('') : '') + '</div>' +
     '<button class="p-btn p-solid p-big" id="add" style="width:100%;margin-bottom:6px;">＋ タスクを足す</button>';
   var groups = SHOW === 'open' ? [
     ['期限を過ぎています', function (x) { return x.due && x.due < today; }, 'late'],
@@ -99,13 +99,14 @@ function render() {
   Array.prototype.forEach.call(document.querySelectorAll('[data-scope]'), function (b) { b.onclick = function () { SCOPE = b.getAttribute('data-scope'); render(); }; });
   g('add').onclick = function () { EDIT = {}; renderForm(); };
   if (g('copyYear')) g('copyYear').onclick = copyYear;
+  if (g('rulesBtn')) g('rulesBtn').onclick = openRules;
 }
 function item(x, today) {
   var late = !x.done && x.due && x.due < today;
   return '<div class="t-it' + (x.done ? ' done' : '') + (x.scope === '社員のみ' ? ' staff' : '') + '"><button class="t-ck' + (x.done ? ' on' : '') + '" data-done="' + esc(x.id) + '" aria-label="完了にする">' + (x.done ? '✓' : '') + '</button>' +
     '<div class="t-body"><div class="t-ti">' + esc(x.title) + '</div><div class="t-meta">' +
     (x.due ? '<span class="' + (late ? 'late' : '') + '">期限 ' + md(x.due) + '</span>' : '') +
-    (x.scope === '社員のみ' ? '<span class="t-tag">社員のみ</span>' : '') +
+    (x.scope === '社員のみ' ? '<span class="t-tag">社員のみ</span>' : '') + (x.rule ? '<span class="t-tag" style="background:#E6F3E7;color:#2E7D32;">🔁 決まり</span>' : '') +
     (x.store ? '<span>' + esc(x.store.split(',').map(sname).join('・')) + '</span>' : '') +
     (x.who ? '<span>担当 ' + esc(x.who) + '</span>' : '') +
     (x.done ? '<span>完了 ' + esc(x.doneBy) + ' ' + esc(String(x.doneAt).slice(5)) + '</span>' : '<span>作成 ' + esc(x.by) + '</span>') + '</div>' +
@@ -161,6 +162,68 @@ function copyYear() {
   var y = new Date().getFullYear();
   if (!confirm((y - 1) + '年に期限があったタスクを、期限を1年ずらして ' + y + '年に写します。よろしいですか？')) return;
   call('todo.copyYear', { year: y }).then(function (r) { if (!r.ok) { if (!fail(r)) alert(r.error); return; } toast(r.added ? r.added + '件を写しました' : '写すものはありませんでした'); load(); });
+}
+// ===== 決まり(毎年この時期にこれをやる。社員だけ。2026-12-17) =====
+var R = null, REDIT = null;
+var WHEN_HINT = { '毎年': '月/日(例：12/28、3/31。複数は「,」)', '毎月': '日(例：1、15、末)', '毎週': '曜日(例：月、木)', '第n曜日': '例：第2水、最終金', '日付指定': '例：2027/3/31' };
+function openRules() {
+  g('view').innerHTML = '<div class="p-card p-muted">読み込んでいます…</div>';
+  call('todo.rules', {}, { retry: true }).then(function (r) { if (!r.ok) { if (!fail(r)) alert(r.error); render(); return; } R = r; renderRules(); });
+}
+function renderRules() {
+  REDIT = null;
+  var h = '<button class="p-btn" id="rBack">‹ TODOリストへ</button><div class="p-card" style="margin-top:10px;"><h2 style="margin-top:0;">🔁 決まり(毎年この時期にこれをやる)</h2>' +
+    '<div class="p-note">決まりを作っておくと、期限の「何日前から出す」になったときに、TODOリストに自動で1件できます(同じ期限は1回だけ)。引き継ぎの備忘マニュアルとして使えます。</div>' +
+    '<button class="p-btn p-solid p-big" id="rAdd" style="width:100%;margin-top:10px;">＋ 決まりを足す</button></div>';
+  if (!R.rules.length) h += '<div class="p-card p-muted">まだ決まりはありません</div>';
+  R.rules.slice().sort(function (a, b) { return (a.next[0] || '9999') < (b.next[0] || '9999') ? -1 : 1; }).forEach(function (x) {
+    h += '<div class="t-it' + (x.scope === '社員のみ' ? ' staff' : '') + '" style="' + (x.on ? '' : 'opacity:.55;') + '"><div class="t-body"><div class="t-ti">' + esc(x.title) + (x.on ? '' : '<span class="t-tag" style="margin-left:6px;background:#EEF0F2;color:#5F6670;">止めている</span>') + '</div>' +
+      '<div class="t-meta"><span>' + esc(x.repeat) + ' ' + esc(x.when) + '</span><span>' + x.lead + '日前から出す</span>' + (x.scope === '社員のみ' ? '<span class="t-tag">社員のみ</span>' : '') +
+      (x.store ? '<span>' + esc(x.store.split(',').map(sname).join('・')) + '</span>' : '') + (x.who ? '<span>担当 ' + esc(x.who) + '</span>' : '') + '</div>' +
+      '<div class="t-meta">次：' + (x.next.length ? x.next.map(md).join('・') : '<span class="late">この1年はなし</span>') + '</div>' +
+      (x.memo ? '<div class="t-memo">' + esc(x.memo) + '</div>' : '') +
+      '<div class="t-ed"><button data-redit="' + esc(x.id) + '">直す</button><button data-rdel="' + esc(x.id) + '">消す</button></div></div></div>';
+  });
+  g('view').innerHTML = h;
+  g('rBack').onclick = function () { load(); };
+  g('rAdd').onclick = function () { REDIT = {}; renderRuleForm(); };
+  Array.prototype.forEach.call(document.querySelectorAll('[data-redit]'), function (b) { b.onclick = function () { REDIT = R.rules.filter(function (y) { return y.id === b.getAttribute('data-redit'); })[0]; renderRuleForm(); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-rdel]'), function (b) { b.onclick = function () {
+    var x = R.rules.filter(function (y) { return y.id === b.getAttribute('data-rdel'); })[0];
+    if (!x || !confirm('決まり「' + x.title + '」を消します。もうできているTODOは残ります。よろしいですか？')) return;
+    call('todo.ruleDelete', { id: x.id }).then(function (r) { if (!r.ok) { if (!fail(r)) alert(r.error); return; } toast('消しました'); openRules(); });
+  }; });
+}
+function renderRuleForm() {
+  var x = REDIT || {}, st = x.store ? x.store.split(',') : [], rp = x.repeat || '毎年';
+  var h = '<div class="p-card"><h2 style="margin-top:0;">' + (x.id ? '決まりを直す' : '決まりを足す') + '</h2>' +
+    '<label class="p-label">題名</label><input class="p-input" id="rT" maxlength="80" value="' + esc(x.title || '') + '" placeholder="例：年末の大掃除の準備・年賀状の発注">' +
+    '<label class="p-label">繰り返し</label><select class="p-select" id="rR">' + R.repeats.map(function (k) { return '<option' + (k === rp ? ' selected' : '') + '>' + k + '</option>'; }).join('') + '</select>' +
+    '<label class="p-label">曜日・日 <span class="p-muted" id="rHint">' + esc(WHEN_HINT[rp]) + '</span></label><input class="p-input" id="rW" value="' + esc(x.when || '') + '">' +
+    '<label class="p-label">何日前から出す(その日にTODOリストにできる)</label><input class="p-input" id="rL" inputmode="numeric" value="' + (x.lead != null ? x.lead : 14) + '">' +
+    '<label class="p-label">見られる人</label><div class="t-seg">' + ['全員', '社員のみ'].map(function (s2) { var on = (x.scope || '全員') === s2; return '<label class="' + (on ? 'on' : '') + '"><input type="radio" name="rS" value="' + s2 + '"' + (on ? ' checked' : '') + '>' + s2 + '</label>'; }).join('') + '</div>' +
+    (D.stores.length > 1 ? '<label class="p-label">店舗(どれも選ばなければ全店舗)</label><div class="t-st">' + D.stores.map(function (s2) { return '<label><input type="checkbox" class="rSt" value="' + esc(s2.code) + '"' + (st.indexOf(s2.code) !== -1 ? ' checked' : '') + '> ' + esc(s2.name) + '</label>'; }).join('') + '</div>' : '') +
+    '<label class="p-label">担当(なくてもよい)</label><input class="p-input" id="rWho" maxlength="40" value="' + esc(x.who || '') + '">' +
+    '<label class="p-label">やり方・メモ(引き継ぎ用。TODOにも写る)</label><textarea class="p-textarea" id="rM" maxlength="1000" placeholder="例：去年は12/20に〇〇へ電話で発注。50枚。">' + esc(x.memo || '') + '</textarea>' +
+    '<label class="p-label">使う期間(なくてもよい)</label><div style="display:flex;gap:8px;"><input type="date" class="p-input" id="rFrom" value="' + esc(x.start || '') + '"><input type="date" class="p-input" id="rTo" value="' + esc(x.end || '') + '"></div>' +
+    '<label style="display:block;margin-top:10px;"><input type="checkbox" id="rOn"' + (x.on === false ? '' : ' checked') + '> この決まりを使う(外すと、TODOを作らない)</label>' +
+    '<div id="rMsg"></div><div style="display:flex;gap:8px;margin-top:12px;"><button class="p-btn p-solid p-big" id="rSave" style="flex:1;">保存する</button><button class="p-btn p-big" id="rCancel" style="flex:1;">やめる</button></div></div>';
+  g('view').innerHTML = h;
+  g('rR').onchange = function () { g('rHint').textContent = WHEN_HINT[g('rR').value] || ''; };
+  Array.prototype.forEach.call(document.querySelectorAll('.t-seg input'), function (r) { r.onchange = function () { Array.prototype.forEach.call(document.querySelectorAll('.t-seg label'), function (l) { l.classList.toggle('on', l.querySelector('input').checked); }); }; });
+  g('rCancel').onclick = renderRules;
+  g('rSave').onclick = function () {
+    var sc = document.querySelector('.t-seg input:checked');
+    var rule = { id: x.id || '', ver: x.ver || '', title: g('rT').value, repeat: g('rR').value, when: g('rW').value, lead: g('rL').value, scope: sc ? sc.value : '全員',
+      stores: Array.prototype.filter.call(document.querySelectorAll('.rSt'), function (c) { return c.checked; }).map(function (c) { return c.value; }),
+      who: g('rWho').value, memo: g('rM').value, start: g('rFrom').value, end: g('rTo').value, on: g('rOn').checked };
+    var b = g('rSave'); b.disabled = true; b.textContent = '保存しています…'; g('rMsg').innerHTML = '';
+    call('todo.ruleSave', { rule: rule }).then(function (r) {
+      b.disabled = false; b.textContent = '保存する';
+      if (!r.ok) { if (!fail(r)) g('rMsg').innerHTML = '<div class="p-err" style="margin-top:8px;">' + esc(r.error) + '</div>'; return; }
+      toast('保存しました' + (r.made ? '(TODOが' + r.made + '件できました)' : '')); openRules();
+    }).catch(function () { b.disabled = false; b.textContent = '保存する'; g('rMsg').innerHTML = '<div class="p-err">通信に失敗しました</div>'; });
+  };
 }
 if (P) load();
 </script>

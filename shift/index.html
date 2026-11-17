@@ -120,7 +120,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-12-13a';
+var PAGE_VERSION = '2026-12-18a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -260,7 +260,12 @@ function startForm(D) {
   var lastStore = D.stores[0].code;          // 新しい時間帯の店舗の初期値(最後に選んだ店舗)
   // 店舗ごとの色(選んだ店舗で、時間帯の行に色を付ける。2026-12-13)
   var COLORS = [['#1D6F86', '#E3F1F5'], ['#C8743A', '#FBEEE4'], ['#6B4FA0', '#EFEAF7'], ['#2E7D32', '#E6F3E7']];
-  function colorOf(code) { var i = Math.max(0, D.stores.map(function (s) { return s.code; }).indexOf(code)); return COLORS[i % COLORS.length]; }
+  // 店舗の色：ポータル設定の店舗一覧の「色」があればそれ(薄い色は自動で作る)。無ければ順番の色(2026-12-18)
+  function pale(hex) { var n = parseInt(hex.slice(1), 16), r = n >> 16, g2 = (n >> 8) & 255, b = n & 255, m = function (x) { return Math.round(x + (255 - x) * 0.88); }; return 'rgb(' + m(r) + ',' + m(g2) + ',' + m(b) + ')'; }
+  function colorOf(code) {
+    var i = Math.max(0, D.stores.map(function (s) { return s.code; }).indexOf(code)), st = D.stores[i] || {};
+    return st.color ? [st.color, pale(st.color)] : COLORS[i % COLORS.length];
+  }
   if (MULTI) {
     $('storeHint').innerHTML = '時間帯ごとに、どちらの店舗で働けるかを選んでください。<span class="legend">' +
       D.stores.map(function (s) { return '<span><i style="background:' + colorOf(s.code)[0] + '"></i>' + esc(s.name) + '</span>'; }).join('') + '</span>';

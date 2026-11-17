@@ -454,5 +454,21 @@
     };
   }
 
+  // ===== シフト表(PDF・Excel)に、確定がない人も0として載せる(2026-12-16) =====
+  //   その店舗の所属の人(シフト希望を使える人)は、その月に確定がなくても行を出す(日数0・時間0)
+  if (typeof sheetData === 'function') {
+    var origSheet = sheetData;
+    sheetData = function () {
+      var d = origSheet.apply(this, arguments), have = {};
+      d.rows.forEach(function (r) { have[r.uid] = 1; });
+      var zero = Object.keys(B.staff).filter(function (u) { return !have[u] && inStore(u, STORE); }).sort(function (a, b) {
+        var ea = empOf(a), eb = empOf(b);
+        return ea !== eb ? (ea === '社員' ? -1 : eb === '社員' ? 1 : ea.localeCompare(eb, 'ja')) : String(nameOfU(a)).localeCompare(String(nameOfU(b)), 'ja');
+      });
+      zero.forEach(function (u) { d.rows.push({ uid: u, name: nameOfU(u), emp: empOf(u), cells: B.days.map(function () { return null; }), tot: { n: 0, span: 0, br: 0, work: 0 } }); });
+      return d;
+    };
+  }
+
   if (B) { paintStoreTabs(); renderBuild(); }
 })();

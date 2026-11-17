@@ -56,7 +56,7 @@
 <div id="done"><div class="in"><div class="k" id="doneK"></div><div class="t" id="doneT"></div></div></div>
 <script>
 var BOT_API = 'https://script.google.com/macros/s/AKfycbwhwNoFjOKK2MGr9qDDDZEolVc8IQrUS3Kcec1IIyf-t73_MGQFTYHdKaXi7R83Z6z2Iw/exec';
-var PAGE_VERSION = '2026-12-12a';
+var PAGE_VERSION = '2026-12-16a';
 var KEY_NAME = 'att_key';
 var W = '日月火水木金土', B = null, CUR = null, BUSY = false, HELP_OPEN = false, HELP_Q = '';
 function $(id) { return document.getElementById(id); }
@@ -91,11 +91,20 @@ function showRegister(msg) {
 }
 
 // ===== 打刻の画面 =====
+var BOARD_CACHE = 'clock_board';
+function todayKey() { var d = new Date(Date.now() - 5 * 3600000); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); } // 目安(営業日の切り替えはBotが決める)
+function setBoard(r) {
+  B = r; B.helpers = B.helpers || [];
+  if ($('ask').style.display !== 'flex') render();
+  try { localStorage.setItem(BOARD_CACHE, JSON.stringify(r)); } catch (e) {}
+}
 function load() {
   if (!key()) { showRegister(); return; }
+  // 前に読んだ画面をすぐ出してから、最新を読む(開いたときに待たないように。2026-12-16)
+  if (!B) { try { var c = JSON.parse(localStorage.getItem(BOARD_CACHE) || 'null'); if (c && c.today === todayKey()) { B = c; B.helpers = B.helpers || []; render(); } } catch (e) {} }
   return call('att.board', { key: key() }).then(function (r) {
-    if (!r.ok) { if (r.error === 'TERMINAL') { try { localStorage.removeItem(KEY_NAME); } catch (e) {} showRegister(r.message); } else $('main').innerHTML = '<div class="box err">' + esc(r.error) + '</div>'; return; }
-    B = r; B.helpers = B.helpers || []; render();
+    if (!r.ok) { if (r.error === 'TERMINAL') { try { localStorage.removeItem(KEY_NAME); localStorage.removeItem(BOARD_CACHE); } catch (e) {} showRegister(r.message); } else $('main').innerHTML = '<div class="box err">' + esc(r.error) + '</div>'; return; }
+    setBoard(r);
   }).catch(function () { if (!B) $('main').innerHTML = '<div class="box err">通信に失敗しました。電波を確かめて、画面を読み込み直してください。</div>'; });
 }
 function card(x) {
@@ -145,12 +154,12 @@ function punch(kind) {
     $('done').style.display = 'flex';
     setTimeout(function () { $('done').style.display = 'none'; }, 2500);
     HELP_OPEN = false; HELP_Q = '';
-    load();
+    if (r.board && r.board.ok) setBoard(r.board); else load(); // 打刻の返事に最新の画面が入っているので、読み直さない
   }).catch(function () { BUSY = false; $('askErr').textContent = '通信に失敗しました。もう一度押してください(二重にはなりません)'; });
 }
 $('doIn').onclick = function () { punch('出勤'); };
 $('doOut').onclick = function () { punch('退勤'); };
-setInterval(function () { if ($('ask').style.display !== 'flex' && !HELP_OPEN) load(); }, 60000); // 1分ごとに状態を読み直す(応援の一覧を開いている間は止める)
+setInterval(function () { if ($('ask').style.display !== 'flex' && !HELP_OPEN && !document.hidden) load(); }, 60000); // 1分ごとに状態を読み直す(応援の一覧を開いている間は止める)
 load();
 </script>
 </body>

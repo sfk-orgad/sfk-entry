@@ -50,7 +50,7 @@
 <div class="t-toast" id="toast" hidden></div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-12-17a';
+var PAGE_VERSION = '2026-12-17b';
 var P = Portal.start({ tool: 'todo', title: 'TODOリスト' });
 var g = Portal.$, esc = Portal.esc;
 var D = null, SHOW = 'open', SCOPE = 'all', EDIT = null;
@@ -61,6 +61,10 @@ function fail(r) { if (r && r.error === 'AUTH') { Portal.gate(Portal.authMessage
 function ymd(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
 function md(s) { if (!s) return ''; var p = s.split('-').map(Number), d = new Date(p[0], p[1] - 1, p[2]); return p[1] + '/' + p[2] + '(' + W.charAt(d.getDay()) + ')'; }
 function sname(c) { var s = (D.stores || []).filter(function (x) { return x.code === c; })[0]; return s ? s.name : c; }
+// 店舗の色(ポータル設定の店舗一覧の「色」。無ければ順に決まった色)。店舗が増えても、店舗一覧に色を書けば揃う(2026-12-17)
+var PALS = ['#1F7A6B', '#7A4FB5', '#C2571A', '#2F6FBF', '#A23B72', '#4D7A1F'];
+function scolor(c) { var i = (D.stores || []).map(function (x) { return x.code; }).indexOf(c), s = (D.stores || [])[i]; return s && s.color ? s.color : PALS[(i < 0 ? 0 : i) % PALS.length]; }
+function schips(str) { return str.split(',').map(function (c) { var col = scolor(c); return '<span class="t-tag" style="background:' + col + '1A;color:' + col + ';border:1px solid ' + col + '55;">' + esc(sname(c)) + '</span>'; }).join(''); }
 
 function load() {
   return call('todo.list', {}, { retry: true }).then(function (r) {
@@ -107,7 +111,7 @@ function item(x, today) {
     '<div class="t-body"><div class="t-ti">' + esc(x.title) + '</div><div class="t-meta">' +
     (x.due ? '<span class="' + (late ? 'late' : '') + '">期限 ' + md(x.due) + '</span>' : '') +
     (x.scope === '社員のみ' ? '<span class="t-tag">社員のみ</span>' : '') + (x.rule ? '<span class="t-tag" style="background:#E6F3E7;color:#2E7D32;">🔁 決まり</span>' : '') +
-    (x.store ? '<span>' + esc(x.store.split(',').map(sname).join('・')) + '</span>' : '') +
+    (x.store ? schips(x.store) : '') +
     (x.who ? '<span>担当 ' + esc(x.who) + '</span>' : '') +
     (x.done ? '<span>完了 ' + esc(x.doneBy) + ' ' + esc(String(x.doneAt).slice(5)) + '</span>' : '<span>作成 ' + esc(x.by) + '</span>') + '</div>' +
     (x.memo ? '<div class="t-memo">' + esc(x.memo) + '</div>' : '') +
@@ -179,7 +183,7 @@ function renderRules() {
   R.rules.slice().sort(function (a, b) { return (a.next[0] || '9999') < (b.next[0] || '9999') ? -1 : 1; }).forEach(function (x) {
     h += '<div class="t-it' + (x.scope === '社員のみ' ? ' staff' : '') + '" style="' + (x.on ? '' : 'opacity:.55;') + '"><div class="t-body"><div class="t-ti">' + esc(x.title) + (x.on ? '' : '<span class="t-tag" style="margin-left:6px;background:#EEF0F2;color:#5F6670;">止めている</span>') + '</div>' +
       '<div class="t-meta"><span>' + esc(x.repeat) + ' ' + esc(x.when) + '</span><span>' + x.lead + '日前から出す</span>' + (x.scope === '社員のみ' ? '<span class="t-tag">社員のみ</span>' : '') +
-      (x.store ? '<span>' + esc(x.store.split(',').map(sname).join('・')) + '</span>' : '') + (x.who ? '<span>担当 ' + esc(x.who) + '</span>' : '') + '</div>' +
+      (x.store ? schips(x.store) : '') + (x.who ? '<span>担当 ' + esc(x.who) + '</span>' : '') + '</div>' +
       '<div class="t-meta">次：' + (x.next.length ? x.next.map(md).join('・') : '<span class="late">この1年はなし</span>') + '</div>' +
       (x.memo ? '<div class="t-memo">' + esc(x.memo) + '</div>' : '') +
       '<div class="t-ed"><button data-redit="' + esc(x.id) + '">直す</button><button data-rdel="' + esc(x.id) + '">消す</button></div></div></div>';

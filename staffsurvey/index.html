@@ -72,7 +72,7 @@
 <div id="sheetView"><div class="sb"><b>アンサーシート</b><input id="asTitle" placeholder="見出し"><button id="asPrint">印刷・PDFに保存</button><button id="asClose">閉じる</button></div><div id="asPage"></div></div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-12-02a';
+var PAGE_VERSION = '2026-12-18a';
 var P = Portal.start({ tool: 'staffsurvey', title: 'スタッフアンケート' });
 var g = Portal.$, esc = Portal.esc, D = null, VIEW = 'trend', STORE = 'all', F = { store: '', state: 'open', kind: '' };
 var COLORS = ['#1D6F86', '#C8743A', '#6B4FA0', '#2E7D32'];
@@ -145,7 +145,7 @@ function renderTickets() {
       '<textarea data-k="memo" placeholder="メモ(社員だけが見る。対応の内容など)">' + esc(t.memo) + '</textarea>' +
       '<div class="ans"><textarea data-k="answer" placeholder="会社からの回答(アンサーシートに載せる文。スタッフ全員に見せる前提で)">' + esc(t.answer) + '</textarea></div>' +
       '<label class="onsheet"><input type="checkbox" data-k="sheet"' + (t.sheet ? ' checked' : '') + '> アンサーシートに載せる</label></div>' +
-      '<button class="p-btn" data-save style="margin-top:6px;">保存</button> <span class="msg"></span></div>';
+      '<div style="margin-top:6px;display:flex;align-items:center;gap:8px;"><span class="sv" data-sv="' + esc(t.id) + '">' + svLabel(t.id) + '</span><button class="p-btn" data-retry style="display:none;">もう一度保存</button><span class="msg"></span></div></div>';
   }).join('') : '<div class="p-card p-muted">該当する件はありません</div>';
   g('view').innerHTML = h;
   g('fStore').onchange = function () { F.store = this.value; render(); };
@@ -153,21 +153,74 @@ function renderTickets() {
   g('fState').onchange = function () { F.state = this.value; render(); };
   g('asMake').onclick = showAnswerSheet;
 }
+// ===== 自動保存(2026-12-18)：入力して2秒たったら保存。シフト作成と同じ =====
+//   PEND[id]＝まだ保存していない入力(画面を描き直しても消えないよう、入力のたびにここへ写す)。SAVING[id]＝保存中
+var PEND = {}, TIMER = {}, SAVING = {}, SVSTATE = {};
+function svLabel(id) {
+  var x = SVSTATE[id];
+  if (!x) return '<span class="p-muted" style="font-size:13px;">自動で保存されます</span>';
+  var col = x.k === 'err' ? '#B42318' : x.k === 'dirty' ? '#8A5A00' : x.k === 'ok' ? '#1F7A3D' : '#5F6670';
+  return '<span style="font-size:13px;font-weight:700;color:' + col + ';">' + esc(x.t) + '</span>';
+}
+function setSv(id, k, t) {
+  SVSTATE[id] = { k: k, t: t };
+  var el = document.querySelector('[data-sv="' + id + '"]'); if (el) el.innerHTML = svLabel(id);
+  var box = document.querySelector('.tk[data-id="' + id + '"]');
+  if (box) { var rb = box.querySelector('[data-retry]'); if (rb) rb.style.display = k === 'err' && !/ほかの人/.test(t) ? '' : 'none'; }
+}
+function readBox(box) {
+  var v = function (k) { return box.querySelector('[data-k="' + k + '"]').value; };
+  return { state: v('state'), owner: v('owner'), memo: v('memo'), answer: v('answer'), sheet: box.querySelector('[data-k="sheet"]').checked };
+}
+function changed(box, quick) {
+  var id = box.getAttribute('data-id');
+  PEND[id] = readBox(box);
+  clearTimeout(TIMER[id]);
+  if (PEND[id].sheet && !PEND[id].answer.trim()) { setSv(id, 'err', 'アンサーシートに載せるときは、会社からの回答を書いてください(書くと保存します)'); return; }
+  setSv(id, 'dirty', '未保存(2秒後に保存)');
+  TIMER[id] = setTimeout(function () { saveTicket(id); }, quick ? 600 : 2000);
+}
+function saveTicket(id) {
+  var vals = PEND[id]; if (!vals) return Promise.resolve(true);
+  if (SAVING[id]) { TIMER[id] = setTimeout(function () { saveTicket(id); }, 500); return Promise.resolve(false); }
+  var t = D.tickets.filter(function (x) { return x.id === id; })[0]; if (!t) return Promise.resolve(false);
+  SAVING[id] = true; delete PEND[id];
+  setSv(id, 'busy', '保存しています…');
+  return call('ssv.ticket', { id: id, state: vals.state, owner: vals.owner, memo: vals.memo, answer: vals.answer, sheet: vals.sheet, ver: [t.state, t.owner, t.memo, t.answer, t.sheet ? '1' : ''].join('|') }).then(function (r) {
+    SAVING[id] = false;
+    if (!r.ok) {
+      if (!PEND[id]) PEND[id] = vals; // 失敗したら、入力は残す
+      setSv(id, 'err', /ほかの人/.test(r.error) ? 'ほかの人が先に直しました。上の「開き直す」で最新にしてから直してください' : '保存できませんでした：' + r.error);
+      if (/ほかの人/.test(r.error)) { var m = document.querySelector('.tk[data-id="' + id + '"] .msg'); if (m) m.innerHTML = '<a href="#" data-reload>開き直す</a>'; }
+      return false;
+    }
+    t.state = vals.state; t.owner = vals.owner; t.memo = vals.memo; t.answer = vals.answer; t.sheet = vals.sheet; t.at = r.at || '今'; t.by = r.by || (Portal.session() || {}).name || '';
+    // 状態の札だけ描き直す(書いている途中の欄はそのまま)
+    var box = document.querySelector('.tk[data-id="' + id + '"]');
+    if (box) { var st = box.querySelector('.st'); if (st) { st.textContent = t.state; st.className = 'st s' + D.states.indexOf(t.state); } }
+    if (PEND[id]) setSv(id, 'dirty', '未保存(2秒後に保存)');
+    else { var n = new Date(); setSv(id, 'ok', '保存済み ' + n.getHours() + ':' + ('0' + n.getMinutes()).slice(-2)); }
+    return true;
+  }).catch(function () { SAVING[id] = false; if (!PEND[id]) PEND[id] = vals; setSv(id, 'err', '通信に失敗しました'); return false; });
+}
+function onEdit(e) {
+  var el = e.target; if (!el.getAttribute || !el.getAttribute('data-k')) return;
+  var box = el.closest('.tk'); if (!box) return;
+  changed(box, el.tagName === 'SELECT' || el.type === 'checkbox');
+}
+g('view').addEventListener('input', onEdit);
+g('view').addEventListener('change', onEdit);
 g('view').addEventListener('click', function (e) {
-  var b = e.target.closest('[data-save]'); if (!b) return;
-  var box = b.closest('.tk'), id = box.getAttribute('data-id'), t = D.tickets.filter(function (x) { return x.id === id; })[0];
-  var val = function (k) { return box.querySelector('[data-k="' + k + '"]').value; };
-  var onSheet = box.querySelector('[data-k="sheet"]').checked;
-  if (onSheet && !val('answer').trim()) { box.querySelector('.msg').textContent = 'アンサーシートに載せるときは、会社からの回答を書いてください'; return; }
-  b.disabled = true; box.querySelector('.msg').textContent = '保存しています…';
-  call('ssv.ticket', { id: id, state: val('state'), owner: val('owner'), memo: val('memo'), answer: val('answer'), sheet: onSheet, ver: [t.state, t.owner, t.memo, t.answer, t.sheet ? '1' : ''].join('|') }).then(function (r) {
-    b.disabled = false;
-    if (!r.ok) { box.querySelector('.msg').textContent = r.error; return; }
-    t.state = val('state'); t.owner = val('owner'); t.memo = val('memo'); t.answer = val('answer'); t.sheet = onSheet; t.at = '今'; t.by = (Portal.session() || {}).name || '';
-    box.querySelector('.msg').textContent = '保存しました';
-    setTimeout(render, 600);
-  }).catch(function () { b.disabled = false; box.querySelector('.msg').textContent = '通信に失敗しました'; });
+  var rb = e.target.closest('[data-retry]');
+  if (rb) { var id = rb.closest('.tk').getAttribute('data-id'); if (!PEND[id]) PEND[id] = readBox(rb.closest('.tk')); saveTicket(id); return; }
+  var rl = e.target.closest('[data-reload]');
+  if (rl) { e.preventDefault(); PEND = {}; SVSTATE = {}; load(); }
 });
+// 画面を描き直す前(絞り込み・タブの切り替え)に、未保存の分をすぐ保存する
+var renderNoFlush = render;
+render = function () { Object.keys(PEND).forEach(function (id) { clearTimeout(TIMER[id]); if (!(PEND[id].sheet && !PEND[id].answer.trim())) saveTicket(id); }); renderNoFlush(); };
+// 閉じるときに未保存があれば知らせる
+window.addEventListener('beforeunload', function (e) { if (Object.keys(PEND).length || Object.keys(SAVING).some(function (k) { return SAVING[k]; })) { e.preventDefault(); e.returnValue = ''; } });
 
 // ===== やりがい(選んだ項目の数) =====
 function renderChoice() {

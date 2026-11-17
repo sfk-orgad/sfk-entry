@@ -260,6 +260,14 @@
   // ===== シフトを組む =====
   function renderBuild() {
     if (!B || VIEWNOW !== 'vBuild') return;
+    try { renderBuild0(); } catch (e) {
+      // 何も出ないままにしない：理由を画面に出す(2026-12-18)
+      g('vBuild').innerHTML = '<div class="box" style="border-color:#F2B8B5;background:#FFF6F5;"><b>「シフトを組む」を表示できませんでした</b><div style="margin-top:6px;">' + esc(e && e.message ? e.message : e) +
+        '</div><div class="muted" style="margin-top:6px;">この文を管理者に伝えてください。月の一覧とチェック・希望一覧のタブは使えます。</div></div>';
+      if (window.console) console.error(e);
+    }
+  }
+  function renderBuild0() {
     var keepY = window.scrollY;
     g('vBuild').innerHTML = '<div class="b2"><div class="side">' + subHtml() + calendarHtml() + monthHtml() + '</div><div id="b2day"></div></div>';
     loadUnlocks();

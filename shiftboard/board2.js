@@ -217,11 +217,52 @@
       '<div class="muted" style="margin-top:4px;">色つきの行＝選んでいる日に入っている人。休憩はシフト設定の「休憩の決まり」で自動計算。</div></div>';
   }
 
+  // ===== 提出状況(この月のシフト希望。未提出の人と、締め切り後の解禁。2026-12-18) =====
+  var UNL = {}, UNLKEY = '';
+  function sxPost(action, extra) {
+    return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ app: 'sx', action: action, token: S.token }, extra || {})) })
+      .then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); });
+  }
+  function loadUnlocks(force) {
+    var k = B.month; if (!force && UNLKEY === k) return; UNLKEY = k;
+    sxPost('sx.board', { month: B.month, store: '' }).then(function (r) { UNL = {}; ((r && r.unlocks) || []).forEach(function (x) { if (x.active) UNL[x.store + '|' + x.uid] = x.until; }); var el = g('b2sub'); if (el) el.outerHTML = subHtml(); }).catch(function () {});
+  }
+  function subHtml() {
+    var codes = storesNow(), h = '';
+    codes.forEach(function (code) {
+      var uns = (B.unsubmitted[code] || []).slice().sort(byStaff);
+      h += '<div style="margin-top:6px;"><b style="color:' + (scol(code) || 'var(--ink)') + '">' + esc(sname(code)) + '</b>' +
+        (uns.length ? '　<span style="color:var(--short);font-weight:700;">未提出 ' + uns.length + '人</span>' : '　<span style="color:var(--ok);font-weight:700;">全員提出</span>') + '</div>' +
+        uns.map(function (u) {
+          var until = UNL[code + '|' + u];
+          return '<div style="display:flex;align-items:center;gap:6px;font-size:13px;padding:2px 0;"><span style="flex:1;">' + esc(nameOfU(u)) + '</span>' +
+            (until ? '<span style="font-size:11px;color:var(--ok);">解禁中 ' + Number(until.slice(5, 7)) + '/' + Number(until.slice(8, 10)) + 'まで</span>' : (B.readonly ? '' : '<button class="mini2" data-unl="' + esc(code) + '|' + esc(u) + '">解禁</button>')) + '</div>';
+        }).join('');
+    });
+    return '<div class="mon" id="b2sub"><h3>シフト希望の提出状況(' + esc(B.label) + ')</h3>' + h +
+      '<div class="muted" style="margin-top:6px;">1日も入れずに出した人も「提出」です(出られる日がない)。解禁＝締め切り後でも、その人だけ提出できるようにする(期限つき・本人に知らせる)。</div></div>';
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-unl]'); if (!b) return;
+    var p = b.getAttribute('data-unl').split('|'), code = p[0], u = p[1];
+    var d = prompt(nameOfU(u) + 'さんに、' + sname(code) + 'の' + B.label + '分の提出を解禁します。\n何日間受け付けますか？(1〜14。今日を含む)', '3');
+    if (d === null) return;
+    d = Number(d); if (!(d >= 1 && d <= 14)) { alert('1〜14の数で入れてください'); return; }
+    var notify = confirm('本人に LINE WORKS で知らせますか？\n［OK］知らせる　［キャンセル］知らせない');
+    b.disabled = true;
+    sxPost('sx.unlock', { month: B.month, store: code, uid: u, days: d, notify: notify }).then(function (r) {
+      if (!r.ok) { b.disabled = false; alert('解禁できませんでした：' + r.error); return; }
+      g('msg').textContent = nameOfU(u) + 'さんの提出を ' + r.until + ' まで解禁しました' + (notify ? (r.sent ? '(本人に知らせました)' : '(お試し中のため、本人には送っていません)') : '');
+      loadUnlocks(true);
+    }).catch(function () { b.disabled = false; alert('通信に失敗しました'); });
+  });
+
   // ===== シフトを組む =====
   function renderBuild() {
     if (!B || VIEWNOW !== 'vBuild') return;
     var keepY = window.scrollY;
-    g('vBuild').innerHTML = '<div class="b2"><div class="side">' + calendarHtml() + monthHtml() + '</div><div id="b2day"></div></div>';
+    g('vBuild').innerHTML = '<div class="b2"><div class="side">' + subHtml() + calendarHtml() + monthHtml() + '</div><div id="b2day"></div></div>';
+    loadUnlocks();
     renderBoard();
     window.scrollTo(0, keepY);
   }

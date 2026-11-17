@@ -120,7 +120,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-12-18a';
+var PAGE_VERSION = '2026-12-18b';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -326,12 +326,40 @@ function startForm(D) {
   });
 
   // ===== 日ごとの入力 =====
+  // ===== 営業カレンダー(休業・トピック。2026-12-18) =====
+  //   締めチェック管理簿のカレンダーを Bot から読む。選べる店舗の分だけ。読めなくても希望はふつうに出せる
+  var BIZ = null;
+  function bizList(d) {
+    if (!BIZ || !BIZ.days) return [];
+    return D.stores.map(function (st) { var x = (BIZ.days[st.code] || {})[d]; return x ? { st: st, x: x } : null; }).filter(Boolean);
+  }
+  function bizHtml(d) {
+    var l = bizList(d); if (!l.length) return '';
+    var closed = l.filter(function (z) { return z.x.closed; }), tp = [];
+    l.forEach(function (z) { z.x.topics.forEach(function (t) { tp.push((MULTI ? (z.st.short || z.st.name) + '：' : '') + t); }); });
+    return (closed.length ? '<span class="bz-cl">' + (closed.length === l.length ? '休業日' : '休業：' + esc(closed.map(function (z) { return z.st.short || z.st.name; }).join('・'))) + '</span>' : '') +
+      (tp.length ? '<span class="bz-tp">★ ' + esc(tp.join(' ／ ')) + '</span>' : '');
+  }
+  function bizAllClosed(d) { var l = bizList(d); return l.length && l.every(function (z) { return z.x.closed; }); }
+  function paintBiz() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-bz]'), function (el) { var d = Number(el.getAttribute('data-bz')); el.innerHTML = bizHtml(d); var card = $('day-' + d); if (card) card.classList.toggle('closed', !!bizAllClosed(d)); });
+  }
+  (function () {
+    var st = document.createElement('style');
+    st.textContent = '.bz-cl{display:inline-block;margin-left:6px;font-size:12px;font-weight:700;color:#B42318;background:#FDECEA;border-radius:6px;padding:0 6px}.bz-tp{display:block;font-size:12px;font-weight:400;color:#8A5A00;margin-top:2px}.day.closed{background:#F1F3F5}';
+    document.head.appendChild(st);
+    fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ app: 'todo', action: 'biz.month', token: S.token, month: D.month.key }) })
+      .then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); })
+      .then(function (r) { if (r && r.ok) { BIZ = r; paintBiz(); } }).catch(function () {});
+  })();
+
   function render() {
+    setTimeout(paintBiz, 0);
     $('days').innerHTML = D.days.map(function (x) {
       var rs = cur.days[x.d] || [];
       var cls = x.w === 0 || x.hol ? 'sun' : (x.w === 6 ? 'sat' : '');
       var h = '<div class="day" id="day-' + x.d + '"><div class="day-head"><div class="date ' + cls + '">' + x.d + '日(' + W.charAt(x.w) + ')' +
-        (x.hol ? '<span class="hol">' + esc(x.hol) + '</span>' : '') + '</div><div>' +
+        (x.hol ? '<span class="hol">' + esc(x.hol) + '</span>' : '') + '<span class="bzslot" data-bz="' + x.d + '">' + bizHtml(x.d) + '</span></div><div>' +
         (x.d > 1 ? '<button type="button" class="mini" data-act="copy" data-d="' + x.d + '">前の日と同じ</button>' : '') +
         (rs.length < D.maxRanges ? '<button type="button" class="mini" data-act="add" data-d="' + x.d + '">＋時間帯</button>' : '') + '</div></div>';
       if (!rs.length) h += '<div class="empty">出勤できない(空欄)</div>';

@@ -122,6 +122,8 @@
     if (multi() && !g('tabs').querySelector('[data-allst]')) g('tabs').insertAdjacentHTML('afterbegin', '<button class="tab allst" data-allst="1">全店舗</button> ');
     var a = g('tabs').querySelector('[data-allst]'); if (a) a.classList.toggle('on', ALLST);
     if (ALLST) Array.prototype.forEach.call(g('tabs').querySelectorAll('.tab[data-s]'), function (x) { x.classList.remove('on'); });
+    Array.prototype.forEach.call(g('tabs').querySelectorAll('.tab[data-s]'), function (x) { var c = scol(x.getAttribute('data-s')); if (c) { var on = x.classList.contains('on'); x.style.borderColor = c; x.style.background = on ? c : ''; x.style.color = on ? '#fff' : c; } });
+
   }
   g('tabs').addEventListener('click', function (e) {
     var a = e.target.closest('[data-allst]');
@@ -142,6 +144,8 @@
   function exOf(uid, d) { return ((B && B.extra) || {})[uid] ? (B.extra[uid][d] || null) : null; }
   function okRanges(x) { return (x && x.other || []).map(function (o) { var a = String(o).split('@'), t = a[0].split('-'); return { s: t[0], e: t[1], store: a[1] || '' }; }); }
   function sname(c) { var st = storeOf(c); return st ? st.name : c; }
+  function scol(c) { var st = storeOf(c); return st && st.color ? st.color : ''; } // ポータル設定の店舗一覧の「色」(2026-12-18)
+  function sshort(c) { var st = storeOf(c); return st && st.short ? st.short : sname(c).replace(/^(Sauna Base |SAUNA )/i, '').slice(0, 3); }
   function hm2(m) { return Math.floor(m / 60) + ':' + ('0' + (m % 60)).slice(-2); }
   function inStore(u, code) { var p = B.staff[u] || {}; return (p.stores || []).some(function (c) { return c === '*' || c === (code || STORE); }); }
   function storesNow() { return ALLST && multi() ? visibleStores().map(function (s) { return s.code; }) : [STORE]; }
@@ -179,7 +183,7 @@
       if (many) {
         body = infos.map(function (z) {
           var c = z.c, cls = !c.placed ? 'none' : c.hasNeed && c.short ? 'short' : 'ok';
-          return '<span class="sl"><b class="st ' + cls + '" style="padding:0 2px;">' + esc(sname(z.code).replace(/^(SAUNA |Sauna Base )/i, '').slice(0, 3)) + '</b>' + stripHtml(c) + '</span>';
+          return '<span class="sl"><b class="st ' + cls + '" style="padding:0 2px;">' + esc(sshort(z.code)) + '</b>' + stripHtml(c) + '</span>';
         }).join('');
       } else {
         var c = infos[0].c;
@@ -326,7 +330,7 @@
     var lackNote = c.lack && c.hasNeed ? '<br><span class="short">希望者(他店でもOKを除く)を全員入れても ' + hm2(c.lack) + ' 分足りません。' + (okU.length ? '緑の点線の「他店でもOK」の人も使えます。' : '募集文タブか、個別の依頼が必要です。') + '</span>' : '';
     return '<div data-st="' + esc(code) + '">' +
       '<div class="board"><div class="bi">' +
-      (many ? '<div class="secst">' + esc(st.name) + (sm.pattern ? '<small>必要人数：' + esc(sm.pattern) + '</small>' : '') + '</div>' : (sm.pattern ? '<div class="r sec"><div class="who">必要人数：' + esc(sm.pattern) + '</div></div>' : '')) +
+      (many ? '<div class="secst"' + (scol(code) ? ' style="background:' + scol(code) + '"' : '') + '>' + esc(st.name) + (sm.pattern ? '<small>必要人数：' + esc(sm.pattern) + '</small>' : '') + '</div>' : (sm.pattern ? '<div class="r sec"><div class="who">必要人数：' + esc(sm.pattern) + '</div></div>' : '')) +
       '<div class="r axis"><div class="who"></div><div class="track">' + axis + '</div><div class="act"></div></div>' +
       segRow('必要人数', needR) + segRow('希望者数', availR) + segRow('配置人数', pickR) +
       '<div class="r sec"><div class="who">この店舗の希望 ' + rowsU.length + '名 ― 点線の帯を押すと採用／右で時間を調整(2秒後に自動で保存)。<span style="color:var(--ok)">緑の帯＝「他店でもOK」にした時間</span></div></div>' +

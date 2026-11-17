@@ -1,11 +1,21 @@
 // calendar/todo.js
 // 2026-12-17：営業の情報(休業・料金区分・祝日・トピック/イベント。締めチェック管理簿のカレンダー)も重ねて出す(営業カレンダーの画面の役割をシフトカレンダーに寄せる)
 // シフトカレンダーに、共有のTODOリストの期限を出す(2026-12-16)。未完了のタスクを、期限の日のマスと、日を押したときの下に出す
-//   index.html の一番下で読む：<script src="todo.js?v=3"></script>。TODOリストを使う権限がない人には何も出ない
+//   index.html の一番下で読む：<script src="todo.js?v=4"></script>。TODOリストを使う権限がない人には何も出ない
 (function () {
   if (typeof renderCal !== 'function') return;
   var TODO = {}, LOADED = '', BIZ = {};
   var BZSHOW = (function () { try { return localStorage.getItem('cal_bz_show') || ''; } catch (e) { return ''; } })(); // 営業の表示：''＝全店舗 ／ 店舗コード＝その店舗だけ(2026-12-17)
+  // 店舗の色：ポータル設定の店舗一覧の「色」があれば、カレンダー全体(シフトの色・凡例・営業・イベント)でそれを使う(2026-12-17)
+  var MCOL = null;
+  function useMasterColors(list) {
+    var o = {}; (list || []).forEach(function (s2) { if (s2.color) o[s2.code] = s2.color; });
+    if (!Object.keys(o).length || MCOL) return;
+    MCOL = o;
+    var base = colorOf;
+    colorOf = function (code) { return MCOL[code] || base(code); };
+    try { g('legend').innerHTML = C.stores.map(function (s2) { return '<span><i style="background:' + colorOf(s2.code) + '"></i>' + esc(s2.name) + (s2.open ? '' : '(未公開)') + '</span>'; }).join(''); } catch (e) {}
+  }
   function shortName(n) { return String(n).replace(/^(Sauna Base |SAUNA )/i, '').slice(0, 8); }
   function bzStores(bz) { return bz.stores.filter(function (s2) { return !BZSHOW || s2.code === BZSHOW; }); }
   function tint(code) { var c = typeof colorOf === 'function' ? colorOf(code) : '#5F6670'; return 'background:' + c + '1A !important;color:' + c + ';border:1px solid ' + c + '66'; }
@@ -42,7 +52,7 @@
       .catch(function () {});
     fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ app: 'todo', action: 'biz.month', token: S.token, month: m }) })
       .then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); })
-      .then(function (r) { if (!r.ok) return; BIZ[m] = r; if (C && C.month === m) { origCal(); origDetail(); } })
+      .then(function (r) { if (!r.ok) return; BIZ[m] = r; useMasterColors(r.stores); if (C && C.month === m) { origCal(); origDetail(); if (typeof renderNext === 'function') renderNext(); if (typeof VIEW !== 'undefined' && VIEW === 'all') renderAll(); } })
       .catch(function () {});
   }
   function list(d) { var ym = C.month; var key = ym + '-' + ('0' + d).slice(-2); return (TODO[ym] || []).filter(function (x) { return x.due === key; }); }

@@ -175,7 +175,7 @@
     var m = B.month; if (BIZ[m] || BIZWAIT[m]) return; BIZWAIT[m] = 1;
     fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ app: 'todo', action: 'biz.month', token: S.token, month: m }) })
       .then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); })
-      .then(function (r) { delete BIZWAIT[m]; BIZ[m] = r && r.ok ? r : { days: {} }; if (B.month === m) renderBuild(); })
+      .then(function (r) { delete BIZWAIT[m]; BIZ[m] = r && r.ok ? r : { days: {} }; if (B.month === m) { renderBuild(); renderWish(); } })
       .catch(function () { delete BIZWAIT[m]; });
   }
   function biz(code, d) { var b = BIZ[B.month]; return b && b.days && b.days[code] ? (b.days[code][d] || null) : null; }
@@ -512,7 +512,15 @@
     var people = Object.keys(B.staff).filter(function (u) { return WALL || inStore(u, STORE) || B.req.some(function (r) { return r[4] === u && r[1] === STORE; }); });
     var uns = B.unsubmitted[STORE] || [];
     people.sort(function (a, b) { var ua = uns.indexOf(a) !== -1, ub = uns.indexOf(b) !== -1; return ua !== ub ? (ua ? 1 : -1) : byStaff(a, b); });
-    var head = B.days.map(function (x) { return '<th class="' + (x.hol || x.w === 0 ? 'hol' : x.w === 6 ? 'sat' : '') + '">' + x.d + '<br>' + W.charAt(x.w) + '</th>'; }).join('');
+    loadBiz();
+    var wcodes = WALL ? storesNow() : [STORE];
+    var head = B.days.map(function (x) {
+      var bz = wcodes.map(function (c) { return biz(c, x.d); }).filter(Boolean);
+      var closed = bz.length && bz.every(function (z) { return z.closed; }), tp = [];
+      bz.forEach(function (z) { z.topics.forEach(function (t) { tp.push(t); }); });
+      return '<th class="' + (x.hol || x.w === 0 ? 'hol' : x.w === 6 ? 'sat' : '') + '"' + (closed ? ' style="background:#E2E5E9;"' : '') + (tp.length ? ' title="' + esc(tp.join(' / ')) + '"' : '') + '>' + x.d + '<br>' + W.charAt(x.w) +
+        (closed ? '<br><span style="font-size:10px;color:var(--muted);">休業</span>' : '') + (tp.length ? '<br><span style="font-size:10px;color:#8A5A00;">★</span>' : '') + '</th>';
+    }).join('');
     var cnt = B.days.map(function () { return 0; });
     var body = people.map(function (u) {
       var n = 0, un = uns.indexOf(u) !== -1;

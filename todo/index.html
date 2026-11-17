@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODOリスト</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="../common/style.css?v=1">
+<!--
+  共有のTODOリスト(GitHub Pages の todo/index.html。2026-12-16)
+  ・だれでも足せる・だれでも完了にできる。直す・消すは作った人と社員
+  ・見られる人：全員 ／ 社員のみ(社員だけが見る・足す)。店舗を選ぶと、その店舗の人だけに出る(空＝全店舗)
+  ・期限のあるタスクは、シフトカレンダーの日にも出る(calendar/todo.js)
+  ・社員：「去年の分を今年に写す」で、去年の期限のタスクを期限を1年ずらして写す
+  データは Bot(Todo.gs、app=todo。ツール一覧の todo の行の API＝BotのURL)
+-->
+<style>
+.t-bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.t-chip { padding: 8px 14px; border: 1px solid var(--p-line); border-radius: 999px; background: #fff; font-size: 15px; cursor: pointer; font-family: inherit; color: var(--p-ink); }
+.t-chip.on { background: var(--p-c); color: #fff; border-color: var(--p-c); font-weight: 700; }
+.t-grp { font-size: 14px; font-weight: 700; margin: 16px 2px 6px; color: var(--p-muted); }
+.t-grp.late { color: var(--p-err); }
+.t-it { display: flex; gap: 12px; align-items: flex-start; background: #fff; border: 1px solid var(--p-line); border-radius: 12px; padding: 12px; margin-bottom: 8px; }
+.t-it.staff { border-left: 6px solid #6B4FA0; }
+.t-ck { width: 30px; height: 30px; flex: 0 0 auto; border: 2px solid #9AA3AD; border-radius: 8px; background: #fff; cursor: pointer; font-size: 18px; line-height: 26px; text-align: center; color: #fff; padding: 0; }
+.t-ck.on { background: #2E7D32; border-color: #2E7D32; }
+.t-body { flex: 1; min-width: 0; }
+.t-ti { font-size: 17px; font-weight: 700; word-break: break-word; }
+.t-it.done .t-ti { text-decoration: line-through; color: var(--p-muted); }
+.t-meta { font-size: 13px; color: var(--p-muted); margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.t-meta .late { color: var(--p-err); font-weight: 700; }
+.t-tag { font-size: 12px; border-radius: 6px; padding: 0 6px; background: #EFEAF7; color: #6B4FA0; font-weight: 700; }
+.t-memo { font-size: 14px; margin-top: 6px; white-space: pre-wrap; word-break: break-word; }
+.t-ed { display: flex; gap: 6px; margin-top: 8px; }
+.t-ed button { font-size: 13px; padding: 4px 10px; border: 1px solid var(--p-line); border-radius: 999px; background: #fff; cursor: pointer; font-family: inherit; }
+.t-seg { display: flex; gap: 6px; } .t-seg label { flex: 1; border: 1px solid var(--p-line); border-radius: 10px; padding: 10px; text-align: center; font-size: 15px; cursor: pointer; }
+.t-seg input { display: none; } .t-seg label.on { border-color: var(--p-c); background: #E8EEF0; font-weight: 700; }
+.t-st { display: flex; gap: 12px; flex-wrap: wrap; font-size: 15px; }
+.t-toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom,0px)); transform: translateX(-50%); background: #1F2328; color: #fff; padding: 12px 18px; border-radius: 12px; font-size: 16px; z-index: 50; max-width: 90%; }
+</style>
+</head>
+<body>
+<div id="app" hidden>
+  <div class="p-wrap">
+    <div id="view"></div>
+    <div class="p-ver" id="ver"></div>
+  </div>
+</div>
+<div class="t-toast" id="toast" hidden></div>
+<script src="../common/portal.js?v=1"></script>
+<script>
+var PAGE_VERSION = '2026-12-16a';
+var P = Portal.start({ tool: 'todo', title: 'TODOリスト' });
+var g = Portal.$, esc = Portal.esc;
+var D = null, SHOW = 'open', SCOPE = 'all', EDIT = null;
+var W = '日月火水木金土';
+function call(a, x, o) { return P.call(a, x, Object.assign({ app: 'todo' }, o || {})); }
+function toast(t) { var x = g('toast'); x.textContent = t; x.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { x.hidden = true; }, 3000); }
+function fail(r) { if (r && r.error === 'AUTH') { Portal.gate(Portal.authMessage(r, 'TODOリスト'), { back: true }); return true; } return false; }
+function ymd(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+function md(s) { if (!s) return ''; var p = s.split('-').map(Number), d = new Date(p[0], p[1] - 1, p[2]); return p[1] + '/' + p[2] + '(' + W.charAt(d.getDay()) + ')'; }
+function sname(c) { var s = (D.stores || []).filter(function (x) { return x.code === c; })[0]; return s ? s.name : c; }
+
+function load() {
+  return call('todo.list', {}, { retry: true }).then(function (r) {
+    if (!r.ok) { if (!fail(r)) Portal.gate('開けませんでした：' + r.error, { back: true }); return; }
+    D = r; Portal.showApp(); g('ver').textContent = Portal.timing(PAGE_VERSION);
+    if (EDIT) renderForm(); else render();
+  }).catch(function (e) { Portal.gate('通信に失敗しました。\n電波の良いところで開き直してください。', { back: true, detail: e.message }); });
+}
+
+function render() {
+  EDIT = null;
+  var today = ymd(new Date()), week = ymd(new Date(Date.now() + 7 * 86400000));
+  var list = D.items.filter(function (x) { return (SHOW === 'open' ? !x.done : x.done) && (SCOPE === 'all' || x.scope === SCOPE); });
+  var openN = D.items.filter(function (x) { return !x.done; }).length;
+  var h = '<div class="t-bar"><button class="t-chip' + (SHOW === 'open' ? ' on' : '') + '" data-show="open">未完了 ' + openN + '</button><button class="t-chip' + (SHOW === 'done' ? ' on' : '') + '" data-show="done">完了</button>' +
+    (D.staff ? '<span style="width:8px"></span>' + [['all', 'すべて'], ['全員', '全員向け'], ['社員のみ', '社員のみ']].map(function (c) { return '<button class="t-chip' + (SCOPE === c[0] ? ' on' : '') + '" data-scope="' + c[0] + '">' + c[1] + '</button>'; }).join('') : '') + '</div>' +
+    '<button class="p-btn p-solid p-big" id="add" style="width:100%;margin-bottom:6px;">＋ タスクを足す</button>';
+  var groups = SHOW === 'open' ? [
+    ['期限を過ぎています', function (x) { return x.due && x.due < today; }, 'late'],
+    ['今日', function (x) { return x.due === today; }, ''],
+    ['7日以内', function (x) { return x.due > today && x.due <= week; }, ''],
+    ['それ以降', function (x) { return x.due > week; }, ''],
+    ['期限なし', function (x) { return !x.due; }, '']
+  ] : [['完了したもの(新しい順)', function () { return true; }, '']];
+  var sorted = list.slice().sort(function (a, b) { return SHOW === 'open' ? ((a.due || '9999') < (b.due || '9999') ? -1 : (a.due || '9999') > (b.due || '9999') ? 1 : a.title.localeCompare(b.title, 'ja')) : (a.doneAt < b.doneAt ? 1 : -1); });
+  var any = false;
+  groups.forEach(function (gr) {
+    var xs = sorted.filter(gr[1]); if (!xs.length) return; any = true;
+    h += '<div class="t-grp ' + gr[2] + '">' + gr[0] + '(' + xs.length + ')</div>' + xs.slice(0, SHOW === 'done' ? 100 : 500).map(function (x) { return item(x, today); }).join('');
+  });
+  if (!any) h += '<div class="p-card p-muted" style="margin-top:10px;">' + (SHOW === 'open' ? 'やることはありません' : '完了したタスクはまだありません') + '</div>';
+  if (D.staff) h += '<div class="p-card" style="margin-top:16px;"><b>去年の分を今年に写す</b><div class="p-note">毎年やることを、去年の期限のタスクから写します(期限を1年ずらして、未完了で)。同じタスクは2回写しません。</div>' +
+    '<button class="p-btn" id="copyYear" style="margin-top:8px;">' + (new Date().getFullYear() - 1) + '年の分を ' + new Date().getFullYear() + '年に写す</button></div>';
+  g('view').innerHTML = h;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-show]'), function (b) { b.onclick = function () { SHOW = b.getAttribute('data-show'); render(); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-scope]'), function (b) { b.onclick = function () { SCOPE = b.getAttribute('data-scope'); render(); }; });
+  g('add').onclick = function () { EDIT = {}; renderForm(); };
+  if (g('copyYear')) g('copyYear').onclick = copyYear;
+}
+function item(x, today) {
+  var late = !x.done && x.due && x.due < today;
+  return '<div class="t-it' + (x.done ? ' done' : '') + (x.scope === '社員のみ' ? ' staff' : '') + '"><button class="t-ck' + (x.done ? ' on' : '') + '" data-done="' + esc(x.id) + '" aria-label="完了にする">' + (x.done ? '✓' : '') + '</button>' +
+    '<div class="t-body"><div class="t-ti">' + esc(x.title) + '</div><div class="t-meta">' +
+    (x.due ? '<span class="' + (late ? 'late' : '') + '">期限 ' + md(x.due) + '</span>' : '') +
+    (x.scope === '社員のみ' ? '<span class="t-tag">社員のみ</span>' : '') +
+    (x.store ? '<span>' + esc(x.store.split(',').map(sname).join('・')) + '</span>' : '') +
+    (x.who ? '<span>担当 ' + esc(x.who) + '</span>' : '') +
+    (x.done ? '<span>完了 ' + esc(x.doneBy) + ' ' + esc(String(x.doneAt).slice(5)) + '</span>' : '<span>作成 ' + esc(x.by) + '</span>') + '</div>' +
+    (x.memo ? '<div class="t-memo">' + esc(x.memo) + '</div>' : '') +
+    (x.canEdit ? '<div class="t-ed"><button data-edit="' + esc(x.id) + '">直す</button><button data-del="' + esc(x.id) + '">消す</button></div>' : '') + '</div></div>';
+}
+g('view').addEventListener('click', function (e) {
+  var b = e.target.closest('[data-done]');
+  if (b) {
+    var x = D.items.filter(function (y) { return y.id === b.getAttribute('data-done'); })[0]; if (!x) return;
+    x.done = !x.done; x.doneBy = D.me; x.doneAt = ''; render(); // 先に画面を変える
+    call('todo.done', { id: x.id, done: x.done }).then(function (r) { if (!r.ok) { if (!fail(r)) { toast(r.error); load(); } return; } toast(x.done ? '完了にしました' : '未完了に戻しました'); load(); });
+    return;
+  }
+  var ed = e.target.closest('[data-edit]');
+  if (ed) { EDIT = D.items.filter(function (y) { return y.id === ed.getAttribute('data-edit'); })[0]; renderForm(); return; }
+  var del = e.target.closest('[data-del]');
+  if (del) {
+    var t = D.items.filter(function (y) { return y.id === del.getAttribute('data-del'); })[0];
+    if (!t || !confirm('「' + t.title + '」を消します。よろしいですか？')) return;
+    call('todo.delete', { id: t.id }).then(function (r) { if (!r.ok) { if (!fail(r)) alert(r.error); return; } toast('消しました'); load(); });
+  }
+});
+
+function renderForm() {
+  var x = EDIT || {}, isNew = !x.id, st = x.store ? x.store.split(',') : [];
+  var h = '<div class="p-card"><h2 style="margin-top:0;">' + (isNew ? 'タスクを足す' : 'タスクを直す') + '</h2>' +
+    '<label class="p-label">題名</label><input class="p-input" id="fT" maxlength="80" value="' + esc(x.title || '') + '" placeholder="例：浄水器のフィルター交換">' +
+    '<label class="p-label">期限(なくてもよい)</label><input type="date" class="p-input" id="fD" value="' + esc(x.due || '') + '">' +
+    (D.staff ? '<label class="p-label">見られる人</label><div class="t-seg">' + ['全員', '社員のみ'].map(function (s) { var on = (x.scope || '全員') === s; return '<label class="' + (on ? 'on' : '') + '"><input type="radio" name="fS" value="' + s + '"' + (on ? ' checked' : '') + '>' + s + '</label>'; }).join('') + '</div>' : '') +
+    (D.stores.length > 1 ? '<label class="p-label">店舗(どれも選ばなければ全店舗)</label><div class="t-st">' + D.stores.map(function (s) { return '<label><input type="checkbox" class="fSt" value="' + esc(s.code) + '"' + (st.indexOf(s.code) !== -1 ? ' checked' : '') + '> ' + esc(s.name) + '</label>'; }).join('') + '</div>' : '') +
+    '<label class="p-label">担当(なくてもよい)</label><input class="p-input" id="fW" maxlength="40" value="' + esc(x.who || '') + '" placeholder="例：松井・早番の人">' +
+    '<label class="p-label">メモ</label><textarea class="p-textarea" id="fM" maxlength="1000">' + esc(x.memo || '') + '</textarea>' +
+    '<div id="fMsg"></div><div style="display:flex;gap:8px;margin-top:12px;"><button class="p-btn p-solid p-big" id="fSave" style="flex:1;">保存する</button><button class="p-btn p-big" id="fBack" style="flex:1;">やめる</button></div>' +
+    (D.staff ? '<div class="p-note" style="margin-top:10px;">「社員のみ」は、社員(と社長)にだけ見えます。アルバイトの画面とシフトカレンダーには出ません。</div>' : '') + '</div>';
+  g('view').innerHTML = h;
+  Array.prototype.forEach.call(document.querySelectorAll('.t-seg input'), function (r) { r.onchange = function () { Array.prototype.forEach.call(document.querySelectorAll('.t-seg label'), function (l) { l.classList.toggle('on', l.querySelector('input').checked); }); }; });
+  g('fBack').onclick = function () { render(); };
+  g('fSave').onclick = function () {
+    var sc = document.querySelector('.t-seg input:checked');
+    var item = { id: x.id || '', ver: x.ver || '', title: g('fT').value, due: g('fD').value, scope: sc ? sc.value : '全員', who: g('fW').value, memo: g('fM').value,
+      stores: Array.prototype.filter.call(document.querySelectorAll('.fSt'), function (c) { return c.checked; }).map(function (c) { return c.value; }) };
+    var b = g('fSave'); b.disabled = true; b.textContent = '保存しています…'; g('fMsg').innerHTML = '';
+    call('todo.save', { item: item }).then(function (r) {
+      b.disabled = false; b.textContent = '保存する';
+      if (!r.ok) { if (!fail(r)) g('fMsg').innerHTML = '<div class="p-err" style="margin-top:8px;">' + esc(r.error) + '</div>'; return; }
+      toast('保存しました'); EDIT = null; load();
+    }).catch(function () { b.disabled = false; b.textContent = '保存する'; g('fMsg').innerHTML = '<div class="p-err">通信に失敗しました。保存できたか、一覧で確かめてください</div>'; });
+  };
+  g('fT').focus();
+}
+function copyYear() {
+  var y = new Date().getFullYear();
+  if (!confirm((y - 1) + '年に期限があったタスクを、期限を1年ずらして ' + y + '年に写します。よろしいですか？')) return;
+  call('todo.copyYear', { year: y }).then(function (r) { if (!r.ok) { if (!fail(r)) alert(r.error); return; } toast(r.added ? r.added + '件を写しました' : '写すものはありませんでした'); load(); });
+}
+if (P) load();
+</script>
+</body>
+</html>

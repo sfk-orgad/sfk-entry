@@ -169,6 +169,17 @@
     return '<span class="stp">' + s + '</span>';
   }
 
+  // ===== 営業カレンダー(締めチェック管理簿のカレンダー：休業・料金区分・トピック。2026-12-18) =====
+  var BIZ = {}, BIZWAIT = {};
+  function loadBiz() {
+    var m = B.month; if (BIZ[m] || BIZWAIT[m]) return; BIZWAIT[m] = 1;
+    fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ app: 'todo', action: 'biz.month', token: S.token, month: m }) })
+      .then(function (r) { return r.text(); }).then(function (t) { return JSON.parse(t); })
+      .then(function (r) { delete BIZWAIT[m]; BIZ[m] = r && r.ok ? r : { days: {} }; if (B.month === m) renderBuild(); })
+      .catch(function () { delete BIZWAIT[m]; });
+  }
+  function biz(code, d) { var b = BIZ[B.month]; return b && b.days && b.days[code] ? (b.days[code][d] || null) : null; }
+
   // ===== カレンダーと今月の稼働 =====
   function calendarHtml() {
     var y = Number(B.month.slice(0, 4)), m = Number(B.month.slice(5, 7)), first = new Date(y, m - 1, 1).getDay();
@@ -182,16 +193,20 @@
       var body = '';
       if (many) {
         body = infos.map(function (z) {
-          var c = z.c, cls = !c.placed ? 'none' : c.hasNeed && c.short ? 'short' : 'ok';
-          return '<span class="sl"><b class="st ' + cls + '" style="padding:0 2px;">' + esc(sshort(z.code)) + '</b>' + stripHtml(c) + '</span>';
+          var c = z.c, bz = biz(z.code, x.d), cls = !c.placed ? 'none' : c.hasNeed && c.short ? 'short' : 'ok';
+          if (bz && bz.closed) return '<span class="sl"><b class="st none" style="padding:0 2px;">' + esc(sshort(z.code)) + '</b><span style="font-size:10px;color:var(--muted);">休業</span></span>';
+          return '<span class="sl"><b class="st ' + cls + '" style="padding:0 2px;">' + esc(sshort(z.code)) + (bz && bz.topics.length ? '★' : '') + '</b>' + stripHtml(c) + '</span>';
         }).join('');
       } else {
-        var c = infos[0].c;
-        body = (!c.placed ? '<span class="st none">未配置</span>' : (c.hasNeed ? (c.short ? '<span class="st short">不足' + (Math.ceil(c.short / 30) / 2) + 'h</span>' : '<span class="st ok">充足</span>') : '<span class="st ok">' + c.placed + '人</span>')) +
+        var c = infos[0].c, bz0 = biz(infos[0].code, x.d);
+        if (bz0 && bz0.closed) body = '<span class="st none" style="background:#E2E5E9;">休業</span>' + (bz0.topics.length ? '<span class="wc" style="color:#8A5A00;">★' + esc(bz0.topics[0]).slice(0, 6) + '</span>' : '');
+        else body = (bz0 && bz0.topics.length ? '<span class="wc" style="color:#8A5A00;" title="' + esc(bz0.topics.join(' / ')) + '">★' + esc(bz0.topics[0]).slice(0, 6) + '</span>' : '') + (!c.placed ? '<span class="st none">未配置</span>' : (c.hasNeed ? (c.short ? '<span class="st short">不足' + (Math.ceil(c.short / 30) / 2) + 'h</span>' : '<span class="st ok">充足</span>') : '<span class="st ok">' + c.placed + '人</span>')) +
           (c.lack && c.hasNeed ? '<span class="lack">希望不足</span>' : '') + stripHtml(c);
+        if (bz0 && bz0.closed) body += '';
       }
       var wn = crossOn(x.d).length;
-      cells += '<button class="day' + (x.hol || x.w === 0 ? ' hol' : x.w === 6 ? ' sat' : '') + (x.d === DAY ? ' on' : '') + '" data-bd="' + x.d + '" title="' + x.d + '日' + (x.hol ? ' ' + esc(x.hol) : '') + '">' +
+      var allClosed = codes.every(function (code) { var bz = biz(code, x.d); return bz && bz.closed; });
+      cells += '<button class="day' + (x.hol || x.w === 0 ? ' hol' : x.w === 6 ? ' sat' : '') + (x.d === DAY ? ' on' : '') + '" data-bd="' + x.d + '" title="' + x.d + '日' + (x.hol ? ' ' + esc(x.hol) : '') + '"' + (allClosed ? ' style="background:#E2E5E9;"' : '') + '>' +
         '<span class="n">' + x.d + '</span>' + (wn ? '<span class="wc">2店舗' + wn + '</span>' : '') + body + '</button>';
     });
     return '<div class="cal"><div class="prog"><span>配置した日 <b>' + placedDays + '</b>／' + B.days.length + '日</span><span class="pbar"><i style="width:' + (placedDays / B.days.length * 100).toFixed(1) + '%"></i></span></div>' +
@@ -236,13 +251,27 @@
         uns.map(function (u) {
           var until = UNL[code + '|' + u];
           return '<div style="display:flex;align-items:center;gap:6px;font-size:13px;padding:2px 0;"><span style="flex:1;">' + esc(nameOfU(u)) + '</span>' +
-            (until ? '<span style="font-size:11px;color:var(--ok);">解禁中 ' + Number(until.slice(5, 7)) + '/' + Number(until.slice(8, 10)) + 'まで</span>' : (B.readonly ? '' : '<button class="mini2" data-unl="' + esc(code) + '|' + esc(u) + '">解禁</button>')) + '</div>';
+            (until ? '<span style="font-size:11px;color:var(--ok);">解禁中 ' + Number(until.slice(5, 7)) + '/' + Number(until.slice(8, 10)) + 'まで</span>' : (B.readonly ? '' : '<button class="mini2" data-unl="' + esc(code) + '|' + esc(u) + '">解禁</button>')) +
+            (B.readonly ? '' : '<button class="mini2" data-mks="' + esc(u) + '" title="この月は出ない人(夏だけ・スポットなど)を、提出済みにする">提出済みに</button>') + '</div>';
         }).join('');
     });
     return '<div class="mon" id="b2sub"><h3>シフト希望の提出状況(' + esc(B.label) + ')</h3>' + h +
-      '<div class="muted" style="margin-top:6px;">1日も入れずに出した人も「提出」です(出られる日がない)。解禁＝締め切り後でも、その人だけ提出できるようにする(期限つき・本人に知らせる)。</div></div>';
+      '<div class="muted" style="margin-top:6px;">1日も入れずに出した人も「提出」です(出られる日がない)。解禁＝締め切り後でも、その人だけ提出できるようにする(期限つき・本人に知らせる)。提出済みに＝この月は出ない人(夏だけ・スポットなど)を、管理者が提出済みにする(催促が止まる。あとで本人が出し直してもよい)。</div></div>';
   }
   document.addEventListener('click', function (e) {
+    var mk = e.target.closest('[data-mks]');
+    if (mk) {
+      var mu = mk.getAttribute('data-mks');
+      if (!confirm(nameOfU(mu) + 'さんを、' + B.label + 'は「提出済み」(出られる日なし)にします。\n催促が止まります。よろしいですか？')) return;
+      mk.disabled = true;
+      sxPost('sx.markSubmitted', { month: B.month, uid: mu, on: true }).then(function (r) {
+        if (!r.ok) { mk.disabled = false; alert('できませんでした：' + r.error); return; }
+        Object.keys(B.unsubmitted).forEach(function (c) { B.unsubmitted[c] = (B.unsubmitted[c] || []).filter(function (x) { return x !== mu; }); });
+        g('msg').textContent = nameOfU(mu) + 'さんを提出済みにしました';
+        renderBuild();
+      }).catch(function () { mk.disabled = false; alert('通信に失敗しました'); });
+      return;
+    }
     var b = e.target.closest('[data-unl]'); if (!b) return;
     var p = b.getAttribute('data-unl').split('|'), code = p[0], u = p[1];
     var d = prompt(nameOfU(u) + 'さんに、' + sname(code) + 'の' + B.label + '分の提出を解禁します。\n何日間受け付けますか？(1〜14。今日を含む)', '3');
@@ -272,6 +301,7 @@
     g('vBuild').innerHTML = '<div class="b2"><div class="side">' + subHtml() + calendarHtml() + monthHtml() + '</div><div id="b2day"></div></div>';
     loadUnlocks();
     renderBoard();
+    loadBiz();
     window.scrollTo(0, keepY);
   }
   function renderBoard() {
@@ -380,6 +410,7 @@
     return '<div data-st="' + esc(code) + '">' +
       '<div class="board"><div class="bi">' +
       (many ? '<div class="secst"' + (scol(code) ? ' style="background:' + scol(code) + '"' : '') + '>' + esc(st.name) + (sm.pattern ? '<small>必要人数：' + esc(sm.pattern) + '</small>' : '') + '</div>' : (sm.pattern ? '<div class="r sec"><div class="who">必要人数：' + esc(sm.pattern) + '</div></div>' : '')) +
+      bizRow(code) +
       '<div class="r axis"><div class="who"></div><div class="track">' + axis + '</div><div class="act"></div></div>' +
       segRow('必要人数', needR) + segRow('希望者数', availR) + segRow('配置人数', pickR) +
       '<div class="r sec"><div class="who">この店舗の希望 ' + rowsU.length + '名 ― 点線の帯を押すと採用／右で時間を調整(2秒後に自動で保存)。<span style="color:var(--ok)">緑の帯＝「他店でもOK」にした時間</span></div></div>' +
@@ -409,6 +440,14 @@
       if (t.hasAttribute('data-cs')) { list[Number(t.getAttribute('data-cs'))][1] = t.value; changedKeys([code]); }
       if (t.hasAttribute('data-ce')) { list[Number(t.getAttribute('data-ce'))][2] = t.value; changedKeys([code]); }
     };
+  }
+  // 営業カレンダーのその日(休業・料金区分・祝日・トピック)
+  function bizRow(code) {
+    var bz = biz(code, DAY);
+    if (!bz) return '';
+    return '<div class="r sec" style="background:' + (bz.closed ? '#FDECEA' : '#FFF8E6') + ';"><div class="who" style="font-size:14px;color:var(--ink);">' +
+      (bz.closed ? '<b style="color:var(--short);">営業カレンダー：休業日</b>(シフトを入れるときは確かめてください)' : '営業カレンダー：' + esc(bz.price || '')) + (bz.hol ? '　' + esc(bz.hol) : '') +
+      (bz.topics.length ? '　<b style="color:#8A5A00;">★ ' + esc(bz.topics.join(' ／ ')) + '</b>' : '') + '</div></div>';
   }
   // ほかの店舗の確定と重なるか(重なれば店舗名を返す)
   function clash(u, code, s, e) {

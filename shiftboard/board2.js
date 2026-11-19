@@ -570,5 +570,152 @@
     };
   }
 
+  // ===== シフト表を取り込む(スマレジの「勤務時間(横軸：年月日)」の Excel。2026-12-18) =====
+  //   画面の中で Excel を読み(サーバーにファイルは送らない)、整えた「人・日・開始・終了」だけを、日ごとのいつもの保存で送る
+  //   形：1行目に日付(2026/11/01 …)、A列に氏名、マスに「09:00 ~ 18:00」。下の「出勤人数」などの行と右の「計」の列は読まない
+  //   名前は空白・（よみがな）・全角半角の違いを吸収して、シフト希望を使える人と合わせる。合わない人は、画面で選ぶか、取り込まない
+  (function () {
+    var bar = g('sheetBtn'); if (!bar) return;
+    bar.insertAdjacentHTML('afterend', ' <button class="btn" id="impBtn">シフト表を取り込む</button>');
+    document.body.insertAdjacentHTML('beforeend', '<div id="impView" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:120;overflow:auto;"><div style="background:#fff;max-width:880px;margin:30px auto;border-radius:14px;padding:18px 20px;" id="impBox"></div></div>');
+  })();
+  var IMP = null;
+  function nkey(s) { return String(s || '').normalize('NFKC').replace(/[(（][^)）]*[)）]/g, '').replace(/[\s\u3000・･]/g, '').toLowerCase(); }
+  function impOpen() {
+    if (B.readonly) { alert('過去の月には取り込めません'); return; }
+    IMP = { store: STORE, rows: null, file: '' };
+    impRender();
+    g('impView').style.display = 'block';
+  }
+  function impClose() { g('impView').style.display = 'none'; IMP = null; }
+  function impRender() {
+    var st = visibleStores();
+    var h = '<h2 style="margin:0 0 6px;">シフト表を取り込む(' + esc(B.label) + ')</h2>' +
+      '<div class="muted">スマレジの「勤務時間(横軸：年月日)」の Excel(.xlsx)を、店舗ごとに取り込みます。取り込んだシフトは確定シフトになります(公開はしません)。</div>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:12px 0;">店舗：<select id="impStore">' + st.map(function (x) { return '<option value="' + esc(x.code) + '"' + (x.code === IMP.store ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('') + '</select>' +
+      '<input type="file" id="impFile" accept=".xlsx,.xls,.csv"><span class="muted" id="impMsg"></span></div><div id="impPrev"></div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;"><button class="btn" id="impCancel">閉じる</button></div>';
+    g('impBox').innerHTML = h;
+    g('impCancel').onclick = impClose;
+    g('impStore').onchange = function () { IMP.store = this.value; if (IMP.rows) impPreview(); };
+    g('impFile').onchange = function () { var f = this.files[0]; if (f) impRead(f); };
+  }
+  function impRead(file) {
+    g('impMsg').textContent = '読んでいます…';
+    IMP.file = file.name;
+    // ファイル名に店舗のコード・名前・略称があれば、その店舗を選ぶ
+    visibleStores().forEach(function (x) { if ([x.code, x.short, x.name].some(function (k) { return k && file.name.toUpperCase().indexOf(String(k).toUpperCase()) !== -1; })) IMP.store = x.code; });
+    if (g('impStore')) g('impStore').value = IMP.store;
+    loadXlsx().then(function (X) {
+      return file.arrayBuffer().then(function (buf) {
+        var wb = X.read(buf, { type: 'array' }), ws = wb.Sheets[wb.SheetNames[0]];
+        return X.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+      });
+    }).then(function (aoa) { IMP.aoa = aoa; impParse(); impPreview(); g('impMsg').textContent = ''; })
+      .catch(function (e) { g('impMsg').textContent = '読めませんでした：' + (e && e.message ? e.message : e); });
+  }
+  // 表 → { rows:[{name, d, s, e}], months:{}, other:件数 }
+  function impParse() {
+    var aoa = IMP.aoa, hi = -1, cols = {};
+    for (var i = 0; i < Math.min(aoa.length, 10) && hi < 0; i++) {
+      var c = {}, n = 0;
+      aoa[i].forEach(function (v, j) { var m = String(v).match(/(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/); if (m) { c[j] = { ym: m[1] + '-' + ('0' + m[2]).slice(-2), d: Number(m[3]) }; n++; } });
+      if (n >= 5) { hi = i; cols = c; }
+    }
+    IMP.rows = []; IMP.otherMonth = 0; IMP.fileMonths = {};
+    if (hi < 0) { IMP.error = '1行目あたりに日付(2026/11/01 の形)の並びが見つかりません。スマレジの「勤務時間(横軸：年月日)」の Excel か確かめてください'; return; }
+    IMP.error = '';
+    aoa.slice(hi + 1).forEach(function (r) {
+      var name = String(r[0] || '').trim(); if (!name) return;
+      Object.keys(cols).forEach(function (j) {
+        var cell = String(r[j] || ''), re = /(\d{1,2})[:：](\d{2})\s*[~〜～\-－]\s*(\d{1,2})[:：](\d{2})/g, m;
+        while ((m = re.exec(cell))) {
+          var c = cols[j]; IMP.fileMonths[c.ym] = 1;
+          if (c.ym !== B.month) { IMP.otherMonth++; continue; }
+          IMP.rows.push({ name: name, d: c.d, s: Number(m[1]) * 60 + Number(m[2]), e: Number(m[3]) * 60 + Number(m[4]) });
+        }
+      });
+    });
+    // 名前 → スタッフ
+    var byKey = {};
+    Object.keys(B.staff).forEach(function (u) { var k = nkey(B.staff[u].name); (byKey[k] = byKey[k] || []).push(u); });
+    IMP.map = IMP.map || {};
+    IMP.rows.forEach(function (x) {
+      if (x.name in IMP.map) return;
+      var hit = byKey[nkey(x.name)] || [];
+      if (hit.length !== 1) { var k = nkey(x.name); hit = Object.keys(B.staff).filter(function (u) { var kk = nkey(B.staff[u].name); return kk.indexOf(k) === 0 || k.indexOf(kk) === 0; }); }
+      IMP.map[x.name] = hit.length === 1 ? hit[0] : '';
+    });
+  }
+  function impPreview() {
+    var box = g('impPrev');
+    if (IMP.error) { box.innerHTML = '<div class="wl">' + esc(IMP.error) + '</div>'; return; }
+    var st = storeOf(IMP.store), names = [];
+    IMP.rows.forEach(function (x) { if (names.indexOf(x.name) === -1) names.push(x.name); });
+    var ok = [], out = [], skip = 0;
+    IMP.rows.forEach(function (x) {
+      var u = IMP.map[x.name]; if (!u) { skip++; return; }
+      if (x.s < st.start || x.e > st.end || x.s >= x.e) out.push(x); else ok.push(x);
+    });
+    IMP.ok = ok;
+    var people = {}; ok.forEach(function (x) { people[IMP.map[x.name]] = 1; });
+    var opts = function (cur) { return '<option value="">(取り込まない)</option>' + Object.keys(B.staff).sort(function (a, b) { return String(B.staff[a].name).localeCompare(String(B.staff[b].name), 'ja'); }).map(function (u) { return '<option value="' + esc(u) + '"' + (u === cur ? ' selected' : '') + '>' + esc(B.staff[u].name) + '</option>'; }).join(''); };
+    var unmatched = names.filter(function (n) { return !IMP.map[n]; });
+    var months = Object.keys(IMP.fileMonths);
+    var h = '<div class="box" style="min-width:0;">' +
+      '<div style="font-size:16px;"><b>' + esc(IMP.file) + '</b> → <b>' + esc(st.name) + '</b>：取り込めるシフト <b>' + ok.length + '件</b>(' + Object.keys(people).length + '人)</div>' +
+      (months.length && months.indexOf(B.month) === -1 ? '<div class="wl">このファイルは ' + esc(months.join('・')) + ' の分です。上の月を切り替えてから取り込んでください</div>' : '') +
+      (IMP.otherMonth ? '<div class="muted">ほかの月の日付 ' + IMP.otherMonth + '件は読みません(' + esc(B.label) + 'だけ)</div>' : '') +
+      (out.length ? '<div class="wl" style="font-size:13px;">' + esc(st.name) + 'の営業時間(' + hm(st.start) + '〜' + hm(st.end) + ')の外 ' + out.length + '件は取り込みません：' + esc(out.slice(0, 8).map(function (x) { return x.name + ' ' + x.d + '日 ' + hm(x.s) + '-' + hm(x.e); }).join('、')) + (out.length > 8 ? ' ほか' : '') + '</div>' : '') +
+      (unmatched.length ? '<div style="margin-top:8px;"><b style="color:var(--short);">名前が合わない人 ' + unmatched.length + '人</b>(シフト希望を使える人から選ぶと取り込みます)' +
+        unmatched.map(function (n) { return '<div style="display:flex;gap:8px;align-items:center;margin-top:4px;"><span style="min-width:9em;">' + esc(n) + '(' + IMP.rows.filter(function (x) { return x.name === n; }).length + '件)</span><select data-impmap="' + esc(n) + '">' + opts('') + '</select></div>'; }).join('') + '</div>' : '<div class="muted" style="margin-top:6px;">名前はすべて合いました</div>') +
+      '<div style="margin-top:12px;"><b>取り込み方</b>' +
+      '<label style="display:block;margin-top:4px;"><input type="radio" name="impMode" value="replace" checked> 置き換える(' + esc(st.name) + 'の' + esc(B.label) + 'の確定シフトを、すべてこのファイルの内容にする)</label>' +
+      '<label style="display:block;"><input type="radio" name="impMode" value="add"> 足す(今の確定シフトに足す。同じ人の重なる時間はまとめる)</label></div>' +
+      '<div style="display:flex;justify-content:flex-end;margin-top:10px;"><button class="btn solid" id="impGo"' + (ok.length ? '' : ' disabled') + '>' + ok.length + '件を取り込む</button></div><div id="impProg" class="muted"></div></div>';
+    box.innerHTML = h;
+    Array.prototype.forEach.call(box.querySelectorAll('[data-impmap]'), function (sel) { sel.onchange = function () { IMP.map[sel.getAttribute('data-impmap')] = sel.value; impPreview(); }; });
+    g('impGo').onclick = impApply;
+  }
+  // 同じ人の重なる・隣り合う時間帯をまとめる
+  function mergeList(list) {
+    var by = {}, out = [];
+    list.forEach(function (c) { (by[c[0]] = by[c[0]] || []).push([c[0], c[1], c[2]]); });
+    Object.keys(by).forEach(function (u) {
+      by[u].sort(function (a, b) { return mins(a[1]) - mins(b[1]); });
+      var cur = null;
+      by[u].forEach(function (c) { if (cur && mins(c[1]) <= mins(cur[2])) { if (mins(c[2]) > mins(cur[2])) cur[2] = c[2]; } else { cur = c; out.push(cur); } });
+    });
+    return out;
+  }
+  function impApply() {
+    var mode = (document.querySelector('[name="impMode"]:checked') || {}).value || 'replace', code = IMP.store, st = storeOf(code);
+    if (mode === 'replace' && !confirm(st.name + 'の' + B.label + 'の確定シフトを、すべてこのファイルの内容に置き換えます。\n今の確定シフト(この店舗・この月)は消えます。よろしいですか？')) return;
+    var byDay = {};
+    IMP.ok.forEach(function (x) { (byDay[x.d] = byDay[x.d] || []).push([IMP.map[x.name], hm(x.s), hm(x.e)]); });
+    var days = B.days.map(function (x) { return x.d; }).filter(function (d) { return mode === 'replace' ? (byDay[d] || confOf(code, d).length) : byDay[d]; });
+    days.forEach(function (d) {
+      var k = key(code, d);
+      CONF[k] = mergeList((mode === 'add' ? (CONF[k] || []) : []).concat(byDay[d] || []));
+      DIRTY[k] = true;
+    });
+    g('impGo').disabled = true;
+    var done = 0, fail = [];
+    var chain = Promise.resolve();
+    days.forEach(function (d) {
+      chain = chain.then(function () {
+        g('impProg').textContent = '保存しています… ' + done + '/' + days.length + '日';
+        return saveDayAll(d).then(function (r) { done++; if (!r) fail.push(d); });
+      });
+    });
+    chain.then(function () {
+      g('impProg').innerHTML = fail.length ? '<span style="color:var(--short);font-weight:700;">' + fail.length + '日分は保存できませんでした(' + fail.join('・') + '日)。その日を開いて「もう一度保存」してください</span>'
+        : '<b style="color:var(--ok);">' + days.length + '日分を保存しました</b>';
+      renderStrip(); renderChecks(); renderBuild();
+      g('msg').textContent = st.name + 'の' + B.label + 'のシフト表を取り込みました';
+    });
+  }
+  document.addEventListener('click', function (e) { if (e.target && e.target.id === 'impBtn') impOpen(); });
+
   if (B) { paintStoreTabs(); renderBuild(); }
 })();

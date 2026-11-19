@@ -22,6 +22,9 @@ table.pd { border-collapse: collapse; width: 100%; font-size: 14px; background: 
 .ok { color: var(--p-ok); font-weight: 700; } .ng { color: var(--p-err); font-weight: 700; }
 .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
 .bar select, .bar input { font-size: 15px; padding: 7px; border: 1px solid #B9C0C8; border-radius: 8px; }
+.pd tr.cx td { color: #9AA3AD; } .pd tr.cx td.nm { text-decoration: line-through; }
+.cxbox { margin-top: 10px; padding: 12px; border: 1px solid #F2B8B5; background: #FFF6F5; border-radius: 12px; }
+.cxbox select, .cxbox input[type=text] { font-size: 15px; padding: 7px; border: 1px solid #B9C0C8; border-radius: 8px; }
 </style>
 </head>
 <body>
@@ -51,7 +54,7 @@ table.pd { border-collapse: collapse; width: 100%; font-size: 14px; background: 
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-26a';
+var PAGE_VERSION = '2026-12-18a';
 var P = Portal.start({ tool: 'paydoc_admin', title: '書類を配る' });
 var g = Portal.$, esc = Portal.esc, STAFF = [], KINDS = [], ITEMS = [];
 function call(a, x, o) { return P.call(a, x, Object.assign({ app: 'paydoc' }, o || {})); }
@@ -134,15 +137,57 @@ g('send').onclick = function () {
       (n ? '。' + (n.mode === 'お試し' ? 'お試し中のため、本人には知らせていません' : n.sent + '人に知らせました') : '') + '</div>';
   });
 };
-g('lload').onclick = function () {
+// ===== 配った書類の一覧と取り消し(2026-12-18) =====
+var LIST = [];
+g('lload').onclick = loadList;
+function loadList() {
   g('list').textContent = '読み込んでいます…';
-  call('pd.admin.list', { ym: g('lym').value }, { retry: true }).then(function (r) {
+  return call('pd.admin.list', { ym: g('lym').value }, { retry: true }).then(function (r) {
     if (!r.ok) { g('list').textContent = r.error; return; }
-    var seen = r.rows.filter(function (x) { return x.seen; }).length;
-    g('list').innerHTML = r.rows.length ? '<div class="p-note">' + r.rows.length + '件(見た ' + seen + '・まだ ' + (r.rows.length - seen) + ')</div><table class="pd"><tr><th>氏名</th><th>書類</th><th>配った</th><th>見た</th></tr>' +
-      r.rows.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td>' + esc(x.kind) + '</td><td>' + esc(x.at) + '<br><span class="p-muted">' + esc(x.by) + '</span></td><td>' + (x.seen ? esc(x.seen) : '<span class="ng">まだ</span>') + '</td></tr>'; }).join('') + '</table>' : 'この年月に配った書類はありません';
+    LIST = r.rows; renderList();
   });
-};
+}
+function renderList() {
+  if (!LIST.length) { g('list').textContent = 'この年月に配った書類はありません'; return; }
+  var live = LIST.filter(function (x) { return !x.canceled; }), seen = live.filter(function (x) { return x.seen; }).length;
+  g('list').innerHTML = '<div class="p-note">' + live.length + '件(見た ' + seen + '・まだ ' + (live.length - seen) + ')' + (LIST.length > live.length ? '・取り消し ' + (LIST.length - live.length) + '件' : '') + '</div>' +
+    '<table class="pd"><tr><th><input type="checkbox" id="cxAll" title="すべて選ぶ"></th><th>氏名</th><th>書類</th><th>配った</th><th>見た</th></tr>' +
+    LIST.map(function (x) {
+      if (x.canceled) return '<tr class="cx"><td></td><td class="nm">' + esc(x.name) + '</td><td>' + esc(x.kind) + '</td><td>' + esc(x.at) + '</td><td>取り消し ' + esc(x.cAt) + '<br>' + esc(x.cBy) + '・' + esc(x.cWhy) + '</td></tr>';
+      return '<tr><td><input type="checkbox" class="cx1" value="' + esc(x.id) + '"></td><td class="nm">' + esc(x.name) + '<br><span class="p-muted" style="font-size:12px;">' + esc(x.file || '') + '</span></td><td>' + esc(x.kind) + '</td><td>' + esc(x.at) + '<br><span class="p-muted">' + esc(x.by) + '</span></td><td>' + (x.seen ? esc(x.seen) : '<span class="ng">まだ</span>') + '</td></tr>';
+    }).join('') + '</table>' +
+    (live.length ? '' : '<div id="cxMsg" style="margin-top:8px;"></div>') + (!live.length ? '' : '<div class="cxbox"><b>選んだ書類を取り消す</b><div class="p-note">本人の一覧から消え、開けなくなります。ファイルはドライブのゴミ箱へ(30日は戻せます)。正しいファイルは、取り消したあとにいつもどおり配ってください。</div>' +
+    '<div class="bar">理由<select id="cxWhy"><option>ファイル違い</option><option>人違い</option><option>テスト(動作確認)</option><option value="">その他(右に書く)</option></select><input type="text" id="cxWhy2" placeholder="その他の理由" maxlength="100" style="flex:1;min-width:140px;"></div>' +
+    '<label style="display:block;margin-top:4px;"><input type="checkbox" id="cxNotify"> 本人に LINE WORKS で知らせる(「誤りのため取り消しました。正しいものを改めてお送りします」)</label>' +
+    '<button class="p-btn" id="cxGo" style="margin-top:8px;border-color:#B42318;color:#B42318;">選んだ書類を取り消す</button> <span id="cxMsg"></span></div>');
+  if (!live.length) return;
+  g('cxAll').onchange = function () { var on = this.checked; Array.prototype.forEach.call(document.querySelectorAll('.cx1'), function (c) { c.checked = on; }); };
+  g('cxWhy').onchange = function () { g('cxNotify').checked = this.value !== 'テスト(動作確認)' && this.value !== ''; };
+  g('cxNotify').checked = true;
+  g('cxGo').onclick = doCancel;
+}
+function doCancel() {
+  var ids = Array.prototype.filter.call(document.querySelectorAll('.cx1'), function (c) { return c.checked; }).map(function (c) { return c.value; });
+  if (!ids.length) { alert('取り消す書類にチェックを入れてください'); return; }
+  var why = g('cxWhy').value || g('cxWhy2').value.trim();
+  if (!why) { alert('取り消しの理由を入れてください'); return; }
+  var pick = LIST.filter(function (x) { return ids.indexOf(x.id) !== -1; });
+  var seen = pick.filter(function (x) { return x.seen; });
+  var notify = g('cxNotify').checked;
+  if (!confirm(pick.length + '件の書類を取り消します(理由：' + why + ')。\n' +
+    (seen.length ? '⚠ そのうち ' + seen.length + '件は、本人がもう開いています(' + seen.slice(0, 5).map(function (x) { return x.name; }).join('・') + (seen.length > 5 ? ' ほか' : '') + ')。\n' : '') +
+    (notify ? '本人に LINE WORKS で知らせます。' : '本人には知らせません。') + '\nよろしいですか？')) return;
+  var b = g('cxGo'); b.disabled = true; g('cxMsg').textContent = '取り消しています…';
+  call('pd.admin.cancel', { ids: ids, reason: why, notify: notify }).then(function (r) {
+    b.disabled = false;
+    if (!r.ok) { g('cxMsg').innerHTML = '<span class="ng">' + esc(r.error) + '</span>'; return; }
+    loadList().then(function () {
+      g('msg').innerHTML = '';
+      var m = document.getElementById('cxMsg');
+      if (m) m.innerHTML = '<span class="ok">' + r.canceled + '件を取り消しました</span>' + (notify ? '(' + (r.mode === 'お試し' ? 'お試し中のため、本人には知らせていません' : r.sent + '人に知らせました') + ')' : '');
+    });
+  }).catch(function () { b.disabled = false; g('cxMsg').innerHTML = '<span class="ng">通信に失敗しました。一覧を読み直して、取り消されたか確かめてください</span>'; });
+}
 if (P) init();
 </script>
 </body>

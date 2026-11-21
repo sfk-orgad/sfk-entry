@@ -43,7 +43,7 @@
 <div class="e-toast" id="toast" hidden></div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-09a';
+var PAGE_VERSION = '2026-12-18a';
 var P = Portal.start({ tool: 'eval', title: '評価ダッシュボード' });
 var g = Portal.$, esc = Portal.esc;
 var D = null, STORE = '', FILTER = 'all', CUR = null, VIEW = 'list';
@@ -144,6 +144,15 @@ function showPerson() {
     field('次回の課題', '<input class="p-input" id="tNext">') +
     '<div class="p-note">講義・見学の受講だけでは、Lv2・3にしません。スキルのLvは、上の「スキル」で直します。</div>' +
     '<div id="msg3"></div><button class="p-btn p-solid" id="save3" style="width:100%;margin-top:8px;">記録を足す</button></details></div>';
+  // 任せている業務(この店舗の分。2026-12-18)
+  var pm = r.perms || { defs: [] };
+  if (pm.defs && pm.defs.length && pm.store) {
+    h += '<div class="p-card"><h2>任せている業務(' + esc(pm.storeName || pm.store) + ')</h2>' + pm.defs.map(function (d) {
+      var on = (pm.mine || []).indexOf(d.name) !== -1;
+      return pm.canEdit ? '<label style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid #EEF0F2;"><input type="checkbox" class="pmc" value="' + esc(d.name) + '"' + (on ? ' checked' : '') + ' style="width:22px;height:22px;"><span><b>' + esc(d.name) + '</b>' + (d.desc ? '<br><span class="p-muted" style="font-size:12px;">' + esc(d.desc) + '</span>' : '') + '</span></label>'
+        : '<div style="padding:4px 0;">' + (on ? '○ ' : '<span class="p-muted">－ </span>') + esc(d.name) + '</div>';
+    }).join('') + (pm.canEdit ? '<div class="p-note" id="pmMsg">チェックすると、すぐ保存します(StaffMaster の「業務の権限」・本人のマイページに出る)</div>' : '<div class="p-note">付け外しは eval_admin・staff_admin の人が行います</div>') + '</div>';
+  }
   // 推移
   h += '<div class="p-card"><h2>推移</h2>' + (r.history.length ? r.history.map(function (x) {
     return '<div class="e-hist">' + md(x['評価日']) + '　' + esc(x['現G']) + '　総合 <b>' + esc(x['総合100点']) + '</b>（姿勢 ' + esc(x['姿勢60点']) + '・顧客 ' + esc(x['顧客40点']) + '）' + (x['承認'] ? '<br><span class="e-good">' + esc(x['承認']) + '</span>' : '') + '</div>';
@@ -154,6 +163,18 @@ function showPerson() {
     b.onclick = function () { Array.prototype.forEach.call(b.parentNode.children, function (x) { x.classList.toggle('on', x === b); }); };
   });
   g('save1').onclick = save1; if (g('save2')) g('save2').onclick = save2; g('save3').onclick = save3; if (g('approve')) g('approve').onclick = approve;
+  Array.prototype.forEach.call(document.querySelectorAll('.pmc'), function (c) { c.onchange = savePerms; });
+}
+function savePerms() {
+  var list = Array.prototype.filter.call(document.querySelectorAll('.pmc'), function (c) { return c.checked; }).map(function (c) { return c.value; });
+  var m = g('pmMsg'); if (m) m.textContent = '保存しています…';
+  Array.prototype.forEach.call(document.querySelectorAll('.pmc'), function (c) { c.disabled = true; });
+  call("eval.perm", { row: CUR.row, perms: list }).then(function (r) {
+    Array.prototype.forEach.call(document.querySelectorAll('.pmc'), function (c) { c.disabled = false; });
+    if (!r.ok) { if (m) m.innerHTML = '<span class="p-err">' + esc(r.error) + '</span>'; return; }
+    CUR.perms.mine = r.mine || list;
+    var n = new Date(); if (m) m.textContent = '保存しました ' + n.getHours() + ':' + ('0' + n.getMinutes()).slice(-2);
+  }).catch(function () { Array.prototype.forEach.call(document.querySelectorAll('.pmc'), function (c) { c.disabled = false; }); if (m) m.textContent = '通信に失敗しました。もう一度チェックし直してください'; });
 }
 function field(label, input) { return '<label class="p-label">' + esc(label) + '</label>' + input; }
 function sel(k, opts, v, isId) { return '<select class="p-select" ' + (isId ? 'id="' + k + '"' : 'data-k="' + esc(k) + '"') + '><option value="">(選ぶ)</option>' + opts.map(function (o) { return '<option' + (String(o) === String(v) ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>'; }

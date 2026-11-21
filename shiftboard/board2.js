@@ -242,8 +242,10 @@
     var k = B.month; if (!force && UNLKEY === k) return; UNLKEY = k;
     sxPost('sx.board', { month: B.month, store: '' }).then(function (r) { UNL = {}; ((r && r.unlocks) || []).forEach(function (x) { if (x.active) UNL[x.store + '|' + x.uid] = x.until; }); var el = g('b2sub'); if (el) el.outerHTML = subHtml(); }).catch(function () {});
   }
+  // 解禁できるのは、その月が始まる前(前の月の終わりまで)
+  function canUnlock() { var n = new Date(), ym = n.getFullYear() + '-' + ('0' + (n.getMonth() + 1)).slice(-2); return !B.readonly && B.month > ym; }
   function subHtml() {
-    var codes = storesNow(), h = '';
+    var codes = storesNow(), h = '', can = canUnlock();
     codes.forEach(function (code) {
       var uns = (B.unsubmitted[code] || []).slice().sort(byStaff);
       h += '<div style="margin-top:6px;"><b style="color:' + (scol(code) || 'var(--ink)') + '">' + esc(sname(code)) + '</b>' +
@@ -251,14 +253,27 @@
         uns.map(function (u) {
           var until = UNL[code + '|' + u];
           return '<div style="display:flex;align-items:center;gap:6px;font-size:13px;padding:2px 0;"><span style="flex:1;">' + esc(nameOfU(u)) + '</span>' +
-            (until ? '<span style="font-size:11px;color:var(--ok);">解禁中 ' + Number(until.slice(5, 7)) + '/' + Number(until.slice(8, 10)) + 'まで</span>' : (B.readonly ? '' : '<button class="mini2" data-unl="' + esc(code) + '|' + esc(u) + '">解禁</button>')) +
+            (until ? '<span style="font-size:11px;color:var(--ok);">解禁中 ' + Number(until.slice(5, 7)) + '/' + Number(until.slice(8, 10)) + 'まで</span>' : (can ? '<button class="mini2" data-unl="' + esc(code) + '|' + esc(u) + '">解禁</button>' : '')) +
             (B.readonly ? '' : '<button class="mini2" data-mks="' + esc(u) + '" title="この月は出ない人(夏だけ・スポットなど)を、提出済みにする">提出済みに</button>') + '</div>';
         }).join('');
+      // 提出済みの人の出し直し(修正)の解禁
+      var subd = Object.keys(B.staff).filter(function (u) { return inStore(u, code) && uns.indexOf(u) === -1; }).sort(byStaff);
+      var on = subd.filter(function (u) { return UNL[code + '|' + u]; });
+      if (on.length) h += '<div style="font-size:12px;color:var(--ok);margin-top:4px;">出し直しを解禁中：' + on.map(function (u) { var t = UNL[code + '|' + u]; return esc(nameOfU(u)) + '(' + Number(t.slice(5, 7)) + '/' + Number(t.slice(8, 10)) + 'まで)'; }).join('、') + '</div>';
+      if (can && subd.length) h += '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:13px;"><span>提出済みの人の出し直し</span><select class="subUnl" data-store="' + esc(code) + '" style="flex:1;min-width:0;font-size:13px;"><option value="">(選ぶ)</option>' +
+        subd.map(function (u) { return '<option value="' + esc(u) + '">' + esc(nameOfU(u)) + '</option>'; }).join('') + '</select><button class="mini2" data-unlsub="' + esc(code) + '">解禁</button></div>';
     });
+    if (!can && !B.readonly) h += '<div class="muted" style="margin-top:6px;color:var(--short);">' + esc(B.label) + 'はもう始まっているので、解禁はできません(解禁できるのは前の月の終わりまで)</div>';
     return '<div class="mon" id="b2sub"><h3>シフト希望の提出状況(' + esc(B.label) + ')</h3>' + h +
       '<div class="muted" style="margin-top:6px;">1日も入れずに出した人も「提出」です(出られる日がない)。解禁＝締め切り後でも、その人だけ提出できるようにする(期限つき・本人に知らせる)。提出済みに＝この月は出ない人(夏だけ・スポットなど)を、管理者が提出済みにする(催促が止まる。あとで本人が出し直してもよい)。</div></div>';
   }
   document.addEventListener('click', function (e) {
+    var us = e.target.closest('[data-unlsub]');
+    if (us) {
+      var sc = us.getAttribute('data-unlsub'), sel = document.querySelector('.subUnl[data-store="' + sc + '"]');
+      if (!sel || !sel.value) { alert('出し直しを解禁する人を選んでください'); return; }
+      us.setAttribute('data-unl', sc + '|' + sel.value); // 下の解禁の流れに渡す
+    }
     var mk = e.target.closest('[data-mks]');
     if (mk) {
       var mu = mk.getAttribute('data-mks');
@@ -274,7 +289,8 @@
     }
     var b = e.target.closest('[data-unl]'); if (!b) return;
     var p = b.getAttribute('data-unl').split('|'), code = p[0], u = p[1];
-    var d = prompt(nameOfU(u) + 'さんに、' + sname(code) + 'の' + B.label + '分の提出を解禁します。\n何日間受け付けますか？(1〜14。今日を含む)', '3');
+    if (b.hasAttribute('data-unlsub')) b.removeAttribute('data-unl');
+    var d = prompt(nameOfU(u) + 'さんに、' + sname(code) + 'の' + B.label + '分の' + ((B.unsubmitted[code] || []).indexOf(u) === -1 ? '出し直し(提出済みの希望の修正)' : '提出') + 'を解禁します。\n何日間受け付けますか？(1〜14。今日を含む。前の月の終わりまで)', '3');
     if (d === null) return;
     d = Number(d); if (!(d >= 1 && d <= 14)) { alert('1〜14の数で入れてください'); return; }
     var notify = confirm('本人に LINE WORKS で知らせますか？\n［OK］知らせる　［キャンセル］知らせない');

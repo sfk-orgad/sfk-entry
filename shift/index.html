@@ -120,7 +120,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-12-18b';
+var PAGE_VERSION = '2026-12-18c';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -189,7 +189,8 @@ if (!S || !S.token || S.exp < Date.now()) {
   gate('開くツールが分かりませんでした。\nポータルから開き直してください。', true);
 } else {
   // ポータルが先読みしたデータ(3分以内)があれば、待たずに表示して、裏で最新を確かめる
-  var pre = readPrefetch();
+  var WANT = (location.hash.match(/^#(\d{4}-\d{2})$/) || [])[1] || ''; // タブで選んだ月(2026-12-18)
+  var pre = WANT ? null : readPrefetch();
   if (pre) {
     showForm(pre, '先読み');
     api('shift.init', {}, true).then(function (res) {
@@ -217,7 +218,8 @@ function showForm(D, how) {
 }
 
 function loadNow() {
-  api('shift.init', {}, true).then(function (res) {
+  var want = (location.hash.match(/^#(\d{4}-\d{2})$/) || [])[1] || '';
+  api('shift.init', want ? { month: want } : {}, true).then(function (res) {
     if (!res.ok) { gate(res.error === 'AUTH' ? authMessage(res) : '開けませんでした：' + res.error, true); return; }
     showForm(res.init, '取得');
   }).catch(function (e) {
@@ -234,6 +236,27 @@ function startForm(D) {
   function mins(t) { var p = String(t).split(':'); return Number(p[0]) * 60 + Number(p[1]); }
 
   $('title').textContent = D.month.label + 'のシフト希望';
+  // 受付中の月が2つ以上(解禁された月・次の月)なら、タブで切り替える(2026-12-18)
+  (function () {
+    var ms = D.months || [];
+    var old = document.getElementById('mtabs'); if (old) old.remove();
+    if (ms.length < 2) return;
+    var st = document.createElement('style');
+    st.textContent = '#mtabs{display:flex;gap:6px;margin:0 0 10px;flex-wrap:wrap}#mtabs button{flex:1;min-width:30%;padding:10px 8px;border:1px solid rgba(255,255,255,.45);border-radius:12px;background:rgba(255,255,255,.1);font-size:15px;font-family:inherit;cursor:pointer;color:#fff;line-height:1.3}#mtabs button.on{background:#fff;color:#16323A;border-color:#fff;font-weight:700}#mtabs small{display:block;font-size:11px;opacity:.85;font-weight:400}';
+    document.head.appendChild(st);
+    var bar = document.createElement('div'); bar.id = 'mtabs';
+    bar.innerHTML = ms.map(function (m) {
+      return '<button data-mon="' + m.key + '" class="' + (m.key === D.month.key ? 'on' : '') + '">' + esc(m.label) + '分' + (m.unlocked ? '(出し直し)' : '') +
+        '<small>' + (m.done ? '提出済み・' : '') + '締め切り ' + esc(m.deadline) + '</small></button>';
+    }).join('');
+    $('title').parentNode.insertBefore(bar, $('title'));
+    bar.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-mon]'); if (!b || b.getAttribute('data-mon') === D.month.key) return;
+      try { if (typeof saveDraft === 'function') saveDraft(); } catch (x) {}
+      if (dirty && !confirm('まだ出していない入力があります(この端末に下書きとして残ります)。\n' + b.textContent.replace(/締め切り.*/, '') + 'に切り替えますか？')) return;
+      location.hash = b.getAttribute('data-mon'); location.reload();
+    });
+  })();
   if (D.name) $('me').textContent = D.name + ' さん';
   $('timing').innerHTML = esc('ver ' + PAGE_VERSION + '・開くまで ' + (D.clientMs / 1000).toFixed(1) + '秒(' + D.how + ')') + '<span id="wakeState"></span>';
   if (D.portalUrl) {

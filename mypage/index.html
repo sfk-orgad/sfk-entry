@@ -47,7 +47,7 @@
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-12-14a';
+var PAGE_VERSION = '2026-12-18a';
 var P = Portal.start({ tool: 'mypage', title: 'マイページ' });
 var g = Portal.$, esc = Portal.esc;
 function row(k, v) { return '<div class="me-row"><span class="k">' + esc(k) + '</span><span>' + (v ? esc(v) : '<span class="p-muted">―</span>') + '</span></div>'; }
@@ -56,6 +56,10 @@ function load() {
     if (!r.ok) { Portal.gate(r.error === 'AUTH' ? Portal.authMessage(r, 'マイページ') : '開けませんでした：' + r.error, { back: true }); return; }
     var m = r.me;
     g('info').innerHTML = '<h2 style="margin-top:0;">' + esc(m.name) + ' さん</h2>' + row('StaffID', m.sid) + row('雇用区分', m.emp) + row('所属', m.stores) + row('グレード', m.grade) + row('上長', m.bosses);
+    // 任されている業務(店舗ごと。2026-12-18)。設定で出さないときは m.perms が null
+    if (m.perms) g('info').insertAdjacentHTML('beforeend', '<div style="margin-top:12px;"><b>任されている業務</b>' + (m.perms.length ? m.perms.map(function (x) {
+      return '<div style="margin-top:4px;"><span class="p-muted">' + esc(x.store) + '：</span>' + x.perms.map(function (n) { return '<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 10px;border-radius:999px;background:#E8F1EE;color:#1F5D4B;font-size:14px;">' + esc(n) + '</span>'; }).join('') + '</div>';
+    }).join('') : '<div class="p-muted" style="margin-top:4px;">まだありません</div>') + '</div>');
     g('yobina').value = m['呼び名'] || '';
     // ほかのツールへの近道(ポータルが持っている入口のうち、あるものだけ)
     // 開く先は、ポータルのカードと同じURL(ポータルが portal_urls に入れておく。店舗などの引き継ぎも同じになる)

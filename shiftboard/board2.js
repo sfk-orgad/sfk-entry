@@ -595,6 +595,30 @@
     bar.insertAdjacentHTML('afterend', ' <button class="btn" id="impBtn">シフト表を取り込む</button>');
     document.body.insertAdjacentHTML('beforeend', '<div id="impView" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:120;overflow:auto;"><div style="background:#fff;max-width:880px;margin:30px auto;border-radius:14px;padding:18px 20px;" id="impBox"></div></div>');
   })();
+  // ===== 上の道具の欄の整理(2026-12-18)：書き出し・取り込みを1つのメニューにまとめる =====
+  //   シフト表(印刷・PDF・Excel)／スマレジ用の勤務表／スマレジのシフト表を取り込む。タイムラインの書き出しは使わないので隠す(SHOW_TIMELINE_EXPORT を true で戻る)
+  var SHOW_TIMELINE_EXPORT = false;
+  (function () {
+    var ids = ['sheetBtn', 'kinmu', 'impBtn', 'export'];
+    if (!g('sheetBtn') || !g('kinmu')) return;
+    var css = document.createElement('style');
+    css.textContent = '#ioMenu{position:relative;display:inline-block}#ioMenu>summary{list-style:none;cursor:pointer}#ioMenu>summary::-webkit-details-marker{display:none}' +
+      '#ioMenu .pop{position:absolute;z-index:60;top:calc(100% + 6px);left:0;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;min-width:300px}' +
+      '#ioMenu .it{display:block;width:100%;text-align:left;border:0;background:none;padding:10px 12px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:14px;color:var(--ink)}#ioMenu .it:hover{background:var(--soft)}#ioMenu .it small{display:block;color:var(--muted);font-size:12px;margin-top:2px}';
+    document.head.appendChild(css);
+    var items = [
+      ['sheetBtn', '🖨 シフト表(印刷・PDF・Excel)', 'この店舗・この月の確定シフトを、スタッフ×日付の表に。貼り出し・配る用'],
+      ['kinmu', '📤 スマレジ用の勤務表を作る', 'スマレジの勤怠にシフトを登録するための表を、スプシに作る'],
+      ['impBtn', '📥 スマレジのシフト表を取り込む', 'スマレジから出した Excel で、確定シフトをまとめて入れる'],
+    ];
+    if (SHOW_TIMELINE_EXPORT) items.push(['export', '🕒 タイムラインを書き出す', '希望の時間帯の表を、シフト希望のスプシに作る']);
+    var det = document.createElement('details'); det.id = 'ioMenu';
+    det.innerHTML = '<summary class="btn">書き出す・取り込む ▾</summary><div class="pop">' + items.map(function (x) { return '<button type="button" class="it" data-io="' + x[0] + '">' + x[1] + '<small>' + x[2] + '</small></button>'; }).join('') + '</div>';
+    g('sheetBtn').parentNode.insertBefore(det, g('sheetBtn'));
+    ids.forEach(function (id) { if (g(id)) g(id).style.display = 'none'; });
+    det.addEventListener('click', function (e) { var b = e.target.closest('[data-io]'); if (!b) return; det.open = false; var t = g(b.getAttribute('data-io')); if (t) t.click(); });
+    document.addEventListener('click', function (e) { if (det.open && !det.contains(e.target)) det.open = false; });
+  })();
   var IMP = null;
   function nkey(s) { return String(s || '').normalize('NFKC').replace(/[(（][^)）]*[)）]/g, '').replace(/[\s\u3000・･]/g, '').toLowerCase(); }
   function impOpen() {

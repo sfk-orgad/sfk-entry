@@ -68,7 +68,7 @@
 <div class="toast" id="toast" hidden></div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-10a';
+var PAGE_VERSION = '2026-12-18a';
 var g = Portal.$, esc = Portal.esc;
 var D = null, SORT = { k: 'sid', asc: true };
 
@@ -128,6 +128,35 @@ g('tbl').addEventListener('click', function (e) {
 });
 
 // ===== 1人の画面(直す) =====
+// ===== 業務の権限(店舗ごと)・個別に許可するツール のチェック(2026-12-18) =====
+function permParse(t) { var o = {}; String(t || '').split(/[,、，\n]+/).forEach(function (x) { var m = x.trim().match(/^([A-Za-z0-9_\-]+)\s*[:：]\s*(.+)$/); if (m) o[m[1] + ':' + m[2].trim()] = 1; }); return o; }
+function permGrid(t, edit) {
+  var have = permParse(t), perms = D.perms || [];
+  if (!perms.length) return '<div class="p-muted">権限の一覧がまだありません(ポータル設定の「業務の権限」シート。認証基盤のエディタで setupWorkPerms を実行すると作られます)</div>';
+  var h = '<div style="overflow-x:auto;"><table id="' + (edit ? 'permGrid' : 'permView') + '" style="border-collapse:collapse;font-size:15px;"><tr><th style="text-align:left;padding:6px 10px;">業務</th>' +
+    D.stores.map(function (st) { return '<th style="padding:6px 10px;">' + esc(st.name) + '</th>'; }).join('') + '</tr>';
+  perms.forEach(function (p) {
+    h += '<tr style="border-top:1px solid #EEF0F2;"><td style="padding:6px 10px;"><b>' + esc(p.name) + '</b>' + (p.desc ? '<div class="p-muted" style="font-size:12px;">' + esc(p.desc) + '</div>' : '') + '</td>' +
+      D.stores.map(function (st) {
+        var k = st.code + ':' + p.name, on = !!have[k];
+        return '<td style="text-align:center;padding:6px 10px;">' + (edit ? '<input type="checkbox" value="' + esc(k) + '"' + (on ? ' checked' : '') + ' style="width:22px;height:22px;">' : (on ? '○' : '<span class="p-muted">－</span>')) + '</td>';
+      }).join('') + '</tr>';
+  });
+  return h + '</table></div>';
+}
+var TOOLS_EXTRA = []; // ツール一覧にない値(「全て」など)は、そのまま残す
+function toolBoxes(t) {
+  var have = String(t || '').split(/[,、\s]+/).filter(Boolean), tools = D.tools || [];
+  if (!tools.length) return '<input class="p-input" data-k="個別に許可するツール" value="' + esc(t) + '">';
+  var ids = tools.map(function (x) { return x.id; });
+  TOOLS_EXTRA = have.filter(function (x) { return ids.indexOf(x) === -1; });
+  var cats = []; tools.forEach(function (x) { var c = x.category || '権限だけ・そのほか'; if (cats.indexOf(c) === -1) cats.push(c); });
+  return '<div id="toolBox">' + (TOOLS_EXTRA.length ? '<div class="p-note">そのまま残す：' + esc(TOOLS_EXTRA.join('、')) + '</div>' : '') + cats.map(function (c) {
+    return '<div style="margin:6px 0 2px;font-size:13px;color:var(--p-muted);font-weight:700;">' + esc(c) + '</div>' + tools.filter(function (x) { return (x.category || '権限だけ・そのほか') === c; }).map(function (x) {
+      return '<label style="display:inline-block;margin:2px 14px 2px 0;"><input type="checkbox" value="' + esc(x.id) + '"' + (have.indexOf(x.id) !== -1 ? ' checked' : '') + '> ' + esc(x.name) + '</label>';
+    }).join('');
+  }).join('') + '</div>';
+}
 function nameOf(sid) { var x = D.staff.filter(function (s) { return s.sid === sid; })[0]; return x ? x.name : sid; }
 function toast(t) { var x = g('toast'); x.textContent = t; x.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { x.hidden = true; }, 3500); }
 function showEdit(sid) {
@@ -152,7 +181,10 @@ function showEdit(sid) {
       field('雇用区分', '<select class="p-select" data-k="雇用区分">' + emps.map(function (e) { return '<option' + (e === x['雇用区分'] ? ' selected' : '') + '>' + esc(e) + '</option>'; }).join('') + '</select>', '変えたら StaffID の頭文字も直す(checkStaffMaster)') +
       field('所属', '<div id="affil">' + D.stores.map(function (st) { return '<label style="margin-right:12px;"><input type="checkbox" value="' + esc(st.code) + '"' + (mine.indexOf(st.code) !== -1 ? ' checked' : '') + '> ' + esc(st.name) + '</label>'; }).join('') + '</div>') +
       field('ステータス', '<select class="p-select" data-k="ステータス">' + D.edit.status.map(function (e) { return '<option' + (e === x['ステータス'] ? ' selected' : '') + '>' + esc(e) + '</option>'; }).join('') + '</select>') +
-      field('個別に許可するツール', '<input class="p-input" data-k="個別に許可するツール" value="' + esc(x['個別に許可するツール'] || '') + '">', 'ツールIDをカンマ区切り(例：eval_admin)。ポータルの権限そのものなので注意') + '</div>';
+      field('個別に許可するツール', toolBoxes(x['個別に許可するツール'] || ''), '雇用区分で使えるツールに足して、この人だけに許可するもの。ポータルの権限そのものなので注意') +
+      field('業務の権限', permGrid(x['業務の権限'] || '', true), '店舗ごとに、任せてよい業務にチェック。権限の一覧はポータル設定の「業務の権限」シートで足す・直す') + '</div>';
+  } else if ((D.perms || []).length) {
+    h += '<div class="p-card"><h2 style="margin-top:0;">業務の権限</h2>' + permGrid(x['業務の権限'] || '', false) + '<div class="p-note">付け外しは管理者(staff_admin)が行います</div></div>';
   }
   h += '<div id="msg"></div><button class="p-btn p-solid p-big" id="save" style="width:100%;">保存する</button>';
   g('listArea').hidden = true; g('editArea').hidden = false; g('editArea').innerHTML = h; window.scrollTo(0, 0);
@@ -166,7 +198,11 @@ function showEdit(sid) {
   g('save').onclick = function () {
     var v = { '上長': bosses.join(',') };
     Array.prototype.forEach.call(document.querySelectorAll('#editArea [data-k]'), function (el) { v[el.getAttribute('data-k')] = el.value; });
-    if (D.isAdmin) v['所属'] = Array.prototype.filter.call(document.querySelectorAll('#affil input'), function (c) { return c.checked; }).map(function (c) { return c.value; }).join(',');
+    if (D.isAdmin) {
+      v['所属'] = Array.prototype.filter.call(document.querySelectorAll('#affil input'), function (c) { return c.checked; }).map(function (c) { return c.value; }).join(',');
+      if (g('toolBox')) v['個別に許可するツール'] = Array.prototype.filter.call(document.querySelectorAll('#toolBox input'), function (c) { return c.checked; }).map(function (c) { return c.value; }).concat(TOOLS_EXTRA).join(',');
+      if (g('permGrid')) v['業務の権限'] = Array.prototype.filter.call(document.querySelectorAll('#permGrid input'), function (c) { return c.checked; }).map(function (c) { return c.value; }).join('、');
+    }
     var b = g('save'); b.disabled = true; b.textContent = '保存しています…'; g('msg').innerHTML = '';
     P.call('staff.save', { sid: sid, ver: x.ver, values: v }).then(function (r) {
       b.disabled = false; b.textContent = '保存する';

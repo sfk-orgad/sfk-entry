@@ -64,7 +64,11 @@
   .stabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
   .stabs button { padding: 6px 12px; font-size: 14px; border: 1px solid #B9C0C8; border-radius: 999px; background: #fff; cursor: pointer; font-family: inherit; }
   .stabs button.on { color: #fff; border-color: transparent; font-weight: 700; }
-  .tw { overflow-x: auto; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+  .tw { overflow: auto; max-height: 75vh; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+  /* 全体の表：日付の見出しと氏名の列を、縦・横にスクロールしても出したままにする(2026-12-18) */
+  .tt th { position: sticky; top: 0; z-index: 2; }
+  .tt th:first-child { left: 0; z-index: 3; }
+  .tt tr:last-child td.nm { z-index: 1; }
   .tt { border-collapse: collapse; font-size: 12px; }
   .tt th, .tt td { border: 1px solid #E6E9ED; padding: 3px 4px; text-align: center; white-space: nowrap; }
   .tt th { background: #F3F5F7; font-weight: 600; }
@@ -151,7 +155,7 @@
 </div>
 
 <script>
-var PAGE_VERSION = '2026-12-17a';
+var PAGE_VERSION = '2026-12-18a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 var COLORS = ['#1F7A6B', '#7A4FB5', '#C2571A', '#2F6FBF', '#A23B72', '#4D7A1F']; // 店舗ごとの色(店舗シートの順)

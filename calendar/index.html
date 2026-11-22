@@ -166,7 +166,7 @@
 </div>
 
 <script>
-var PAGE_VERSION = '2026-12-18c';
+var PAGE_VERSION = '2026-12-18d';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 var COLORS = ['#1F7A6B', '#7A4FB5', '#C2571A', '#2F6FBF', '#A23B72', '#4D7A1F']; // 店舗ごとの色(店舗シートの順)
@@ -383,6 +383,8 @@ function renderAll() {
   var list = C.team.filter(function (t) { return t[1] === TSTORE; });
   var names = []; list.forEach(function (t) { if (names.indexOf(t[4]) === -1) names.push(t[4]); });
   names.sort(function (a, b) { return a === C.name ? -1 : b === C.name ? 1 : a.localeCompare(b, 'ja'); }); // 自分を一番上に
+  // その月にシフトが無い人も行を出す(Bot が店舗の人の名前を返していれば。下にまとめる。2026-12-18)
+  ((C.members || {})[TSTORE] || []).forEach(function (nm) { if (names.indexOf(nm) === -1) names.push(nm); });
   var h = '<tr><th>氏名</th>' + C.days.map(function (x) {
     var today = now.getFullYear() === ym[0] && now.getMonth() + 1 === ym[1] && now.getDate() === x.d;
     return '<th class="' + (x.hol ? 'hol' : x.w === 0 ? 'sun' : x.w === 6 ? 'sat' : '') + (today ? ' today' : '') + '">' + x.d + '<br>' + W.charAt(x.w) + '</th>';
@@ -491,7 +493,7 @@ g('detail').addEventListener('click', function (e) {
 });
 </script>
 <!-- 印刷(2026-12-15) -->
-<script src="print.js?v=1"></script>
+<script src="print.js?v=2"></script>
 <script src="todo.js?v=5"></script>
 </body>
 </html>

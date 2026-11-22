@@ -84,7 +84,8 @@
     '.b2 .day .sl{display:flex;align-items:center;gap:2px;width:100%;font-size:10px;line-height:1.3;white-space:nowrap;overflow:hidden}',
     '.b2 .day .sl b{font-weight:700;min-width:1.6em;text-align:left}',
     '.b2 .day .sl .stp{flex:1;height:5px;margin:0}',
-    '#tabs .tab.allst{border-style:dashed}'
+    '#tabs .tab.allst{border-style:dashed}',
+    '#vMonth .grid-wrap{max-height:75vh;overflow:auto}#vMonth .mt th{z-index:2}#vMonth .mt tr:first-child th:first-child{left:0;z-index:3}' // 月の一覧：見出しを固定(2026-12-18)
   ].join('\n');
   document.head.appendChild(css2);
 

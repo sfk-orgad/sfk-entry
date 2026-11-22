@@ -50,7 +50,7 @@
 <div class="t-toast" id="toast" hidden></div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-12-17b';
+var PAGE_VERSION = '2026-12-18a';
 var P = Portal.start({ tool: 'todo', title: 'TODOリスト' });
 var g = Portal.$, esc = Portal.esc;
 var D = null, SHOW = 'open', SCOPE = 'all', EDIT = null;
@@ -142,7 +142,7 @@ function renderForm() {
     '<label class="p-label">期限(なくてもよい)</label><input type="date" class="p-input" id="fD" value="' + esc(x.due || '') + '">' +
     (D.staff ? '<label class="p-label">見られる人</label><div class="t-seg">' + ['全員', '社員のみ'].map(function (s) { var on = (x.scope || '全員') === s; return '<label class="' + (on ? 'on' : '') + '"><input type="radio" name="fS" value="' + s + '"' + (on ? ' checked' : '') + '>' + s + '</label>'; }).join('') + '</div>' : '') +
     (D.stores.length > 1 ? '<label class="p-label">店舗(どれも選ばなければ全店舗)</label><div class="t-st">' + D.stores.map(function (s) { return '<label><input type="checkbox" class="fSt" value="' + esc(s.code) + '"' + (st.indexOf(s.code) !== -1 ? ' checked' : '') + '> ' + esc(s.name) + '</label>'; }).join('') + '</div>' : '') +
-    '<label class="p-label">担当(なくてもよい)</label><input class="p-input" id="fW" maxlength="40" value="' + esc(x.who || '') + '" placeholder="例：松井・早番の人">' +
+    '<label class="p-label">担当(なくてもよい)</label><input class="p-input" id="fW" maxlength="40" value="' + esc(x.who || '') + '" placeholder="例：早番の人">' +
     '<label class="p-label">メモ</label><textarea class="p-textarea" id="fM" maxlength="1000">' + esc(x.memo || '') + '</textarea>' +
     '<div id="fMsg"></div><div style="display:flex;gap:8px;margin-top:12px;"><button class="p-btn p-solid p-big" id="fSave" style="flex:1;">保存する</button><button class="p-btn p-big" id="fBack" style="flex:1;">やめる</button></div>' +
     (D.staff ? '<div class="p-note" style="margin-top:10px;">「社員のみ」は、社員(と社長)にだけ見えます。アルバイトの画面とシフトカレンダーには出ません。</div>' : '') + '</div>';

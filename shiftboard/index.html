@@ -61,6 +61,13 @@
   .ps td.nm { text-align: left; font-weight: 700; font-size: 7.5pt; padding-left: 1mm; }
   .ps td.nm small { font-weight: 400; color: #666; font-size: 6pt; }
   .ps td.w { background: #FAFBFC; line-height: 1.15; } .ps td.sum { font-weight: 700; background: #F4F6F8; }
+  /* 時間を読みやすく(2026-12-18)：開始は太字・終了は普通、上下に分けて少し大きく。分は小さく。土日祝の列に色・1行おきに色・2ページ目にも見出し */
+  .ps td.w { font-size: 8.2pt; line-height: 1.05; padding: .6mm .1mm; background: #fff; }
+  .ps td.w .s { font-weight: 700; display: block; } .ps td.w .e { display: block; color: #333; border-top: .2mm solid #C9CFD6; margin-top: .3mm; padding-top: .3mm; }
+  .ps td.w small { font-size: 5.6pt; vertical-align: .35em; margin-left: .1mm; }
+  .ps td.wk { background: #F7F1F1; } .ps td.w.wk { background: #FBF3F3; }
+  .ps tbody tr:nth-child(even) td.nm { background: #F6F8F9; } .ps tbody tr:nth-child(even) td:not(.nm):not(.sum):not(.wk) { background: #FAFBFC; }
+  .ps thead { display: table-header-group; } .ps tr { page-break-inside: avoid; }
   .ps tr.foot td { background: #F4F6F8; font-weight: 700; }
   .ps .note { font-size: 6.5pt; color: #555; margin-top: 2mm; }
   @media print {
@@ -208,7 +215,7 @@
   <div class="muted" id="edMsg" style="margin-top:6px;"></div>
 </div>
 <script>
-var PAGE_VERSION = '2026-12-14a';
+var PAGE_VERSION = '2026-12-18a';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -1032,18 +1039,22 @@ function showSheet() {
     '<div class="meta"><span>' + (pub ? '公開：' + esc(pub.at) : '未公開(作成中)') + '</span><span>出力：' + stamp + '</span></div>' +
     '<table><colgroup><col style="width:' + nmW + 'mm">' + B.days.map(function () { return '<col style="width:' + dayW.toFixed(2) + 'mm">'; }).join('') +
     '<col style="width:' + sumW + 'mm"><col style="width:' + sumW + 'mm"><col style="width:' + sumW + 'mm"><col style="width:' + sumW + 'mm"></colgroup>' +
-    '<tr><th>氏名</th>' + B.days.map(function (x) { return '<th class="' + (x.hol ? 'hol' : x.w === 0 ? 'sun' : x.w === 6 ? 'sat' : '') + '">' + x.d + '<br>' + W.charAt(x.w) + '</th>'; }).join('') +
-    '<th>日数</th><th>在籍</th><th>休憩</th><th>実働</th></tr>';
+    '<thead><tr><th>氏名</th>' + B.days.map(function (x) { return '<th class="' + (x.hol ? 'hol' : x.w === 0 ? 'sun' : x.w === 6 ? 'sat' : '') + '">' + x.d + '<br>' + W.charAt(x.w) + '</th>'; }).join('') +
+    '<th>日数</th><th>在籍</th><th>休憩</th><th>実働</th></tr></thead><tbody>';
+  // 時刻：時は大きく、分(00以外)は小さく(21:30 → 21³⁰)
+  var tm = function (t) { var p = String(t).split(':'); return Number(p[0]) + (p[1] && p[1] !== '00' ? '<small>' + p[1] + '</small>' : ''); };
+  var wk = B.days.map(function (x) { return x.hol || x.w === 0 || x.w === 6; });
   d.rows.forEach(function (r) {
     h += '<tr><td class="nm">' + esc(r.name) + (r.emp ? '<br><small>' + esc(r.emp) + '</small>' : '') + '</td>' + r.cells.map(function (c) {
       // 狭いので、開始と終了を2行に(10- / 15:30)
-      return c ? '<td class="w">' + c.segs.map(function (s) { return shortHm(s[1]) + '-<br>' + shortHm(s[2]); }).join('<br>') + '</td>' : '<td></td>';
+      var i = arguments[1];
+      return c ? '<td class="w' + (wk[i] ? ' wk' : '') + '">' + c.segs.map(function (s) { return '<span class="s">' + tm(s[1]) + '</span><span class="e">' + tm(s[2]) + '</span>'; }).join('') + '</td>' : '<td' + (wk[i] ? ' class="wk"' : '') + '></td>';
     }).join('') + '<td class="sum">' + r.tot.n + '</td><td class="sum">' + hrs(r.tot.span) + '</td><td class="sum">' + hrs(r.tot.br) + '</td><td class="sum">' + hrs(r.tot.work) + '</td></tr>';
   });
   var all = d.rows.reduce(function (a, r) { a.n += r.tot.n; a.span += r.tot.span; a.br += r.tot.br; a.work += r.tot.work; return a; }, { n: 0, span: 0, br: 0, work: 0 });
-  h += '<tr class="foot"><td class="nm">人数</td>' + d.heads.map(function (n) { return '<td>' + (n || '') + '</td>'; }).join('') +
+  h += '</tbody><tr class="foot"><td class="nm">人数</td>' + d.heads.map(function (n) { return '<td>' + (n || '') + '</td>'; }).join('') +
     '<td>' + all.n + '</td><td>' + hrs(all.span) + '</td><td>' + hrs(all.br) + '</td><td>' + hrs(all.work) + '</td></tr></table>' +
-    '<div class="note">時間は上が開始・下が終了(10- / 18 ＝10:00〜18:00)。在籍・休憩・実働は時間。休憩は「休憩の決まり」(雇用区分ごと)で、この店舗のその日の在籍から自動で数えています。</div>';
+    '<div class="note">時間は上(太字)が開始・下が終了(10 / 18 ＝10:00〜18:00、21³⁰＝21:30)。土日祝の列は色付き。在籍・休憩・実働は時間。休憩は「休憩の決まり」(雇用区分ごと)で、この店舗のその日の在籍から自動で数えています。</div>';
   if (!d.rows.length) h += '<p>この月は、この店舗の確定シフトがまだありません。</p>';
   g('sheetPage').innerHTML = h;
   g('sheetTitle').textContent = d.st.name + ' ' + B.label + ' シフト表';

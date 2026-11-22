@@ -166,7 +166,7 @@
 </div>
 
 <script>
-var PAGE_VERSION = '2026-12-18b';
+var PAGE_VERSION = '2026-12-18c';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 var COLORS = ['#1F7A6B', '#7A4FB5', '#C2571A', '#2F6FBF', '#A23B72', '#4D7A1F']; // 店舗ごとの色(店舗シートの順)
@@ -407,7 +407,7 @@ function renderAll() {
   if (hd && meRow) Array.prototype.forEach.call(meRow.children, function (td) { td.style.top = (Math.floor(hd.getBoundingClientRect().height) - 1) + 'px'; });
   // 名前で探す欄(1回だけ作る)
   if (!g('ttq')) {
-    g('stabs').insertAdjacentHTML('afterend', '<div class="ttbar"><input id="ttq" type="search" placeholder="名前で探す(例：大井)"><span class="muted">★＝あなた(いつも上)。行を押すと色が付きます</span></div>');
+    g('stabs').insertAdjacentHTML('afterend', '<div class="ttbar"><input id="ttq" type="search" placeholder="名前で探す"><span class="muted">★＝あなた(いつも上)。行を押すと色が付きます</span></div>');
     g('ttq').addEventListener('input', function () { window.TTQ = this.value; renderAll(); });
   }
 }

@@ -69,6 +69,17 @@
   .tt th { position: sticky; top: 0; z-index: 2; }
   .tt th:first-child { left: 0; z-index: 3; }
   .tt tr:last-child td.nm { z-index: 1; }
+  /* 見やすく(2026-12-18)：1行おきに色・自分の行は見出しのすぐ下に固定・人数の行は下に固定・今日の列・押した行に色 */
+  .tt tr.r:nth-child(even) td { background: #FAFBFC; } .tt tr.r:nth-child(even) td.nm { background: #F6F8F9; }
+  .tt tr.me td { position: sticky; z-index: 2; background: #FFF4C2 !important; box-shadow: 0 2px 0 #E5C64A; }
+  .tt tr.me td.nm { left: 0; z-index: 4; }
+  .tt tr.ft td { position: sticky; bottom: 0; z-index: 2; background: #EEF1F4 !important; }
+  .tt tr.ft td.nm { left: 0; z-index: 4; }
+  .tt td.td { background: #EAF4FF !important; } .tt tr.me td.td { background: #FFE89A !important; }
+  .tt tr.pick td { background: #DFF3E6 !important; } .tt tr.pick td.nm { color: #1F5D4B; }
+  .tt tr.r { cursor: pointer; }
+  .ttbar { display: flex; gap: 8px; align-items: center; margin: 0 0 8px; flex-wrap: wrap; }
+  .ttbar input { flex: 1; min-width: 140px; font-size: 15px; padding: 7px 10px; border: 1px solid #B9C0C8; border-radius: 10px; font-family: inherit; }
   .tt { border-collapse: collapse; font-size: 12px; }
   .tt th, .tt td { border: 1px solid #E6E9ED; padding: 3px 4px; text-align: center; white-space: nowrap; }
   .tt th { background: #F3F5F7; font-weight: 600; }
@@ -155,7 +166,7 @@
 </div>
 
 <script>
-var PAGE_VERSION = '2026-12-18a';
+var PAGE_VERSION = '2026-12-18b';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 var COLORS = ['#1F7A6B', '#7A4FB5', '#C2571A', '#2F6FBF', '#A23B72', '#4D7A1F']; // 店舗ごとの色(店舗シートの順)
@@ -376,19 +387,37 @@ function renderAll() {
     var today = now.getFullYear() === ym[0] && now.getMonth() + 1 === ym[1] && now.getDate() === x.d;
     return '<th class="' + (x.hol ? 'hol' : x.w === 0 ? 'sun' : x.w === 6 ? 'sat' : '') + (today ? ' today' : '') + '">' + x.d + '<br>' + W.charAt(x.w) + '</th>';
   }).join('') + '<th>日数</th></tr>';
+  var tdy = (now.getFullYear() === ym[0] && now.getMonth() + 1 === ym[1]) ? now.getDate() : 0;
+  var q = (window.TTQ || '').replace(/\s/g, '');
   names.forEach(function (nm) {
-    var n = 0;
-    h += '<tr' + (nm === C.name ? ' class="me"' : '') + '><td class="nm">' + esc(nm) + '</td>' + C.days.map(function (x) {
+    var n = 0, me = nm === C.name;
+    if (q && !me && nm.replace(/\s/g, '').indexOf(q) === -1) return; // 名前で探す
+    h += '<tr class="r' + (me ? ' me' : '') + (window.TTPICK === nm ? ' pick' : '') + '" data-nm="' + esc(nm) + '"><td class="nm">' + (me ? '★ ' : '') + esc(nm) + '</td>' + C.days.map(function (x) {
       var ts = list.filter(function (t) { return t[4] === nm && t[0] === x.d; });
       if (ts.length) n++;
-      return '<td class="t">' + ts.map(function (t) { return hmShort(t[2]) + '<br>' + hmShort(t[3]); }).join('<br>') + '</td>';
+      return '<td class="t' + (x.d === tdy ? ' td' : '') + '">' + ts.map(function (t) { return hmShort(t[2]) + '<br>' + hmShort(t[3]); }).join('<br>') + '</td>';
     }).join('') + '<td class="cnt">' + n + '</td></tr>';
   });
-  h += '<tr><td class="nm">人数</td>' + C.days.map(function (x) {
+  h += '<tr class="ft"><td class="nm">人数</td>' + C.days.map(function (x) {
     var u = {}; list.forEach(function (t) { if (t[0] === x.d) u[t[4]] = 1; }); return '<td class="cnt">' + (Object.keys(u).length || '') + '</td>';
   }).join('') + '<td></td></tr>';
   g('tt').innerHTML = h;
+  // 自分の行を、日付の見出しのすぐ下に固定する(見出しの高さに合わせる)
+  var hd = g('tt').querySelector('tr'), meRow = g('tt').querySelector('tr.me');
+  if (hd && meRow) Array.prototype.forEach.call(meRow.children, function (td) { td.style.top = (Math.floor(hd.getBoundingClientRect().height) - 1) + 'px'; });
+  // 名前で探す欄(1回だけ作る)
+  if (!g('ttq')) {
+    g('stabs').insertAdjacentHTML('afterend', '<div class="ttbar"><input id="ttq" type="search" placeholder="名前で探す(例：大井)"><span class="muted">★＝あなた(いつも上)。行を押すと色が付きます</span></div>');
+    g('ttq').addEventListener('input', function () { window.TTQ = this.value; renderAll(); });
+  }
 }
+// 行を押すと色を付ける(もう一度押すと消える)。人を目で追いやすくする
+g('tt').addEventListener('click', function (e) {
+  var tr = e.target.closest('tr.r'); if (!tr) return;
+  var nm = tr.getAttribute('data-nm');
+  window.TTPICK = window.TTPICK === nm ? '' : nm;
+  Array.prototype.forEach.call(g('tt').querySelectorAll('tr.r'), function (x) { x.classList.toggle('pick', x.getAttribute('data-nm') === window.TTPICK); });
+});
 g('vt').addEventListener('click', function (e) {
   var b = e.target.closest('button'); if (!b) return;
   VIEW = b.getAttribute('data-v');

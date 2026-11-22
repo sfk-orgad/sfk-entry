@@ -68,6 +68,7 @@
     var list = C.team.filter(function (t) { return t[1] === TSTORE; });
     var names = []; list.forEach(function (t) { if (names.indexOf(t[4]) === -1) names.push(t[4]); });
     names.sort(function (a, b) { return a.localeCompare(b, 'ja'); });
+    ((C.members || {})[TSTORE] || []).forEach(function (nm) { if (names.indexOf(nm) === -1) names.push(nm); }); // シフトが無い人も(2026-12-18)
     var nmW = 22, cntW = 8, dayW = (285 - nmW - cntW) / C.days.length;
     var h = '<h1>' + esc(C.label) + '　' + esc(storeName(TSTORE)) + '　シフト表</h1><div class="meta"><span>公開されたシフト</span><span>出力：' + stamp() + '</span></div>' +
       '<table class="all"><colgroup><col style="width:' + nmW + 'mm">' + C.days.map(function () { return '<col style="width:' + dayW.toFixed(2) + 'mm">'; }).join('') + '<col style="width:' + cntW + 'mm"></colgroup>' +

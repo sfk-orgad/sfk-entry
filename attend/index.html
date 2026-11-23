@@ -52,7 +52,7 @@ table.at { border-collapse: collapse; font-size: 12px; }
     <div id="vMonth">
       <div class="bar"><select id="store"></select><select id="month"></select>
         <button class="p-btn" id="reload">読み直す</button><button class="p-btn" id="print">印刷・PDF・Excel</button></div>
-      <div class="p-note">セルを押すと、その人・その日を直せます。⚠＝打刻の抜け(退勤なし など)。黄色＝管理者が直した日。休憩はシフト設定の「休憩の決まり」で自動。並行期間はスマレジが正です。</div>
+      <div class="p-note">セルを押すと、その人・その日を直せます。⚠＝打刻の抜け(退勤なし・出勤が2回 など。理由は表の下の一覧か、⚠に指を置く・押すと出ます)。黄色＝管理者が直した日。休憩はシフト設定の「休憩の決まり」で自動。並行期間はスマレジが正です。</div>
       <div class="tw" style="margin-top:8px;"><table class="at" id="tbl"></table></div>
       <div class="p-card" id="fix" style="display:none;margin-top:12px;"></div>
     </div>
@@ -63,7 +63,7 @@ table.at { border-collapse: collapse; font-size: 12px; }
 <div id="sheet"><div class="sb"><b id="sTitle"></b><button id="sPrint">印刷・PDFに保存</button><button id="sXlsx">Excelでダウンロード</button><button id="sClose">閉じる</button><span id="sMsg"></span></div><div id="page" class="ps"></div></div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-22a';
+var PAGE_VERSION = '2026-12-18a';
 var P = Portal.start({ tool: 'attend_admin', title: '勤怠の管理' });
 var g = Portal.$, esc = Portal.esc, W = '日月火水木金土', M = null, INFO = null;
 function call(a, x, o) { return P.call(a, x, Object.assign({ app: 'attend' }, o || {})); }
@@ -97,10 +97,23 @@ function renderMonth() {
   people.forEach(function (p) {
     h += '<tr><td class="nm">' + esc(p.name) + '</td>' + M.days.map(function (x) {
       var c = p.days[x.d];
-      return '<td class="c' + (c && c.warn.length ? ' w' : '') + (c && c.fixed ? ' fx' : '') + '" data-u="' + esc(p.uid) + '" data-d="' + x.d + '">' + (c ? (c.warn.length ? '⚠' : '') + cellText(c) : '') + '</td>';
+      return '<td class="c' + (c && c.warn.length ? ' w' : '') + (c && c.fixed ? ' fx' : '') + '" data-u="' + esc(p.uid) + '" data-d="' + x.d + '"' + (c && c.warn.length ? ' title="' + esc(c.warn.join('\n')) + '"' : '') + '>' + (c ? (c.warn.length ? '⚠' : '') + cellText(c) : '') + '</td>';
     }).join('') + '<td class="sum">' + p.tot.n + '</td><td class="sum">' + hrs(p.tot.span) + '</td><td class="sum">' + hrs(p.tot.br) + '</td><td class="sum">' + hrs(p.tot.work) + '</td></tr>';
   });
   g('tbl').innerHTML = h;
+  // ⚠ の一覧(表の下)：だれの・何日の・どういう抜けか。押すとその日を直す画面(2026-12-18)
+  var ws = [];
+  people.forEach(function (p) { Object.keys(p.days || {}).forEach(function (d) { var c = p.days[d]; if (c.warn && c.warn.length) ws.push({ uid: p.uid, name: p.name, d: Number(d), warn: c.warn }); }); });
+  ws.sort(function (a, b) { return a.d - b.d || a.name.localeCompare(b.name, 'ja'); });
+  var box = g('warnList');
+  if (!box) { g('tbl').closest('.p-card') ? g('tbl').closest('.p-card').insertAdjacentHTML('beforeend', '<div id="warnList"></div>') : g('tbl').insertAdjacentHTML('afterend', '<div id="warnList"></div>'); box = g('warnList'); }
+  var mm = Number(M.month.slice(5));
+  box.innerHTML = ws.length ? '<div style="margin-top:14px;padding:12px;border:1px solid #F2B8B5;background:#FFF6F5;border-radius:12px;"><b style="color:#B42318;">⚠ 打刻の抜け ' + ws.length + '件</b>(押すと、その日を直せます)' +
+    ws.map(function (x) { return '<div class="wl1" data-u="' + esc(x.uid) + '" data-d="' + x.d + '" style="padding:8px 0;border-top:1px solid #F6D4D1;cursor:pointer;"><b>' + mm + '/' + x.d + ' ' + esc(x.name) + '</b><div style="font-size:14px;color:#7A271A;">' + x.warn.map(esc).join('<br>') + '</div></div>'; }).join('') + '</div>'
+    : '<div class="p-note" style="margin-top:10px;">⚠ 打刻の抜けはありません</div>';
+  Array.prototype.forEach.call(box.querySelectorAll('.wl1'), function (el) {
+    el.onclick = function () { var td = g('tbl').querySelector('td.c[data-u="' + el.getAttribute('data-u') + '"][data-d="' + el.getAttribute('data-d') + '"]'); if (td) td.click(); };
+  });
 }
 g('tbl').addEventListener('click', function (e) {
   var td = e.target.closest('td.c'); if (!td || !M) return;
@@ -111,6 +124,9 @@ g('tbl').addEventListener('click', function (e) {
   var date = M.month + '-' + ('0' + d).slice(-2);
   var paint = function () {
     g('fix').innerHTML = '<h2 style="margin-top:0;">' + esc(nm) + '　' + M.month.slice(5).replace(/^0/, '') + '/' + d + '</h2>' +
+      // ⚠ の理由と、その日の打刻(押した順)
+      (c && c.warn && c.warn.length ? '<div style="padding:10px;border:1px solid #F2B8B5;background:#FFF6F5;border-radius:10px;margin-bottom:8px;color:#7A271A;"><b>⚠ ' + c.warn.map(esc).join('<br>⚠ ') + '</b></div>' : '') +
+      (c && c.punches && c.punches.length ? '<div class="p-note">この日の打刻(押した順)：' + c.punches.map(function (x) { return esc(x[0]) + ' ' + esc(x[1]) + (x[2] && x[2] !== '端末' ? '(' + esc(x[2]) + ')' : ''); }).join(' → ') + '</div>' : '') +
       '<div class="p-note">出勤〜退勤を入れ直します。日をまたぐときは 25:30 のように。空にして保存すると、その日の打刻を消します。</div>' +
       segs.map(function (s, i) { return '<div class="seg"><input class="p-input" data-i="' + i + '" data-k="0" value="' + esc(s[0]) + '" placeholder="9:00">〜<input class="p-input" data-i="' + i + '" data-k="1" value="' + esc(s[1]) + '" placeholder="18:00"><button class="p-btn" data-rm="' + i + '">×</button></div>'; }).join('') +
       '<button class="p-btn" id="addSeg">＋ 出勤〜退勤を足す(中抜けのとき)</button>' +

@@ -28,7 +28,7 @@
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-12-18b';
+var PAGE_VERSION = '2026-12-18c';
 // LINE WORKS のアプリの中のブラウザか(ここでは PDF のダウンロードができない。2026-12-18)
 var IN_APP = /worksmobile|lineworks|line works/i.test(navigator.userAgent || '');
 var P = Portal.start({ tool: 'mydocs', title: '書類' });
@@ -69,6 +69,12 @@ function showPdf(b64, libReady) {
     return lib.getDocument({ data: bytes, isEvalSupported: false, cMapUrl: PDFJS_BASE + 'cmaps/', cMapPacked: true, useSystemFonts: true }).promise; // isEvalSupported：通信先の制限(eval禁止)の下でも動くように
   }).then(function (pdf) {
     box.innerHTML = '<div class="p-note" id="pdfNote">全' + pdf.numPages + 'ページ</div>';
+    // 文字の対応表が置けているか確かめる(無いと、埋め込みの無い日本語の文字が出ず、表の線だけになる。2026-12-18)
+    fetch(PDFJS_BASE + 'cmaps/Adobe-Japan1-UCS2.bcmap', { cache: 'no-store' }).then(function (x) {
+      if (!x.ok) throw new Error(x.status);
+    }).catch(function (e) {
+      var n = g('pdfNote'); if (n) n.insertAdjacentHTML('afterend', '<div class="p-err" style="margin:6px 0;">文字の対応表が見つかりません(' + esc(PDFJS_BASE) + 'cmaps/)。管理者に伝えてください。表の中の文字が出ないことがあります</div>');
+    });
     var width = Math.max(280, box.clientWidth - 16), dpr = Math.min(window.devicePixelRatio || 1, 2);
     var chain = Promise.resolve();
     var draw = function (no, c) { // 描く順番は1枚ずつ(同時に描くと重い)

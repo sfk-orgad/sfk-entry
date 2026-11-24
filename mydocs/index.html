@@ -15,7 +15,7 @@
 <style>
 .di { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: #fff; border: 1px solid var(--p-line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; cursor: pointer; font-family: inherit; font-size: 16px; color: var(--p-ink); }
 .di b { flex: 1; } .di .new { font-size: 12px; background: #B42318; color: #fff; border-radius: 999px; padding: 1px 8px; }
-#pdfPages canvas { width: 100%; height: auto; display: block; margin: 8px 0; box-shadow: 0 1px 4px rgba(0,0,0,.15); background: #fff; }
+#pdfPages canvas, #pdfPages img { width: 100%; height: auto; display: block; margin: 8px 0; box-shadow: 0 1px 4px rgba(0,0,0,.15); background: #fff; -webkit-touch-callout: default; }
 </style>
 </head>
 <body>
@@ -28,7 +28,9 @@
 </div>
 <script src="../common/portal.js?v=1"></script>
 <script>
-var PAGE_VERSION = '2026-11-26a';
+var PAGE_VERSION = '2026-12-18a';
+// LINE WORKS のアプリの中のブラウザか(ここでは PDF のダウンロードができない。2026-12-18)
+var IN_APP = /worksmobile|lineworks|line works/i.test(navigator.userAgent || '');
 var P = Portal.start({ tool: 'mydocs', title: '書類' });
 var g = Portal.$, esc = Portal.esc, D = null, VIEW = 'list';
 function call(a, x, o) { return P.call(a, x, Object.assign({ app: 'paydoc' }, o || {})); }
@@ -72,7 +74,13 @@ function showPdf(b64, libReady) {
         var vp1 = page.getViewport({ scale: 1 });
         var vp = page.getViewport({ scale: (width / vp1.width) * dpr });
         c.width = Math.floor(vp.width); c.height = Math.floor(vp.height); c.style.aspectRatio = '';
-        return page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+        return page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise.then(function () {
+          // 描いたページを画像に置き換える(アプリの中のブラウザでも、長押しで「画像を保存」できる)
+          try {
+            var img = new Image(); img.alt = (no) + 'ページ目'; img.src = c.toDataURL('image/png');
+            if (c.parentNode) c.parentNode.replaceChild(img, c);
+          } catch (x) {}
+        });
       }).catch(function () {});
     };
     // 先にページの枠だけ並べる(1ページ目の縦横比で仮の高さ)。描いたら本当の大きさになる
@@ -131,7 +139,13 @@ g('view').addEventListener('click', function (e) {
     if (!r.ok) { g('pdfPages').innerHTML = '<div class="p-err">' + esc(r.error) + '</div>'; return; }
     d.seen = true;
     showPdf(r.data, lib);
-    // 保存したい人のために(端末によっては使えない)
+    // 保存したい人のために
+    if (IN_APP) { // LINE WORKS のアプリの中では、PDF のダウンロードができないので案内だけ
+      g('dl').innerHTML = '<div class="p-card" style="background:#F7F9FA;margin:10px 0 0;"><b>保存したいとき</b><ol style="margin:6px 0 0;padding-left:1.3em;line-height:1.8;">' +
+        '<li>上の書類の画像を<b>長押し</b> →「<b>画像を保存</b>」(写真に保存されます)</li>' +
+        '<li>PDF のまま保存したいときは、右上の「…」→「<b>ブラウザで開く</b>」で開き直す(ログインし直しになります)</li></ol></div>';
+      return;
+    }
     try {
       var bin = atob(r.data), bytes = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       var url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));

@@ -459,12 +459,22 @@
     };
   }
   // 営業カレンダーのその日(休業・料金区分・祝日・トピック)
+
+  // 営業時間(区分ごと。BizHours.gs。2026-12-18)：[{kind, open, close, slots, closed}] → 「パブリック 10:30〜18:00」など
+  function bhLines(x) {
+    return (x.hours || []).map(function (h) { return (h.kind ? h.kind + ' ' : '') + (h.closed ? '休止' : (h.open ? h.open + '〜' + h.close : '') + (h.slots ? (h.open ? '・' : '') + h.slots : '')); });
+  }
+  function bhShort(x) { // いちばん上の区分の時間だけ短く(10:30–18)
+    var h = (x.hours || []).filter(function (y) { return !y.closed && y.open; })[0];
+    return h ? h.open.replace(/:00$/, '') + '–' + h.close.replace(/:00$/, '') : '';
+  }
   function bizRow(code) {
     var bz = biz(code, DAY);
     if (!bz) return '';
     return '<div class="r sec" style="background:' + (bz.closed ? '#FDECEA' : '#FFF8E6') + ';"><div class="who" style="font-size:14px;color:var(--ink);">' +
       (bz.closed ? '<b style="color:var(--short);">営業カレンダー：休業日</b>(シフトを入れるときは確かめてください)' : '営業カレンダー：' + esc(bz.price || '')) + (bz.hol ? '　' + esc(bz.hol) : '') +
-      (bz.topics.length ? '　<b style="color:#8A5A00;">★ ' + esc(bz.topics.join(' ／ ')) + '</b>' : '') + '</div></div>';
+      (bz.topics.length ? '　<b style="color:#8A5A00;">★ ' + esc(bz.topics.join(' ／ ')) + '</b>' : '') +
+      (!bz.closed && bz.hours && bz.hours.length ? '<div style="margin-top:2px;">営業時間：' + bhLines(bz).map(esc).join('　／　') + '</div>' : '') + '</div></div>';
   }
   // ほかの店舗の確定と重なるか(重なれば店舗名を返す)
   function clash(u, code, s, e) {

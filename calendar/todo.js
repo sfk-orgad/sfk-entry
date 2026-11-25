@@ -1,7 +1,7 @@
 // calendar/todo.js
 // 2026-12-17：営業の情報(休業・料金区分・祝日・トピック/イベント。締めチェック管理簿のカレンダー)も重ねて出す(営業カレンダーの画面の役割をシフトカレンダーに寄せる)
 // シフトカレンダーに、共有のTODOリストの期限を出す(2026-12-16)。未完了のタスクを、期限の日のマスと、日を押したときの下に出す
-//   index.html の一番下で読む：<script src="todo.js?v=4"></script>。TODOリストを使う権限がない人には何も出ない
+//   index.html の一番下で読む：<script src="todo.js?v=6"></script>。TODOリストを使う権限がない人には何も出ない
 (function () {
   if (typeof renderCal !== 'function') return;
   var TODO = {}, LOADED = '', BIZ = {};
@@ -45,6 +45,15 @@
     '.bzs{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px}.bz1{font-size:14px;padding:4px 0;border-bottom:1px solid #EEF1F4}.bz1 .cl{color:#B42318;font-weight:700}.bz1 ul{margin:2px 0 0 18px;padding:0}' +
     '.tds{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px}.td1{font-size:14px;padding:4px 0;border-bottom:1px solid #EEF1F4}.td1 .sf{font-size:11px;color:#6B4FA0;font-weight:700;margin-left:4px}';
   document.head.appendChild(css);
+
+  // 営業時間(区分ごと。BizHours.gs。2026-12-18)：[{kind, open, close, slots, closed}] → 「パブリック 10:30〜18:00」など
+  function bhLines(x) {
+    return (x.hours || []).map(function (h) { return (h.kind ? h.kind + ' ' : '') + (h.closed ? '休止' : (h.open ? h.open + '〜' + h.close : '') + (h.slots ? (h.open ? '・' : '') + h.slots : '')); });
+  }
+  function bhShort(x) { // いちばん上の区分の時間だけ短く(10:30–18)
+    var h = (x.hours || []).filter(function (y) { return !y.closed && y.open; })[0];
+    return h ? h.open.replace(/:00$/, '') + '–' + h.close.replace(/:00$/, '') : '';
+  }
   function today() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function fetchTodo() {
     if (!C || LOADED === C.month) return;
@@ -89,6 +98,7 @@
       var rows = bzStores(bz).map(function (s2) {
         var x = (bz.days[s2.code] || {})[DAY]; if (!x) return '';
         return '<div class="bz1" style="border-left:4px solid ' + colorOf(s2.code) + ';padding-left:8px;"><b style="color:' + colorOf(s2.code) + '">' + esc(s2.name) + '</b>　' + (x.closed ? '<span class="cl">休業</span>' : '営業・' + esc(x.price)) + (x.hol ? '　' + esc(x.hol) : '') +
+          (!x.closed && x.hours && x.hours.length ? '<div style="font-size:13.5px;color:#3A4048;margin-top:2px;">' + bhLines(x).map(esc).join('<br>') + (x.hoursMemo ? '<div class="muted">' + esc(x.hoursMemo) + '</div>' : '') + '</div>' : '') +
           (x.topics.length ? '<ul>' + x.topics.map(function (tp) { return '<li>' + esc(tp) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
       }).join('');
       if (rows) g('detail').insertAdjacentHTML('beforeend', '<div class="bzs"><div style="font-weight:700;font-size:14px;">営業</div>' + rows + '</div>');

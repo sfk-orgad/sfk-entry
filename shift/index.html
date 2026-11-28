@@ -120,7 +120,7 @@
 
 <script>
 // ===== 版の番号・設定 =====
-var PAGE_VERSION = '2026-12-18d';
+var PAGE_VERSION = '2026-12-18e';
 var PORTAL_URL = '../';
 var T0 = Date.now();
 function g(id) { return document.getElementById(id); }
@@ -246,7 +246,7 @@ function startForm(D) {
     document.head.appendChild(st);
     var bar = document.createElement('div'); bar.id = 'mtabs';
     bar.innerHTML = ms.map(function (m) {
-      return '<button data-mon="' + m.key + '" class="' + (m.key === D.month.key ? 'on' : '') + '">' + esc(m.label) + '分' + (m.unlocked ? '(出し直し)' : '') +
+      return '<button data-mon="' + m.key + '" class="' + (m.key === D.month.key ? 'on' : '') + '">' + esc(m.label) + '分' + (m.unlocked ? '(出し直し)' : m.readonly ? '(締め切り済み)' : '') +
         '<small>' + (m.done ? '提出済み・' : '') + '締め切り ' + esc(m.deadline) + '</small></button>';
     }).join('');
     $('title').parentNode.insertBefore(bar, $('title'));
@@ -267,6 +267,16 @@ function startForm(D) {
     // 店舗ごとに締め切りが違い、ほかの月を受け付けている店舗があるとき
     ((D.closed || []).length ? '　※' + D.closed.map(function (x) { return x.name + 'は' + x.month + '分を受付中'; }).join('、') + '(この画面の月は締め切りました)' : '');
   $('maxr').textContent = D.maxRanges;
+  // 締め切り済みの月は見るだけ(2026-12-18)：入力・提出を出さず、出した希望と提出の日時を見せる
+  if (D.readonly) {
+    $('sub').textContent = '締め切り済み(見るだけ)　提出：' + (D.submittedAt || '-') + (D.updatedAt && D.updatedAt !== D.submittedAt ? '　最後に直した日時：' + D.updatedAt : '');
+    var ro = document.createElement('style');
+    ro.textContent = 'body.ro #days input, body.ro #days select, body.ro #days textarea, body.ro #note { pointer-events: none; background: #F6F7F8 !important; } body.ro #days button, body.ro #bar { display: none !important; }';
+    document.head.appendChild(ro); document.body.classList.add('ro');
+    var bc = $('bulk') && $('bulk').closest('.card'); if (bc) bc.style.display = 'none';
+    $('days').insertAdjacentHTML('beforebegin', '<div class="card" style="background:#FFF8E6;border:1px solid #F0D27A;margin-top:12px;"><b>' + esc(D.month.label) + 'は締め切りました。あなたが出した希望です(見るだけ)。</b>' +
+      '<div class="note" style="margin-top:4px;">直したいときは、社員に「出し直しの解禁」をお願いしてください。決まったシフトは「シフトカレンダー」で見られます。</div></div>');
+  }
 
   if (!D.stores.length) {
     $('main').innerHTML = '<div class="card">シフト希望を出せる店舗がありません。管理者に連絡してください。</div>';
